@@ -1,0 +1,32 @@
+{
+  "serialPort": "/dev/ttyAMA0",
+  "baudRate": 9600,
+  "readers": [
+    {
+      "id": "osdp-reader-1",
+      "name": "OSDP Reader 1",
+      "address": 0,
+      "enabled": true,
+      "secureChannel": false,
+      "capabilities": [
+        "LED",
+        "BUZZER",
+        "CARD",
+        "KEYPAD"
+      ]
+    },
+    {
+      "id": "osdp-reader-2",
+      "name": "OSDP Reader 2",
+      "address": 1,
+      "enabled": true,
+      "secureChannel": false,
+      "capabilities": [
+        "LED",
+        "BUZZER",
+        "CARD",
+        "KEYPAD"
+      ]
+    }
+  ]
+}

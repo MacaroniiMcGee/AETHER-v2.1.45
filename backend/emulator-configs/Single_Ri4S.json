@@ -1,0 +1,12 @@
+{
+  "name": "Single_Ri4S",
+  "savedAt": "2026-05-15T20:59:26.983Z",
+  "port": null,
+  "baud": 9600,
+  "devices": [
+    {
+      "address": 11,
+      "model": "RI4S"
+    }
+  ]
+}

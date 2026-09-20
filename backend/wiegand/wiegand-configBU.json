@@ -1,0 +1,138 @@
+{
+  "version": "4.0",
+  "description": "Wiegand Card Emulation/Simulation - TX ONLY (No Physical Readers)",
+  "chip": "gpiochip0",
+  "emulatedReaders": [
+    {
+      "id": "emulated-reader-1",
+      "name": "Emulated Reader 1",
+      "door": "Door 1",
+      "txPins": {
+        "d0": 12,
+        "d1": 13
+      },
+      "timing": {
+        "pulseUs": 50,
+        "spaceUs": 1000
+      },
+      "enabled": true,
+      "notes": "TX ONLY: GPIO 12,13 - Transmit/emulate credentials to downstream reader"
+    },
+    {
+      "id": "emulated-reader-2",
+      "name": "Emulated Reader 2",
+      "door": "Door 2",
+      "txPins": {
+        "d0": 5,
+        "d1": 6
+      },
+      "timing": {
+        "pulseUs": 50,
+        "spaceUs": 1000
+      },
+      "enabled": true,
+      "notes": "TX ONLY: GPIO 5,6 - Transmit/emulate credentials to downstream reader"
+    }
+  ],
+  "nfc_reader": {
+    "enabled": true,
+    "type": "PN532",
+    "interface": "i2c",
+    "i2c_address": "0x24",
+    "pins": {
+      "sda": 2,
+      "scl": 3
+    },
+    "hardware_reserved": true
+  },
+  "rs485_hat": {
+    "enabled": true,
+    "type": "Waveshare RS485 CAN HAT",
+    "interface": "spi",
+    "pins": {
+      "ce1": 7,
+      "ce0": 8,
+      "miso": 9,
+      "mosi": 10,
+      "sclk": 11,
+      "irq": 25
+    },
+    "hardware_reserved": true
+  },
+  "io_map": {
+    "door1": {
+      "lockTrigger": 18,
+      "auxRelay": 17,
+      "doorPosition": 19,
+      "rexSensor": 21,
+      "lockSensor": 22
+    },
+    "door2": {
+      "lockTrigger": 26,
+      "auxRelay": 4,
+      "doorPosition": 27,
+      "rexSensor": 16,
+      "lockSensor": 20
+    },
+    "available_for_expansion": [23, 24]
+  },
+  "defaultFormat": 26,
+  "supportedFormats": [
+    26, 30, 32, 34, 35, 36, 37, 38, 40, 46, 48, 56, 64, 75
+  ],
+  "formatCategories": {
+    "wiegand": [26, 30, 32, 34, 35, 37, 38, 40, 46, 48, 56, 64],
+    "hid": [26, 34, 35, 36, 37, 64],
+    "awid": [26, 34, 37, 50],
+    "indala": [26, 29],
+    "em": [40, 64],
+    "mifare": [32, 56],
+    "piv": [64, 75],
+    "proprietary": [32, 40, 64],
+    "generic": [8, 16, 24, 32]
+  },
+  "hardwareReservedPins": {
+    "i2c_nfc": [2, 3],
+    "spi_rs485": [7, 8, 9, 10, 11, 25],
+    "wiegand_tx": [5, 6, 12, 13]
+  },
+  "availableIOPins": [4, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27],
+  "notes": [
+    "VERSION 4.0 - EMULATION/SIMULATION ONLY (NO RX PINS NEEDED)",
+    "",
+    "=== IMPORTANT: NO PHYSICAL WIEGAND READERS ===",
+    "This system does NOT read from physical Wiegand readers.",
+    "We ONLY transmit/emulate credentials to downstream systems.",
+    "Therefore, NO Wiegand RX pins are reserved!",
+    "",
+    "=== SUPPORTED FORMATS (64 total) ===",
+    "Standard Wiegand: W26, W30, W32, W34, W35, W36, W37, W38, W40, W46, W48, W56, W64",
+    "HID Formats: H10301(26), H10302(37), H10304(37), H10320(36), Corporate 1000(35), SEOS(64)",
+    "AWID: 26-bit, 34-bit, 37-bit, 50-bit",
+    "Indala: 26-bit, 29-bit",
+    "EM Proximity: EM4100(40), EM4102(64)",
+    "MIFARE/NFC: UID 32-bit, UID 56-bit",
+    "Government PIV: PIV/FASC-N(75), CAC(64)",
+    "Proprietary: CASI Rusco, Keri, Kantech, STid, LEGIC",
+    "Testing: Generic 8, 16, 24, 32-bit",
+    "",
+    "=== PIN ALLOCATION ===",
+    "Hardware Reserved: 2,3,7,8,9,10,11,25 (I2C + SPI)",
+    "Wiegand TX ONLY: 5,6,12,13 (transmit/emulate cards)",
+    "Door I/O Available: 4,16,17,18,19,20,21,22,23,24,26,27 (16 pins!)",
+    "",
+    "=== EMULATED READER 1 (Main) ===",
+    "TX Pins: GPIO 12 (D0), GPIO 13 (D1) - Send credentials to downstream",
+    "Lock: GPIO 18 | Aux: GPIO 17 | Door: GPIO 19 | REX: GPIO 21 | Sensor: GPIO 22",
+    "",
+    "=== EMULATED READER 2 (Back) ===",
+    "TX Pins: GPIO 5 (D0), GPIO 6 (D1) - Send credentials to downstream",
+    "Lock: GPIO 26 | Aux: GPIO 4 | Door: GPIO 27 | REX: GPIO 16 | Sensor: GPIO 20",
+    "",
+    "=== BONUS: Extra I/O Available ===",
+    "GPIO 23, 24 - Previously reserved for Wiegand RX, now available for any use!",
+    "Use these for additional doors, sensors, or any other I/O needs",
+    "",
+    "Cards are read via OSDP (RS485 HAT) or NFC (PN532), then emulated via Wiegand TX"
+  ]
+}

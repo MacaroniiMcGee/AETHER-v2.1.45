@@ -1,0 +1,58 @@
+# Archives (backend.zip is 632MB — these are why pushes fail)
+*.zip
+
+# Secrets
+.env
+.env.*
+
+# Dependencies & build output
+node_modules/
+dist/
+.vite/
+__pycache__/
+*.pyc
+
+# Backups / scratch files
+*.bak
+*.bak-*
+*.bak.*
+*.bak2
+*.broken
+*.broken-*
+*.save
+*.pre_*
+*.SAFE-*
+.goutputstream-*
+
+# Logs & OS cruft
+logs/
+*.log
+.DS_Store
+
+# Duplicate working copies — delete this line if you DO want it in the repo
+frontend (2)/
+Backup/
+Test Files/
+
+# Additions
+*.tar.gz
+.git-OLD-backup/
+*.pem
+*.key
+backend/switch/switch-credentials.json
+backend/switch/switch-intents.json
+
+# Backup / scratch copies
+*.backup
+*.backup-*
+*.backup.*
+*.bk.*
+*.bkk.*
+*.bbkk.*
+*.old
+EmulatorBackups/
+frontend/public/oncafe-console-builder.*.html
+
+# Runtime-generated firmware uploads
+backend/data/firmware-library/
+backend/uploads/

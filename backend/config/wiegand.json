@@ -1,0 +1,29 @@
+{
+  "chip": "gpiochip0",
+  "doors": [
+    {
+      "door": 1,
+      "name": "Door 1 (Reader A, shared w/ Door 3)",
+      "d0": 23,
+      "d1": 24
+    },
+    {
+      "door": 2,
+      "name": "Door 2 (Reader B, shared w/ Door 4)",
+      "d0": 16,
+      "d1": 20
+    },
+    {
+      "door": 3,
+      "name": "Door 3 (Reader A, shared w/ Door 1)",
+      "d0": 23,
+      "d1": 24
+    },
+    {
+      "door": 4,
+      "name": "Door 4 (Reader B, shared w/ Door 2)",
+      "d0": 16,
+      "d1": 20
+    }
+  ]
+}

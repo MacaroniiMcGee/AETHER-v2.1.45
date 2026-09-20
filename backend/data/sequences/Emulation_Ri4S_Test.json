@@ -1,0 +1,137 @@
+{
+  "id": "Emulation_Ri4S_Test",
+  "name": "Emulation Ri4S Test",
+  "steps": [
+    {
+      "id": "col-1779044607638",
+      "blocks": [
+        {
+          "id": "block-1779044607638-cqfundckx",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1101,
+          "action": "pulse",
+          "pulseDuration": 1500
+        },
+        {
+          "id": "block-1779044833826-v6o06nv3s",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1107,
+          "action": "pulse",
+          "pulseDuration": 1500
+        },
+        {
+          "id": "block-1779044835904-4p2il7vm8",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1110,
+          "action": "pulse",
+          "pulseDuration": 1500
+        },
+        {
+          "id": "block-1779044922684-3yk99lhyc",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1104,
+          "action": "pulse",
+          "pulseDuration": 1500
+        }
+      ]
+    },
+    {
+      "id": "col-1779045346759",
+      "blocks": [
+        {
+          "id": "block-1779045346759-kamx78ti8",
+          "type": "waitInput",
+          "waitInputType": "controller_output",
+          "waitInputId": 1100,
+          "waitInputState": "high",
+          "waitInputTimeout": 10000,
+          "waitInputTimeoutAction": "continue"
+        },
+        {
+          "id": "block-1779044963294-3cxupdild",
+          "type": "waitInput",
+          "waitInputType": "controller_output",
+          "waitInputId": 1102,
+          "waitInputState": "high",
+          "waitInputTimeout": 10000,
+          "waitInputTimeoutAction": "continue"
+        },
+        {
+          "id": "block-1779045440720-wvpvmv6ns",
+          "type": "waitInput",
+          "waitInputType": "controller_output",
+          "waitInputId": 1104,
+          "waitInputState": "high",
+          "waitInputTimeout": 10000,
+          "waitInputTimeoutAction": "continue"
+        },
+        {
+          "id": "block-1779045455083-ifo7x0saq",
+          "type": "waitInput",
+          "waitInputType": "controller_output",
+          "waitInputId": 1106,
+          "waitInputState": "high",
+          "waitInputTimeout": 10000,
+          "waitInputTimeoutAction": "continue"
+        }
+      ]
+    },
+    {
+      "id": "col-1779045471829",
+      "blocks": [
+        {
+          "id": "block-1779045471829-wma5pjbnz",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1100,
+          "action": "pulse",
+          "pulseDuration": 500
+        },
+        {
+          "id": "block-1779045474689-9ltnz2le9",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1103,
+          "action": "pulse",
+          "pulseDuration": 500
+        },
+        {
+          "id": "block-1779045468926-is6l0fzbj",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1106,
+          "action": "pulse",
+          "pulseDuration": 500
+        },
+        {
+          "id": "block-1779045480825-ahtvap0g8",
+          "type": "io",
+          "ioType": "controller",
+          "ioId": 1109,
+          "action": "pulse",
+          "pulseDuration": 500
+        }
+      ]
+    },
+    {
+      "id": "col-1779051760540",
+      "blocks": [
+        {
+          "id": "block-1779051760540-qppvc0wj4",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 5,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "17:15"
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-05-17T21:03:03.873Z",
+  "updatedAt": "2026-05-17T21:03:03.873Z"
+}

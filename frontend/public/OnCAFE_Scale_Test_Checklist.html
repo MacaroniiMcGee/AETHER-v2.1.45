@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OnCAFE Scale Test Installation and Readiness Checklist</title>
+<style>
+:root {
+  --bg:#f4f6f8; --panel:#ffffff; --text:#1f2937; --muted:#667085;
+  --line:#d9dee7; --accent:#0b5cab; --good:#157347; --warn:#9a6700;
+}
+* { box-sizing:border-box; }
+body { margin:0; font-family:Arial,Helvetica,sans-serif; background:var(--bg); color:var(--text); }
+header { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:16px 24px; }
+h1 { margin:0 0 8px; font-size:24px; }
+.toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+button { border:1px solid var(--line); background:#fff; padding:9px 12px; border-radius:8px; cursor:pointer; font-weight:600; }
+button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+button.danger { color:#a61b1b; }
+.progress-wrap { margin-left:auto; min-width:260px; }
+.progress-text { font-size:13px; color:var(--muted); margin-bottom:4px; text-align:right; }
+.progress { height:10px; background:#e8ecf2; border-radius:999px; overflow:hidden; }
+.progress > div { height:100%; width:0; background:var(--good); transition:width .2s; }
+main { max-width:1200px; margin:24px auto; padding:0 18px 60px; }
+.meta, .section, .signoff { background:var(--panel); border:1px solid var(--line); border-radius:12px; margin-bottom:16px; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+.meta { padding:16px; display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+label.small { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; font-weight:700; }
+input[type=text], input[type=date], textarea, select {
+  width:100%; border:1px solid var(--line); border-radius:7px; padding:9px; font:inherit; background:#fff;
+}
+.section h2 { margin:0; padding:14px 16px; font-size:18px; border-bottom:1px solid var(--line); background:#f9fafb; border-radius:12px 12px 0 0; }
+.item { display:grid; grid-template-columns:28px 1fr 150px 240px; gap:10px; align-items:start; padding:10px 16px; border-bottom:1px solid #edf0f4; }
+.item:last-child { border-bottom:0; }
+.item input[type=checkbox] { width:18px; height:18px; margin-top:3px; }
+.item.completed .task { text-decoration:line-through; color:#667085; }
+.task { line-height:1.35; }
+.status { min-width:120px; }
+.notes { min-height:38px; resize:vertical; }
+.signoff { padding:18px; }
+.sign-grid { display:grid; grid-template-columns:repeat(2,minmax(250px,1fr)); gap:14px; }
+.approval { display:flex; flex-wrap:wrap; gap:18px; padding:12px 0; }
+.approval label { font-weight:600; }
+.summary { background:#f9fafb; border:1px solid var(--line); border-radius:8px; padding:12px; margin-top:12px; }
+@media (max-width:850px) {
+  .item { grid-template-columns:28px 1fr; }
+  .status, .notes { grid-column:2; }
+  .progress-wrap { width:100%; margin-left:0; }
+}
+@media print {
+  header { position:static; }
+  .toolbar button, .no-print { display:none !important; }
+  body { background:#fff; }
+  main { max-width:none; margin:0; }
+  .section, .meta, .signoff { box-shadow:none; break-inside:avoid; }
+  .item { grid-template-columns:24px 1fr 120px 220px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>OnCAFE Scale Test Installation and Readiness Checklist</h1>
+  <div class="toolbar">
+    <button class="primary" onclick="exportJSON()">Export Results (JSON)</button>
+    <button onclick="exportCSV()">Export Results (CSV)</button>
+    <button onclick="window.print()">Print / Save as PDF</button>
+    <button onclick="saveState()">Save</button>
+    <button class="danger" onclick="resetForm()">Reset</button>
+    <div class="progress-wrap">
+      <div class="progress-text" id="progressText">0 of 0 complete</div>
+      <div class="progress"><div id="progressBar"></div></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="meta">
+    <div><label class="small">Test Location</label><input id="testLocation" type="text"></div>
+    <div><label class="small">Test Release</label><input id="testRelease" type="text" value="M9 - Phase 1"></div>
+    <div><label class="small">Checklist Owner</label><input id="checklistOwner" type="text"></div>
+    <div><label class="small">Run / Build Identifier</label><input id="runId" type="text"></div>
+    <div><label class="small">Start Date</label><input id="startDate" type="date"></div>
+    <div><label class="small">Target Completion Date</label><input id="targetDate" type="date"></div>
+  </section>
+
+  <div id="checklist"></div>
+
+  <section class="signoff">
+    <h2>23. Final Sign-Off</h2>
+    <div class="sign-grid">
+      <div><label class="small">Installation Lead</label><input id="installationLead" type="text"></div>
+      <div><label class="small">Date</label><input id="installationDate" type="date"></div>
+      <div><label class="small">Network Lead</label><input id="networkLead" type="text"></div>
+      <div><label class="small">Date</label><input id="networkDate" type="date"></div>
+      <div><label class="small">Automation Lead</label><input id="automationLead" type="text"></div>
+      <div><label class="small">Date</label><input id="automationDate" type="date"></div>
+      <div><label class="small">QA Manager</label><input id="qaManager" type="text"></div>
+      <div><label class="small">Date</label><input id="qaDate" type="date"></div>
+      <div><label class="small">Product Management</label><input id="productManagement" type="text"></div>
+      <div><label class="small">Date</label><input id="productManagementDate" type="date"></div>
+    </div>
+
+    <div style="margin-top:16px">
+      <label class="small">Open Items or Exceptions</label>
+      <textarea id="exceptions" rows="6" placeholder="Document any remaining open items, approved exceptions, owners, and target dates."></textarea>
+    </div>
+
+    <div style="margin-top:16px">
+      <label class="small">Approved to Begin Phase 1 Scale Testing</label>
+      <div class="approval">
+        <label><input type="radio" name="approval" value="Yes"> Yes</label>
+        <label><input type="radio" name="approval" value="No"> No</label>
+        <label><input type="radio" name="approval" value="Approved with documented exceptions"> Approved with documented exceptions</label>
+      </div>
+    </div>
+
+    <div class="summary" id="summaryBox"></div>
+  </section>
+</main>
+
+<script>
+const checklistData = {"1. Test Environment Approval": ["Confirm the designated scale-test location.", "Confirm the test area has sufficient space for controller enclosures, network equipment, relay fixtures, workstations, and cabling.", "Confirm the Phase 1 physical controller quantities available for installation.", "Identify any equipment shortages or substitutions.", "Confirm whether Trove2 enclosures or additional backplanes are required.", "Confirm that the planned backplanes support the controller models being installed.", "Complete and approve the physical lab topology document.", "Assign a unique name and identifier to every enclosure, controller, downstream device, reader, input, and output.", "Photograph the test area before installation begins."], "2. Power and Enclosure Installation": ["Install all required Trove or equivalent enclosures.", "Verify each enclosure is securely mounted.", "Install the correct backplane for each controller type.", "Verify adequate spacing between controllers, power supplies, batteries, relays, and cable pathways.", "Confirm enclosure doors open fully and do not interfere with nearby equipment.", "Label every enclosure with its assigned Location, Area, controller type, and controller number.", "Install the required power supplies.", "Verify the power supply output voltage before connecting controllers.", "Confirm total connected load does not exceed the rated power supply capacity.", "Document the calculated current draw for every enclosure.", "Verify sufficient reserve capacity for readers, downstream devices, relays, locks, and accessories.", "Install backup batteries where required.", "Confirm battery polarity and terminal security.", "Verify AC-loss and low-battery reporting where supported.", "Confirm earth ground is properly connected.", "Confirm all power circuits are fused or protected as required.", "Label every power supply and output circuit.", "Measure and document voltage at the power supply.", "Measure and document voltage at each controller.", "Measure and document voltage at the farthest downstream device.", "Verify voltage remains within specification under load.", "Test enclosure power loss and recovery.", "Confirm controllers reconnect automatically following power restoration."], "3. Network Installation": ["Confirm sufficient active network ports are available.", "Install and label all network cables.", "Confirm network switch capacity supports the full Phase 1 controller count.", "Confirm network switch capacity is expandable for Phase 2.", "Verify network switches have sufficient power and uplink bandwidth.", "Confirm VLAN assignments.", "Confirm DHCP or static IP requirements.", "Reserve or document controller IP addresses where required.", "Confirm DNS access.", "Confirm NTP access.", "Confirm internet access to all required OnCAFE cloud services.", "Verify firewall rules and outbound port requirements.", "Confirm no proxy, content filter, or security appliance is interrupting controller communication.", "Verify each physical controller receives the correct IP configuration.", "Verify each controller can resolve required cloud service addresses.", "Verify controller time and date are correct.", "Confirm all controllers use the approved time zone and NTP source.", "Test physical network disconnection and reconnection.", "Confirm OnCAFE reports a controller offline within the target time.", "Confirm OnCAFE reports the controller online after reconnection.", "Document baseline network latency, packet loss, and available bandwidth.", "Confirm network monitoring is available for the scale-test period."], "4. Controller Installation": ["Confirm the final Phase 1 quantity of NHP-P200 controllers.", "Confirm the final Phase 1 quantity of NHP-P400 controllers.", "Confirm the final Phase 1 quantity of NOP-IC2 controllers.", "Confirm the final quantity of NOP-Ri2 downstream devices.", "Confirm the final quantity of NOP-Ri4 downstream devices.", "Confirm the final quantity of NOP-IO168 downstream devices.", "Reconcile the physical inventory against the approved topology.", "Record serial numbers and MAC addresses for all controllers.", "Record firmware and Cloud Connector versions before installation.", "Mount each controller securely.", "Verify controller mounting does not create electrical shorts.", "Confirm standoffs and mounting hardware are correctly installed.", "Verify controller power polarity.", "Confirm network cabling is secured.", "Label controller power and network cables at both ends.", "Confirm adequate ventilation.", "Verify controller status LEDs indicate normal operation.", "Photograph each completed enclosure.", "Update each controller to the approved firmware version.", "Install the approved Cloud Connector version.", "Confirm no controller is running an unapproved test build.", "Confirm controller date and time after firmware updates.", "Verify each controller reconnects after firmware or Cloud Connector installation.", "Record the final firmware and Cloud Connector version for each controller."], "5. Azure/NOP Downstream Topology": ["Document every NOP-IC2 downstream RS-485 loop.", "Assign a unique address to every downstream device.", "Verify no duplicate addresses exist on the same loop.", "Confirm downstream addressing avoids conflicts with reader addresses.", "Verify RS-485 polarity.", "Verify shield and drain-wire termination.", "Confirm termination resistors are installed where required.", "Confirm the downstream device count does not exceed the approved design limit.", "Confirm realistic field topology is represented.", "Include at least one controller at the maximum approved downstream-device count.", "Include at least one controller at no less than 50% of the maximum downstream-device count.", "Confirm every NOP-Ri2 reports online.", "Confirm every NOP-Ri4 reports online.", "Confirm every NOP-IO168 reports online.", "Confirm all reader ports are visible in OnCAFE.", "Confirm all inputs are visible in OnCAFE.", "Confirm all outputs are visible in OnCAFE.", "Activate every downstream input at least once.", "Activate every downstream output at least once.", "Confirm no downstream device causes an I/O group or controller to report an incorrect offline state."], "6. Reader Installation and Validation": ["Confirm the quantity of Wiegand readers.", "Confirm the quantity of OSDP readers.", "Confirm the quantity of Wiegand splitters.", "Confirm the quantity of OSDP splitters.", "Confirm reader power requirements.", "Record reader model, firmware, serial number, and assigned controller.", "Wire Wiegand readers according to the approved diagram.", "Verify Data 0 and Data 1 polarity.", "Verify reader ground is common with the controller.", "Verify reader LED and buzzer wiring.", "Confirm Wiegand splitter wiring supports 1:2 testing.", "Confirm Wiegand splitter wiring supports 1:4 testing.", "Present a credential and verify all connected controllers receive the event.", "Verify duplicate or simultaneous signals do not stop controller event reporting.", "Measure timestamp skew between controllers receiving the same presentation.", "Confirm timestamp skew is within the approved target.", "Wire OSDP readers according to the approved RS-485 diagram.", "Verify A/B polarity.", "Verify OSDP reader addresses.", "Verify no duplicate reader addresses exist on the same bus.", "Confirm OSDP splitter wiring supports 1:2 testing.", "Confirm OSDP splitter wiring supports 1:4 testing.", "Enable Secure Channel on the required reader population.", "Confirm Secure Channel establishes successfully.", "Verify reader LED and buzzer behavior.", "Verify polling and event-driven behavior where supported.", "Complete at least one OSDP key-rotation test.", "Document any behavior differences between physical and split OSDP installations."], "7. Door, Lock, REX, and DPS Wiring": ["Wire lock outputs.", "Wire door-position switches.", "Wire request-to-exit devices.", "Wire auxiliary inputs where required.", "Confirm fail-safe or fail-secure configuration.", "Confirm relay contact selection is correct.", "Install suppression devices where required.", "Verify supervised-input resistor values.", "Confirm input states display correctly in OnCAFE.", "Confirm lock, unlock, held-open, and forced-open events are generated.", "Confirm REX properly shunts Door Forced monitoring.", "Verify door behavior if the REX remains active past the Grant Time.", "Verify the door returns to its scheduled state after a timed unlock."], "8. Automated Input and Output Fixtures": ["Install automated relay fixtures.", "Label every fixture channel.", "Map every fixture channel to its controller input or output.", "Confirm fixture relays support the required voltage and current.", "Confirm isolation is provided between fixture control circuits and controller circuits.", "Verify the fixture can generate brief pulses.", "Verify the fixture can generate sustained activations.", "Verify the fixture can execute scheduled activation patterns.", "Verify every fixture command is timestamped and logged.", "Verify fixture logs can be correlated with OnCAFE events.", "Confirm the harness can generate one input activation per second.", "Distribute activations across all controller types.", "Exercise every NOP-IO168 input.", "Test brief input pulses.", "Test sustained input activations.", "Test overlapping input activations.", "Verify every commanded activation produces the expected OnCAFE event.", "Identify the minimum pulse duration reliably detected by each controller type.", "Confirm the harness can generate one output activation every three seconds.", "Test momentary output activations.", "Test 5-second timed activations.", "Test 30-second timed activations.", "Test 5-minute timed activations.", "Test indefinite holds.", "Test explicit output deactivation.", "Verify activation timestamps against OnCAFE events.", "Confirm no output commands are missed, duplicated, or excessively delayed."], "9. OnCAFE Organization Configuration": ["Create the scale-test organization.", "Create at least 20 Locations.", "Create at least 3 Areas per Location.", "Confirm a minimum of 60 Areas.", "Configure up to 5 large Locations with a disproportionate controller count.", "Configure multiple smaller Locations.", "Configure at least 2 Locations containing both NHP and Azure controllers.", "Configure at least 1 Azure-only Location.", "Verify controllers are not distributed evenly across all Locations.", "Confirm Location and Area naming follows the approved convention.", "Enroll every physical controller.", "Confirm every controller is assigned to the correct Location and Area.", "Confirm controller names identify the model and unique test number.", "Confirm all doors, elevators, inputs, and outputs appear under the correct controller.", "Confirm controller license allocation.", "Confirm licenses are released when test controllers are removed.", "Verify no duplicate controller enrollment exists.", "Export or capture the completed controller inventory."], "10. Door and Entity Configuration": ["Create all required door entities.", "Assign readers to the correct doors.", "Assign lock outputs.", "Assign DPS inputs.", "Assign REX inputs.", "Assign door-held and door-forced settings.", "Configure elevator entities where required.", "Configure I/O groups where required.", "Confirm all configured entities show the correct online state.", "Confirm entity names follow the approved naming convention.", "Verify Lock.", "Verify Unlock.", "Verify Timed Unlock.", "Verify Override.", "Verify Return to Schedule.", "Verify Card Only, PIN Only, MFA, or Card or PIN modes where supported."], "11. Identity and Credential Configuration": ["Generate at least 75,000 identities.", "Confirm each identity has at least one credential.", "Configure approximately 10% of identities with multiple credentials.", "Include temporary and permanent credential scenarios.", "Include mobile and physical credential combinations.", "Confirm identity names and identifiers are unique.", "Confirm test identities do not conflict with production data.", "Create at least 60 Cardholder Groups.", "Configure at least one Cardholder Group with more than 5,000 members.", "Configure multiple Cardholder Groups with fewer than 50 members.", "Confirm realistic uneven membership distribution.", "Document group membership baselines before the test begins.", "Configure 26-bit standard Wiegand.", "Configure 35-bit HID Corporate 1000.", "Configure 48-bit credential formats.", "Configure 56-bit credential formats.", "Configure OSDP Secure Channel credential testing.", "Configure simulated NFC credentials.", "Configure simulated BLE credentials.", "Confirm credentials route to the correct format.", "Confirm invalid-format denial events are generated correctly.", "Isolate the scale-test credential pool from other labs or organizations."], "12. Access Levels and Schedules": ["Create the required access levels.", "Assign access levels to large and small Cardholder Groups.", "Confirm access levels span multiple Locations.", "Confirm access levels include both NHP and Azure-controlled doors.", "Validate cascading updates for groups with more than 1,000 members.", "Test access-level changes while controllers are offline.", "Confirm changes propagate after controllers reconnect.", "Apply unlock schedules to at least 30% of doors.", "Create at least 6 distinct schedule definitions.", "Configure standard Monday-Friday business hours.", "Configure extended business hours with weekend access.", "Configure a 24/7 unlock schedule.", "Configure a schedule with a holiday exception.", "Configure a temporary override window.", "Configure a schedule that spans midnight.", "Distribute schedules across NHP and Azure controllers.", "Distribute schedules across multiple Locations.", "Verify every scheduled unlock occurs at the expected time.", "Verify every scheduled lock occurs at the expected time.", "Confirm date rollover for schedules spanning midnight.", "Confirm holiday exceptions.", "Confirm temporary override activation and expiration.", "Confirm Return to Schedule behavior.", "Confirm schedule changes are applied to the physical controller.", "Confirm schedules continue operating while a controller is offline.", "Confirm schedule changes made while offline apply after reconnection."], "13. Event Emulation and Command Automation": ["Configure one credential presentation every two seconds.", "Randomize presentations across all controllers.", "Configure approximately 70% Access Granted events.", "Configure approximately 30% Access Denied events.", "Include unknown-credential denials.", "Include schedule-denied events.", "Include suspended-cardholder events.", "Include invalid-format events.", "Include antipassback denials where supported.", "Configure approximately 5% of granted events to produce Door Held or Door Forced events after approximately 30 seconds.", "Configure at least one software-issued unlock command every 15 minutes.", "Randomize commands across controllers.", "Include timed unlock commands.", "Include override-and-hold commands.", "Include Return to Schedule commands.", "Record command issue time.", "Record controller acknowledgment time.", "Record physical activation time.", "Confirm commands do not remain queued after completion."], "14. Controller Offline and Recovery Testing": ["Configure at least 1% of controllers to go offline each test day.", "Include brief disconnections.", "Include 15-minute disconnections.", "Include multi-hour disconnections.", "Include at least one 24-hour disconnection.", "Include one controller offline for exactly 7 days.", "Take 10 controllers in one Location offline simultaneously.", "Take half of the controllers in one large Location offline simultaneously.", "Record physical disconnect time.", "Record the time OnCAFE displays Offline.", "Confirm Offline detection occurs within the approved target.", "Verify offline controllers continue granting valid cached credentials.", "Verify invalid or removed credentials behave as expected while offline.", "Generate events during the offline period.", "Confirm events are stored locally.", "Make configuration changes while the controller is offline.", "Restore controller connectivity.", "Record the time OnCAFE displays Online.", "Record event-backfill start and completion times.", "Confirm zero events are lost.", "Confirm no events are duplicated.", "Confirm event ordering and timestamps remain accurate.", "Confirm offline configuration changes synchronize.", "Confirm queued commands are handled according to the approved design.", "Confirm scheduled operations resume correctly."], "15. Database and Concurrency Preparation": ["Configure at least one identity add, edit, or delete every 15 minutes.", "Include batch modifications of at least 10 users.", "Configure at least one bulk operation affecting 500 or more users.", "Configure daily modifications to at least 6 Cardholder Groups.", "Include bulk changes affecting more than 100 users.", "Include at least one operation affecting thousands of identities.", "Record transaction start and completion times.", "Verify controller updates caused by each database change.", "Configure access-level changes at least once every four hours.", "Configure override-schedule changes at least once every four hours.", "Include single-door overrides.", "Include multi-door overrides.", "Include overlapping overrides.", "Include access-level changes affecting more than 1,000 members.", "Include changes while controllers are offline.", "Configure at least 5 simultaneous administrator sessions.", "Include UI-driven sessions.", "Include API-driven sessions.", "Include read-heavy sessions.", "Include write-heavy sessions.", "Verify session isolation.", "Verify simultaneous changes do not overwrite each other.", "Verify audit records identify the correct administrator."], "16. Test Harness Readiness": ["Confirm the test harness can enroll or interact with all required controller types.", "Confirm the harness can generate credential presentations.", "Confirm the harness can issue unlock commands.", "Confirm the harness can control input relay fixtures.", "Confirm the harness can validate output activations.", "Confirm the harness can disconnect and reconnect controllers.", "Confirm the harness can generate identity and group changes.", "Confirm the harness can apply access-level and schedule changes.", "Confirm the harness records expected and actual results.", "Confirm all logs use synchronized timestamps.", "Confirm logs include controller, Location, Area, entity, credential, and event identifiers.", "Confirm failed automation steps generate alerts.", "Complete a small-scale dry run before the full test begins.", "Version-control the test harness and configuration files.", "Record the test-harness version used for each run."], "17. Monitoring and Telemetry": ["Create a dashboard for event-ingestion latency.", "Create a dashboard for command latency.", "Create a dashboard for controller online/offline status.", "Create a dashboard for event-backfill volume.", "Create a dashboard for database transaction latency.", "Create a dashboard for API error rates.", "Create a dashboard for UI page-load performance.", "Configure alerts for sustained latency above target.", "Configure alerts for unusual controller disconnect volume.", "Configure alerts for event-ingestion failures.", "Monitor controller heartbeat.", "Monitor reconnect frequency.", "Monitor local event queue size where available.", "Monitor configuration-sync status.", "Monitor firmware and Cloud Connector versions.", "Monitor controller time drift.", "Monitor downstream-device communication.", "Monitor network bandwidth.", "Monitor packet loss.", "Monitor switch utilization.", "Monitor server CPU.", "Monitor server memory.", "Monitor database utilization.", "Monitor storage growth.", "Monitor cloud-service errors.", "Confirm monitoring data is retained for the full test period."], "18. Baseline Functional Validation": ["Access Granted.", "Access Denied.", "Unknown credential.", "Schedule denied.", "Lock command.", "Unlock command.", "Timed unlock.", "Override and hold.", "Return to Schedule.", "Door Forced.", "Door Held.", "REX activation.", "Input activation.", "Output activation.", "Controller offline.", "Controller online.", "Event backfill.", "Credential addition.", "Credential removal.", "Identity edit.", "Cardholder Group change.", "Access-level change.", "Schedule change.", "Report generation.", "Audit or activity record generation."], "19. Performance Baseline Validation": ["Measure event-to-UI latency.", "Measure software-unlock end-to-end latency.", "Measure credential-add synchronization time.", "Measure login-page load time.", "Measure Events-page load time.", "Measure a 1,000-record identity import.", "Measure a standard 30-day report.", "Capture P50, P95, and P99 results where possible.", "Confirm baseline results meet the approved targets before the continuous run.", "Document any known deviations accepted before testing begins."], "20. Documentation Package": ["Final physical topology diagram completed.", "Final network topology diagram completed.", "Controller inventory completed.", "Serial number and MAC address list completed.", "Firmware and Cloud Connector version list completed.", "Downstream RS-485 address map completed.", "Reader and splitter map completed.", "Input and output fixture map completed.", "Location and Area structure exported.", "Schedule matrix completed.", "Access-level matrix completed.", "Credential-format matrix completed.", "Test identity and Cardholder Group summary completed.", "Power-load calculations completed.", "Network baseline results completed.", "Performance baseline results completed.", "Photographs of all completed enclosures captured.", "All diagrams, logs, scripts, and configuration files stored in the approved shared location."], "21. Safety and Installation Quality Review": ["No exposed AC conductors.", "No loose DC conductors.", "No unsupported cables.", "No controller boards mounted directly against conductive surfaces.", "No damaged insulation.", "Correct wire gauge used for power and lock circuits.", "Separate high-voltage and low-voltage wiring where required.", "All cable penetrations protected.", "All terminal screws tightened.", "All enclosures grounded.", "All batteries secured.", "All circuits clearly labeled.", "Cable management completed.", "Enclosures can be safely opened and serviced.", "Emergency power-disconnect procedure documented.", "Final installation reviewed by a second qualified team member."], "22. Phase 1 Entry Approval": ["Required physical controllers are installed.", "All controllers report online.", "All downstream devices report online.", "All readers have passed a credential presentation test.", "All automated relay fixtures have passed validation.", "The OnCAFE organization structure is complete.", "The identity and credential population is complete.", "Cardholder Groups are populated.", "Access levels are assigned.", "At least 30% of doors have schedules.", "All 6 required schedule types are configured.", "Event emulation is operational.", "Command automation is operational.", "Offline/reconnect automation is operational.", "Database churn automation is operational.", "Five concurrent administrator sessions are available.", "Monitoring dashboards and alerts are active.", "Baseline performance measurements are complete.", "No unresolved installation defects remain.", "No critical or blocker functional defects prevent testing.", "QA Manager approval received.", "Product Management approval received.", "Lab or facility owner approval received."]};
+const statuses = ["Not Started","In Progress","Complete","Blocked","Not Applicable"];
+const container = document.getElementById("checklist");
+let globalIndex = 0;
+
+Object.entries(checklistData).forEach(([section, items]) => {
+  const sec = document.createElement("section");
+  sec.className = "section";
+  const h2 = document.createElement("h2");
+  h2.textContent = section;
+  sec.appendChild(h2);
+
+  items.forEach(task => {
+    const idx = globalIndex++;
+    const row = document.createElement("div");
+    row.className = "item";
+    row.dataset.index = idx;
+    row.innerHTML = `
+      <input type="checkbox" class="done" aria-label="Complete">
+      <div class="task">${escapeHtml(task)}</div>
+      <select class="status" aria-label="Status">
+        ${statuses.map(s => `<option>${s}</option>`).join("")}
+      </select>
+      <textarea class="notes" rows="1" placeholder="Evidence / notes"></textarea>
+    `;
+    sec.appendChild(row);
+  });
+  container.appendChild(sec);
+});
+
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+}
+
+function collectData() {
+  const results = [];
+  document.querySelectorAll(".item").forEach(row => {
+    results.push({
+      section: row.closest(".section").querySelector("h2").textContent,
+      item: row.querySelector(".task").textContent,
+      completed: row.querySelector(".done").checked,
+      status: row.querySelector(".status").value,
+      notes: row.querySelector(".notes").value
+    });
+  });
+  const approval = document.querySelector('input[name="approval"]:checked');
+  return {
+    exportedAt: new Date().toISOString(),
+    metadata: {
+      testLocation: value("testLocation"),
+      testRelease: value("testRelease"),
+      checklistOwner: value("checklistOwner"),
+      runId: value("runId"),
+      startDate: value("startDate"),
+      targetDate: value("targetDate")
+    },
+    results,
+    signOff: {
+      installationLead: value("installationLead"),
+      installationDate: value("installationDate"),
+      networkLead: value("networkLead"),
+      networkDate: value("networkDate"),
+      automationLead: value("automationLead"),
+      automationDate: value("automationDate"),
+      qaManager: value("qaManager"),
+      qaDate: value("qaDate"),
+      productManagement: value("productManagement"),
+      productManagementDate: value("productManagementDate"),
+      openItemsOrExceptions: value("exceptions"),
+      approval: approval ? approval.value : ""
+    }
+  };
+}
+
+function value(id) { return document.getElementById(id).value; }
+
+function updateProgress() {
+  const rows = [...document.querySelectorAll(".item")];
+  const complete = rows.filter(r => r.querySelector(".done").checked).length;
+  const pct = rows.length ? Math.round(complete / rows.length * 100) : 0;
+  document.getElementById("progressText").textContent = `${complete} of ${rows.length} complete (${pct}%)`;
+  document.getElementById("progressBar").style.width = pct + "%";
+  rows.forEach(r => r.classList.toggle("completed", r.querySelector(".done").checked));
+  const blocked = rows.filter(r => r.querySelector(".status").value === "Blocked").length;
+  const inProgress = rows.filter(r => r.querySelector(".status").value === "In Progress").length;
+  document.getElementById("summaryBox").innerHTML =
+    `<strong>Current Summary:</strong> ${complete} complete, ${inProgress} in progress, ${blocked} blocked, ${rows.length-complete} remaining.`;
+}
+
+function saveState() {
+  localStorage.setItem("oncafeScaleChecklist", JSON.stringify(collectData()));
+  alert("Checklist saved in this browser.");
+}
+
+function loadState() {
+  const raw = localStorage.getItem("oncafeScaleChecklist");
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    Object.entries(data.metadata || {}).forEach(([k,v]) => {
+      const el = document.getElementById(k); if (el) el.value = v || "";
+    });
+    (data.results || []).forEach((r, i) => {
+      const row = document.querySelector(`.item[data-index="${i}"]`);
+      if (!row) return;
+      row.querySelector(".done").checked = !!r.completed;
+      row.querySelector(".status").value = r.status || "Not Started";
+      row.querySelector(".notes").value = r.notes || "";
+    });
+    const s = data.signOff || {};
+    Object.entries(s).forEach(([k,v]) => {
+      if (k === "approval") {
+        const radio = document.querySelector(`input[name="approval"][value="${CSS.escape(v || "")}"]`);
+        if (radio) radio.checked = true;
+      } else if (k === "openItemsOrExceptions") {
+        document.getElementById("exceptions").value = v || "";
+      } else {
+        const el = document.getElementById(k); if (el) el.value = v || "";
+      }
+    });
+  } catch(e) { console.error(e); }
+}
+
+function download(content, filename, type) {
+  const blob = new Blob([content], {type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function safeName() {
+  const raw = value("runId") || "Phase1";
+  return raw.replace(/[^a-z0-9_-]+/gi, "_");
+}
+
+function exportJSON() {
+  const data = collectData();
+  download(JSON.stringify(data, null, 2), `OnCAFE_Scale_Checklist_${safeName()}.json`, "application/json");
+}
+
+function csvCell(v) {
+  const s = String(v ?? "");
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+
+function exportCSV() {
+  const data = collectData();
+  const rows = [["Section","Checklist Item","Completed","Status","Evidence / Notes"]];
+  data.results.forEach(r => rows.push([r.section,r.item,r.completed ? "Yes":"No",r.status,r.notes]));
+  rows.push([]);
+  rows.push(["Final Sign-Off"]);
+  Object.entries(data.signOff).forEach(([k,v]) => rows.push([k,v]));
+  const csv = rows.map(r => r.map(csvCell).join(",")).join("\r\n");
+  download(csv, `OnCAFE_Scale_Checklist_${safeName()}.csv`, "text/csv;charset=utf-8");
+}
+
+function resetForm() {
+  if (!confirm("Clear all checklist results and saved browser data?")) return;
+  localStorage.removeItem("oncafeScaleChecklist");
+  location.reload();
+}
+
+document.addEventListener("change", e => {
+  if (e.target.classList.contains("done")) {
+    const row = e.target.closest(".item");
+    if (e.target.checked) row.querySelector(".status").value = "Complete";
+    else if (row.querySelector(".status").value === "Complete") row.querySelector(".status").value = "Not Started";
+  }
+  updateProgress();
+  localStorage.setItem("oncafeScaleChecklist", JSON.stringify(collectData()));
+});
+document.addEventListener("input", () => {
+  localStorage.setItem("oncafeScaleChecklist", JSON.stringify(collectData()));
+});
+loadState();
+updateProgress();
+</script>
+</body>
+</html>

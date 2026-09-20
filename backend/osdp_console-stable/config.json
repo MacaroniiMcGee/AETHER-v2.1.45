@@ -1,0 +1,51 @@
+{
+    "devices": {
+        "lock": {
+            "port": "serial0",
+            "baud_rate": 115200,
+            "address": 15
+        },
+        "reader": {
+            "port": "ttyUSB0",
+            "baud_rate": 9600,
+            "address": 15
+        },
+        "reader2": {
+            "port": "ttyUSB1",
+            "baud_rate": 9600,
+            "address": 15
+        },
+        "reader3": {
+            "port": "ttyUSB2",
+            "baud_rate": 9600,
+            "address": 15
+        },
+        "reader4": {
+            "port": "ttyUSB3",
+            "baud_rate": 9600,
+            "address": 15
+        },
+        "reader5": {
+            "port": "ttyUSB4",
+            "baud_rate": 9600,
+            "address": 15
+        }
+        // Example configuration with all parameters:
+        /*
+        "example": {
+            "port": "ttyUSB0",
+            "baud_rate": 115200,
+            "verbose": true,
+            "ibeacon": true,
+            "file": "/path/to/file",
+            "poll": true,
+            "serial": "0102030405060708",
+            "secure": true,
+            "flush_log": true,
+            "repl": true,
+            "command": "id",
+            "list_commands": true
+        }
+        */
+    }
+}

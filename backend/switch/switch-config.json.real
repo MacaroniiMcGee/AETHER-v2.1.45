@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "globalDenyPorts": [],
+  "maxHoldMs": 604800000,
+  "defaultHoldMs": 3600000,
+  "verifyDelaysMs": [
+    1200,
+    3000,
+    6000
+  ],
+  "profiles": [
+    {
+      "id": "lab",
+      "name": "GS970M/10PS Lab Switch",
+      "host": "192.168.1.201",
+      "port": 22,
+      "username": "manager",
+      "credentialEnv": "SWITCH_PASS_LAB",
+      "vendor": "allied",
+      "interfacePrefix": "port1.0.",
+      "portCount": 10,
+      "enablePassword": null,
+      "denyPorts": [
+        10
+      ],
+      "autoDetectSelfPort": true
+    }
+  ]
+}

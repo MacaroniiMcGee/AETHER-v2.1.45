@@ -1,0 +1,516 @@
+[
+  {
+    "id": "w26",
+    "name": "Wiegand 26",
+    "bitCount": 26,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "w30",
+    "name": "Wiegand 30",
+    "bitCount": 30,
+    "facilityBits": 10,
+    "cardBits": 18,
+    "parityType": "standard"
+  },
+  {
+    "id": "w32",
+    "name": "Wiegand 32 Raw",
+    "bitCount": 32,
+    "facilityBits": 0,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "w34",
+    "name": "Wiegand 34",
+    "bitCount": 34,
+    "facilityBits": 16,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "w35",
+    "name": "Wiegand 35",
+    "bitCount": 35,
+    "facilityBits": 12,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "w36",
+    "name": "Wiegand 36",
+    "bitCount": 36,
+    "facilityBits": 5,
+    "cardBits": 31,
+    "parityType": "none"
+  },
+  {
+    "id": "w37",
+    "name": "Wiegand 37",
+    "bitCount": 37,
+    "facilityBits": 16,
+    "cardBits": 19,
+    "parityType": "standard"
+  },
+  {
+    "id": "w37a",
+    "name": "Wiegand 37 Alt",
+    "bitCount": 37,
+    "facilityBits": 15,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "w38",
+    "name": "Wiegand 38",
+    "bitCount": 38,
+    "facilityBits": 16,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "w40",
+    "name": "Wiegand 40",
+    "bitCount": 40,
+    "facilityBits": 12,
+    "cardBits": 26,
+    "parityType": "standard"
+  },
+  {
+    "id": "w46",
+    "name": "Wiegand 46",
+    "bitCount": 46,
+    "facilityBits": 16,
+    "cardBits": 28,
+    "parityType": "standard"
+  },
+  {
+    "id": "w48",
+    "name": "Wiegand 48",
+    "bitCount": 48,
+    "facilityBits": 22,
+    "cardBits": 24,
+    "parityType": "standard"
+  },
+  {
+    "id": "w56",
+    "name": "Wiegand 56",
+    "bitCount": 56,
+    "facilityBits": 24,
+    "cardBits": 30,
+    "parityType": "standard"
+  },
+  {
+    "id": "w64",
+    "name": "Wiegand 64",
+    "bitCount": 64,
+    "facilityBits": 28,
+    "cardBits": 34,
+    "parityType": "standard"
+  },
+  {
+    "id": "h10301",
+    "name": "HID H10301",
+    "bitCount": 26,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "h10302",
+    "name": "HID H10302",
+    "bitCount": 37,
+    "facilityBits": 0,
+    "cardBits": 35,
+    "parityType": "standard",
+    "parityOrder": "reversed"
+  },
+  {
+    "id": "h10304",
+    "name": "HID H10304",
+    "bitCount": 37,
+    "facilityBits": 15,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "h10320",
+    "name": "HID H10320",
+    "bitCount": 32,
+    "facilityBits": 0,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "corp1000_35",
+    "name": "Corporate 1000 35-bit",
+    "bitCount": 35,
+    "facilityBits": 12,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "corp1000_48",
+    "name": "Corporate 1000 48-bit",
+    "bitCount": 48,
+    "facilityBits": 22,
+    "cardBits": 24,
+    "parityType": "standard"
+  },
+  {
+    "id": "seos_64",
+    "name": "HID SEOS 64-bit",
+    "bitCount": 64,
+    "facilityBits": 28,
+    "cardBits": 34,
+    "parityType": "standard"
+  },
+  {
+    "id": "awid26",
+    "name": "AWID 26-bit",
+    "bitCount": 26,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "awid34",
+    "name": "AWID 34-bit",
+    "bitCount": 34,
+    "facilityBits": 8,
+    "cardBits": 24,
+    "parityType": "standard"
+  },
+  {
+    "id": "awid37",
+    "name": "AWID 37-bit",
+    "bitCount": 37,
+    "facilityBits": 13,
+    "cardBits": 22,
+    "parityType": "standard"
+  },
+  {
+    "id": "awid50",
+    "name": "AWID 50-bit",
+    "bitCount": 50,
+    "facilityBits": 14,
+    "cardBits": 32,
+    "parityType": "standard"
+  },
+  {
+    "id": "indala26",
+    "name": "Indala 26-bit",
+    "bitCount": 26,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "indala29",
+    "name": "Indala 29-bit",
+    "bitCount": 29,
+    "facilityBits": 8,
+    "cardBits": 18,
+    "parityType": "standard"
+  },
+  {
+    "id": "em4100",
+    "name": "EM4100",
+    "bitCount": 40,
+    "facilityBits": 8,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "em4102",
+    "name": "EM4102",
+    "bitCount": 64,
+    "facilityBits": 8,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "mifare_32",
+    "name": "MIFARE UID 32-bit",
+    "bitCount": 32,
+    "facilityBits": 0,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "mifare_56",
+    "name": "MIFARE UID 56-bit",
+    "bitCount": 56,
+    "facilityBits": 0,
+    "cardBits": 56,
+    "parityType": "none"
+  },
+  {
+    "id": "piv_75",
+    "name": "PIV 75-bit",
+    "bitCount": 75,
+    "facilityBits": 14,
+    "cardBits": 56,
+    "parityType": "none"
+  },
+  {
+    "id": "fascn_75",
+    "name": "FASC-N 75-bit",
+    "bitCount": 75,
+    "facilityBits": 14,
+    "cardBits": 56,
+    "parityType": "none"
+  },
+  {
+    "id": "cac_64",
+    "name": "CAC 64-bit",
+    "bitCount": 64,
+    "facilityBits": 16,
+    "cardBits": 48,
+    "parityType": "none"
+  },
+  {
+    "id": "casi_40",
+    "name": "CASI Rusco 40-bit",
+    "bitCount": 40,
+    "facilityBits": 10,
+    "cardBits": 28,
+    "parityType": "standard"
+  },
+  {
+    "id": "keri_32",
+    "name": "Keri 32-bit",
+    "bitCount": 32,
+    "facilityBits": 8,
+    "cardBits": 24,
+    "parityType": "none"
+  },
+  {
+    "id": "kantech_32",
+    "name": "Kantech XSF 32-bit",
+    "bitCount": 32,
+    "facilityBits": 8,
+    "cardBits": 24,
+    "parityType": "none"
+  },
+  {
+    "id": "stid_40",
+    "name": "STid 40-bit",
+    "bitCount": 40,
+    "facilityBits": 12,
+    "cardBits": 26,
+    "parityType": "standard"
+  },
+  {
+    "id": "legic_64",
+    "name": "LEGIC 64-bit",
+    "bitCount": 64,
+    "facilityBits": 0,
+    "cardBits": 64,
+    "parityType": "none"
+  },
+  {
+    "id": "generic_8",
+    "name": "Generic 8-bit",
+    "bitCount": 8,
+    "facilityBits": 0,
+    "cardBits": 8,
+    "parityType": "none"
+  },
+  {
+    "id": "generic_16",
+    "name": "Generic 16-bit",
+    "bitCount": 16,
+    "facilityBits": 0,
+    "cardBits": 16,
+    "parityType": "none"
+  },
+  {
+    "id": "generic_24",
+    "name": "Generic 24-bit",
+    "bitCount": 24,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "none"
+  },
+  {
+    "id": "generic_32",
+    "name": "Generic 32-bit",
+    "bitCount": 32,
+    "facilityBits": 0,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "wl26_0",
+    "name": "Wavelynx W26-0",
+    "bitCount": 26,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl26_1",
+    "name": "Wavelynx W26-1",
+    "bitCount": 26,
+    "facilityBits": 8,
+    "cardBits": 16,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl30_t",
+    "name": "Wavelynx W30-T",
+    "bitCount": 30,
+    "facilityBits": 4,
+    "cardBits": 26,
+    "parityType": "none"
+  },
+  {
+    "id": "wl32_5",
+    "name": "Wavelynx W32-5 MyPass",
+    "bitCount": 32,
+    "facilityBits": 0,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "wl35_0",
+    "name": "Wavelynx W35-0",
+    "bitCount": 35,
+    "facilityBits": 12,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl36_8",
+    "name": "Wavelynx W36-8",
+    "bitCount": 36,
+    "facilityBits": 5,
+    "cardBits": 31,
+    "parityType": "none"
+  },
+  {
+    "id": "wl37_0",
+    "name": "Wavelynx W37-0",
+    "bitCount": 37,
+    "facilityBits": 16,
+    "cardBits": 19,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl37_1",
+    "name": "Wavelynx W37-1",
+    "bitCount": 37,
+    "facilityBits": 0,
+    "cardBits": 35,
+    "parityType": "standard",
+    "parityOrder": "reversed"
+  },
+  {
+    "id": "wl37_4",
+    "name": "Wavelynx W37-4",
+    "bitCount": 37,
+    "facilityBits": 5,
+    "cardBits": 29,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl38_1",
+    "name": "Wavelynx W38-1",
+    "bitCount": 38,
+    "facilityBits": 8,
+    "cardBits": 28,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl38_2",
+    "name": "Wavelynx W38-2",
+    "bitCount": 38,
+    "facilityBits": 16,
+    "cardBits": 20,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl40_0",
+    "name": "Wavelynx W40-0",
+    "bitCount": 40,
+    "facilityBits": 12,
+    "cardBits": 26,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl40_1",
+    "name": "Wavelynx W40-1",
+    "bitCount": 40,
+    "facilityBits": 8,
+    "cardBits": 30,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl40_2",
+    "name": "Wavelynx W40-2 Wallet",
+    "bitCount": 40,
+    "facilityBits": 8,
+    "cardBits": 30,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl46_t",
+    "name": "Wavelynx W46-T",
+    "bitCount": 46,
+    "facilityBits": 8,
+    "cardBits": 30,
+    "parityType": "standard"
+  },
+  {
+    "id": "wl56_0",
+    "name": "Wavelynx W56-0",
+    "bitCount": 56,
+    "facilityBits": 0,
+    "cardBits": 56,
+    "parityType": "none"
+  },
+  {
+    "id": "wl56_1",
+    "name": "Wavelynx W56-1 Leaf",
+    "bitCount": 56,
+    "facilityBits": 24,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "wl64_t",
+    "name": "Wavelynx W64-T",
+    "bitCount": 64,
+    "facilityBits": 8,
+    "cardBits": 53,
+    "parityType": "none"
+  },
+  {
+    "id": "csn32",
+    "name": "CSN 32-bit",
+    "bitCount": 32,
+    "facilityBits": 0,
+    "cardBits": 32,
+    "parityType": "none"
+  },
+  {
+    "id": "csn56",
+    "name": "CSN 56-bit",
+    "bitCount": 56,
+    "facilityBits": 0,
+    "cardBits": 56,
+    "parityType": "none"
+  },
+  {
+    "id": "csn64",
+    "name": "CSN 64-bit",
+    "bitCount": 64,
+    "facilityBits": 0,
+    "cardBits": 64,
+    "parityType": "none"
+  }
+]

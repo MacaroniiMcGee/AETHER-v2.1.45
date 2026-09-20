@@ -1,0 +1,3054 @@
+/**
+ * server.js â€“ libgpiod-backed backend with automation + Wiegand + OSDP + NFC + bridge + emulations persistence + FORMAT API + GPIO QUEUE
+ * Run with: sudo node server.js
+ *
+ * Notes:
+ * - PN532 (NFC) initialization is OPT-IN. Set ENABLE_PN532=1 to enable.
+ * - GPIO Queue Manager prevents IOplus board lockups from command flooding
+ */
+
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const { spawn, execFile, exec } = require('child_process');
+const { promisify } = require('util');
+const EventEmitter = require('events');
+const path = require('path');
+const fs = require('fs');
+const fsp = require('fs/promises');
+
+const execAsync = promisify(exec);
+
+// ============================================
+// IOplusController Class (Integrated)
+// ============================================
+class IOplusController {
+  constructor(maxBoards = 1) {
+    this.maxBoards = maxBoards;
+    this.relaysPerBoard = 8;
+    this.totalRelays = maxBoards * this.relaysPerBoard;
+  }
+
+  async executeCommand(board, command, retries = 3) {
+    if (this.maxBoards === 1) {
+      board = 0;
+    }
+    
+    const cmd = `timeout 5 ioplus ${board} ${command}`;
+    let lastError;
+    
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const { stdout, stderr } = await execAsync(cmd);
+        if (stderr && stderr.trim()) {
+          throw new Error(stderr.trim());
+        }
+        
+        if (attempt > 0) {
+          console.log(`[IOplus] Command succeeded on attempt ${attempt + 1}`);
+        }
+        
+        return stdout.trim();
+      } catch (error) {
+        lastError = error;
+        
+        const stack = board;
+        if (error.message.includes('No IOplus card detected')) {
+          throw new Error(`Board ${stack} not detected`);
+        }
+        
+        if (attempt < retries - 1) {
+          const backoffMs = Math.min(100 * Math.pow(2, attempt), 500);
+          console.warn(`[IOplus] I2C error on attempt ${attempt + 1}, retrying in ${backoffMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
+      }
+    }
+    
+    console.error(`[IOplus] Command failed after ${retries} attempts:`, lastError.message);
+    throw new Error(`Command failed after ${retries} attempts: ${lastError.message}`);
+  }
+
+  pinToRelay(pin) {
+    if (pin < 0 || pin >= this.totalRelays) {
+      throw new Error(`Pin ${pin} out of range (0-${this.totalRelays - 1}). You only have 1 board with 8 relays.`);
+    }
+    
+    const board = 0;
+    const relay = pin + 1;
+    
+    return { board, relay };
+  }
+
+  relayToPin(board, relay) {
+    if (board !== 0) {
+      throw new Error(`Board ${board} doesn't exist. Only board 0 is available.`);
+    }
+    if (relay < 1 || relay > this.relaysPerBoard) {
+      throw new Error(`Relay ${relay} out of range (1-${this.relaysPerBoard})`);
+    }
+    return relay - 1;
+  }
+
+  async setRelay(pin, state) {
+    const { board, relay } = this.pinToRelay(pin);
+    
+    try {
+      await this.executeCommand(board, `relwr ${relay} ${state ? 1 : 0}`);
+      
+      console.log(`[IOplus] Relay ${pin} (Board ${board}, Relay ${relay}) -> ${state ? 'ON' : 'OFF'}`);
+      
+      return {
+        success: true,
+        pin,
+        board,
+        relay,
+        state
+      };
+    } catch (error) {
+      console.error(`[IOplus] Failed to set relay:`, error.message);
+      throw error;
+    }
+  }
+
+  async getRelay(pin) {
+    const { board, relay } = this.pinToRelay(pin);
+    
+    try {
+      const result = await this.executeCommand(board, `relrd ${relay}`);
+      const state = parseInt(result) === 1;
+      
+      return {
+        success: true,
+        pin,
+        board,
+        relay,
+        state
+      };
+    } catch (error) {
+      console.error(`[IOplus] Failed to read relay:`, error.message);
+      throw error;
+    }
+  }
+
+  async readOptoInput(pin) {
+    const board = 0;
+    const input = pin + 1;
+    
+    if (pin < 0 || pin >= 8) {
+      throw new Error(`Input pin ${pin} out of range (0-7)`);
+    }
+    
+    try {
+      const result = await this.executeCommand(board, `optrd ${input}`);
+      const state = parseInt(result) === 1;
+      
+      return {
+        success: true,
+        pin,
+        board,
+        input,
+        state,
+        type: 'opto'
+      };
+    } catch (error) {
+      console.error(`[IOplus] Failed to read opto input:`, error.message);
+      throw error;
+    }
+  }
+
+  async pulseRelay(pin, durationMs = 500) {
+    await this.setRelay(pin, true);
+    return new Promise((resolve) => {
+      const t = setTimeout(async () => {
+        try { await this.setRelay(pin, false); } catch(e) { console.error('[IOplus] Pulse OFF failed:', e.message); }
+        resolve({ success: true, pin, duration: durationMs });
+      }, durationMs);
+      if (t.unref) t.unref();
+    });
+  }
+
+  async setAllRelaysBitmask(bitmask) {
+    const masked = Math.max(0, Math.min(255, Math.round(bitmask)));
+    await this.executeCommand(0, `relallwr ${masked}`);
+    console.log(`[IOplus] Bitmask write: 0b${masked.toString(2).padStart(8,'0')}`);
+    return { success: true, bitmask: masked };
+  }
+
+  async readAnalogInput(pin) {
+    const board = 0;
+    if (pin < 0 || pin >= 8) throw new Error(`Analog pin ${pin} out of range`);
+    try {
+      const result = await this.executeCommand(board, `adcrd ${pin + 1}`);
+      const volts = parseFloat(result);
+      if (isNaN(volts)) throw new Error(`Invalid ADC reading: ${result}`);
+      return { success: true, pin, volts: parseFloat(volts.toFixed(3)), millivolts: Math.round(volts * 1000), type: 'analog' };
+    } catch (error) {
+      console.error('[IOplus] Failed to read analog input:', error.message);
+      throw error;
+    }
+  }
+
+  async setAllRelays(states) {
+    if (!Array.isArray(states) || states.length !== this.totalRelays) {
+      throw new Error(`Expected array of ${this.totalRelays} states`);
+    }
+    
+    const results = [];
+    for (let i = 0; i < states.length; i++) {
+      try {
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        const result = await this.setRelay(i, states[i]);
+        results.push(result);
+      } catch (error) {
+        results.push({ success: false, pin: i, error: error.message });
+      }
+    }
+    
+    return results;
+  }
+
+  async getAllRelays() {
+    const results = [];
+    for (let i = 0; i < this.totalRelays; i++) {
+      try {
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        const result = await this.getRelay(i);
+        results.push(result);
+      } catch (error) {
+        results.push({ success: false, pin: i, error: error.message });
+      }
+    }
+    
+    return results;
+  }
+
+  async readAllOptoInputs() {
+    const results = [];
+    for (let i = 0; i < 8; i++) {
+      try {
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        const result = await this.readOptoInput(i);
+        results.push(result);
+      } catch (error) {
+        results.push({ success: false, pin: i, error: error.message });
+      }
+    }
+    
+    return results;
+  }
+
+  // ── DAC Analog Outputs (0-10V, channels 1-4) ────────────────────────────
+  async setDAC(channel, voltage) {
+    // channel: 0-3 (maps to ioplus dacwr 1-4)
+    if (channel < 0 || channel > 3) throw new Error(`DAC channel ${channel} out of range (0-3)`);
+    const volts = Math.max(0, Math.min(10, parseFloat(voltage)));
+    await this.executeCommand(0, `dacwr ${channel + 1} ${volts.toFixed(3)}`);
+    console.log(`[IOplus] DAC ${channel} -> ${volts.toFixed(3)}V`);
+    return { success: true, channel, voltage: volts };
+  }
+
+  async getDAC(channel) {
+    if (channel < 0 || channel > 3) throw new Error(`DAC channel ${channel} out of range (0-3)`);
+    const result = await this.executeCommand(0, `dacrd ${channel + 1}`);
+    const voltage = parseFloat(result);
+    return { success: true, channel, voltage: isNaN(voltage) ? 0 : voltage };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async healthCheck() {
+    try {
+      await this.executeCommand(0, 'relrd 1');
+      return { 
+        healthy: true, 
+        message: 'I2C bus responding normally',
+        board: 0
+      };
+    } catch (error) {
+      return { 
+        healthy: false, 
+        message: error.message,
+        board: 0
+      };
+    }
+  }
+}
+
+// ============================================
+// GPIOQueueManager Class (Integrated)
+// ============================================
+class GPIOQueueManager extends EventEmitter {
+  constructor(ioplusController, options = {}) {
+    super();
+    
+    this.controller = ioplusController;
+    this.queue = [];
+    this.processing = false;
+    this.paused = false;
+    
+    this.config = {
+      maxQueueSize: options.maxQueueSize || 100,
+      minDelayBetweenCommands: options.minDelayBetweenCommands || 50,
+      maxConcurrentRequests: options.maxConcurrentRequests || 1,
+      commandTimeout: options.commandTimeout || 5000,
+      healthCheckInterval: options.healthCheckInterval || 10000,
+      maxConsecutiveFailures: options.maxConsecutiveFailures || 5,
+      burstProtectionWindow: options.burstProtectionWindow || 1000,
+      maxBurstCommands: options.maxBurstCommands || 50
+    };
+    
+    this.stats = {
+      totalRequests: 0,
+      successfulRequests: 0,
+      failedRequests: 0,
+      queuedRequests: 0,
+      droppedRequests: 0,
+      consecutiveFailures: 0,
+      lastSuccessTime: Date.now(),
+      commandsInWindow: [],
+      boardHealthy: true
+    };
+    
+    // Health monitoring disabled — Watchdog handles I2C health safely through the queue
+    // this.startHealthMonitoring();
+  }
+
+  async enqueue(operation, ...args) {
+    if (!this.checkBurstProtection()) {
+      this.stats.droppedRequests++;
+      throw new Error('Rate limit exceeded - too many commands in short time window');
+    }
+    
+    if (this.queue.length >= this.config.maxQueueSize) {
+      this.stats.droppedRequests++;
+      throw new Error(`Queue full (${this.config.maxQueueSize} items)`);
+    }
+    
+    return new Promise((resolve, reject) => {
+      const request = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        operation,
+        args,
+        resolve,
+        reject,
+        timestamp: Date.now(),
+        attempts: 0
+      };
+      
+      this.queue.push(request);
+      this.stats.queuedRequests++;
+      this.stats.totalRequests++;
+      
+      if (!this.processing && !this.paused) {
+        this.processQueue();
+      }
+    });
+  }
+
+  checkBurstProtection() {
+    const now = Date.now();
+    const windowStart = now - this.config.burstProtectionWindow;
+    
+    this.stats.commandsInWindow = this.stats.commandsInWindow.filter(
+      timestamp => timestamp > windowStart
+    );
+    
+    if (this.stats.commandsInWindow.length >= this.config.maxBurstCommands) {
+      console.warn(`[Queue] Burst protection triggered: ${this.stats.commandsInWindow.length} commands in ${this.config.burstProtectionWindow}ms window`);
+      return false;
+    }
+    
+    this.stats.commandsInWindow.push(now);
+    return true;
+  }
+
+  async processQueue() {
+    if (this.processing || this.paused || this.queue.length === 0) {
+      return;
+    }
+    
+    this.processing = true;
+    
+    while (this.queue.length > 0 && !this.paused) {
+      const request = this.queue.shift();
+      
+      try {
+        if (!this.stats.boardHealthy) {
+          throw new Error('Board unhealthy - waiting for recovery');
+        }
+        
+        const result = await this.executeWithTimeout(request);
+        
+        this.stats.successfulRequests++;
+        this.stats.consecutiveFailures = 0;
+        this.stats.lastSuccessTime = Date.now();
+        request.resolve(result);
+        
+        if (this.queue.length > 0) {
+          await this.delay(this.config.minDelayBetweenCommands);
+        }
+        
+      } catch (error) {
+        this.stats.failedRequests++;
+        this.stats.consecutiveFailures++;
+        
+        console.error(`[Queue] Command failed (${this.stats.consecutiveFailures} consecutive):`, error.message);
+        
+        if (this.stats.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+          console.error('[Queue] Board appears to be locked up - attempting recovery');
+          this.stats.boardHealthy = false;
+          this.emit('board-lockup', { consecutiveFailures: this.stats.consecutiveFailures });
+          await this.attemptBoardRecovery();
+        }
+        
+        request.reject(error);
+      }
+    }
+    
+    this.processing = false;
+  }
+
+  async executeWithTimeout(request) {
+    return Promise.race([
+      this.controller[request.operation](...request.args),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Command timeout')), this.config.commandTimeout)
+      )
+    ]);
+  }
+
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async attemptBoardRecovery() {
+    // Recovery lock — prevents watchdog triggering a second recovery while one runs
+    if (this._recoveryInProgress) {
+      console.log('[Queue] Recovery already in progress — skipping');
+      return false;
+    }
+    this._recoveryInProgress = true;
+    this._recoveryAttempts = (this._recoveryAttempts || 0) + 1;
+    console.log(`[Queue] Attempting board recovery (attempt #${this._recoveryAttempts})...`);
+    this.paused = true;
+
+    try {
+      console.log('[Queue] Step 1: Waiting for I2C bus to clear...');
+      await this.delay(3000);
+
+      console.log('[Queue] Step 2: Testing board communication...');
+      try {
+        const health = await this.controller.healthCheck();
+        if (health.healthy) {
+          console.log('[Queue] Board recovered! Resuming operations.');
+          this.stats.boardHealthy = true;
+          this.stats.consecutiveFailures = 0;
+          this._recoveryAttempts = 0;
+          this.paused = false;
+          this._recoveryInProgress = false;
+          this.emit('board-recovered');
+          this.processQueue();
+          return true;
+        }
+      } catch (err) { console.log('[Queue] Step 2 failed:', err.message); }
+
+      console.log('[Queue] Step 3: Requesting I2C bus reset...');
+      this.emit('request-i2c-reset');
+      await this.delay(5000);
+
+      console.log('[Queue] Step 4: Testing after I2C reset...');
+      try {
+        const health = await this.controller.healthCheck();
+        if (health.healthy) {
+          console.log('[Queue] Board recovered after I2C reset!');
+          this.stats.boardHealthy = true;
+          this.stats.consecutiveFailures = 0;
+          this._recoveryAttempts = 0;
+          this.paused = false;
+          this._recoveryInProgress = false;
+          this.emit('board-recovered');
+          this.processQueue();
+          return true;
+        }
+      } catch (err) { console.log('[Queue] Step 4 failed:', err.message); }
+
+      // Auto-resume after backoff — board often self-recovers
+      // Never leave queue permanently paused
+      const backoffMs = Math.min(30000, 10000 * this._recoveryAttempts);
+      console.error(`[Queue] Recovery failed (attempt #${this._recoveryAttempts}) — resuming in ${backoffMs/1000}s`);
+      this.emit('board-needs-power-cycle');
+
+      await this.delay(backoffMs);
+
+      try {
+        const h = await this.controller.healthCheck();
+        if (h.healthy) { console.log('[Queue] Board self-recovered during backoff!'); this._recoveryAttempts = 0; }
+        else { console.warn('[Queue] Still unresponsive — resuming optimistically'); }
+      } catch (e) { console.warn('[Queue] Final check failed, resuming:', e.message); }
+
+      this.stats.boardHealthy = true;
+      this.stats.consecutiveFailures = 0;
+      this.paused = false;
+      this._recoveryInProgress = false;
+      this.processQueue();
+      return false;
+
+    } catch (error) {
+      console.error('[Queue] Recovery threw:', error.message);
+      this._recoveryInProgress = false;
+      this.stats.boardHealthy = true;
+      this.stats.consecutiveFailures = 0;
+      this.paused = false;
+      this.processQueue();
+      return false;
+    }
+  }
+
+  async manualRecovery() {
+    console.log('[Queue] Manual recovery triggered - resetting state...');
+    
+    this.stats.boardHealthy = true;
+    this.stats.consecutiveFailures = 0;
+    this.paused = false;
+    this.queue = [];
+    
+    try {
+      const health = await this.controller.healthCheck();
+      if (health.healthy) {
+        console.log('[Queue] Manual recovery successful!');
+        this.emit('board-recovered');
+        this.processQueue();
+        return true;
+      }
+    } catch (err) {
+      console.error('[Queue] Manual recovery failed - board still not responding');
+      this.stats.boardHealthy = false;
+      return false;
+    }
+  }
+
+  startHealthMonitoring() {
+    this.healthCheckTimer = setInterval(async () => {
+      if (!this.stats.boardHealthy) {
+        return;
+      }
+      
+      try {
+        const health = await this.controller.healthCheck();
+        if (!health.healthy) {
+          console.warn('[Queue] Health check failed - board may be unhealthy');
+          this.stats.consecutiveFailures++;
+        }
+      } catch (err) {
+        console.warn('[Queue] Health check error:', err.message);
+        this.stats.consecutiveFailures++;
+      }
+    }, this.config.healthCheckInterval);
+    if (this.healthCheckTimer && this.healthCheckTimer.unref) this.healthCheckTimer.unref();
+  }
+
+  getStats() {
+    return {
+      ...this.stats,
+      queueLength: this.queue.length,
+      processing: this.processing,
+      paused: this.paused,
+      config: this.config
+    };
+  }
+
+  pause() {
+    this.paused = true;
+    console.log('[Queue] Processing paused');
+  }
+
+  resume() {
+    this.paused = false;
+    console.log('[Queue] Processing resumed');
+    if (this.queue.length > 0) {
+      this.processQueue();
+    }
+  }
+
+  clear() {
+    const count = this.queue.length;
+    this.queue = [];
+    console.log(`[Queue] Cleared ${count} pending requests`);
+    return count;
+  }
+
+  destroy() {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+    }
+    this.clear();
+  }
+}
+
+// ============================================
+// Express & Socket.IO Setup
+// ============================================
+
+// optional pretty logger
+let ServerLogger;
+try {
+  ServerLogger = require('./serverLogger');
+} catch (e) {
+  ServerLogger = null;
+  console.warn('[Startup] ./serverLogger not found, falling back to console output.');
+}
+
+const AutomationManager = require('./automation/AutomationManager');
+const WiegandManager = require('./wiegand/WiegandManager');
+const OSDPManager = require('./osdp/OSDPManager');
+const OSDPSniffer = require('./osdp/OSDPSniffer');
+const SwitchManager = require('./switch/SwitchManager');
+
+// Log routes
+let logRoutes = null;
+let logSystemEvent = () => {};
+let logAccessEvent = () => {};
+let logSecurityEvent = () => {};
+try {
+  const _logs = require('./routes/logs');
+  logRoutes = _logs.router || null;
+  logSystemEvent = _logs.logSystemEvent || logSystemEvent;
+  logAccessEvent = _logs.logAccessEvent || logAccessEvent;
+  logSecurityEvent = _logs.logSecurityEvent || logSecurityEvent;
+} catch (e) {
+  console.warn('[Startup] ./routes/logs not found - logging routes/events disabled.');
+}
+
+// NFC
+let PN532Manager = null;
+try {
+  PN532Manager = require('./nfc/PN532Manager');
+} catch (e) {
+  console.warn('[Startup] PN532Manager module not found - NFC will be unavailable if requested.');
+}
+
+// Format API
+const formatRoutes = require('./routes/formats');
+
+// Supervision routes (don't use gpioRoutes anymore - queue replaces it)
+const supervisionRoutes = require('./routes/supervision-routes');
+
+// ---- Global config ----
+const CHIP = 'gpiochip0';
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*", methods: ["GET","POST","PUT","PATCH","DELETE"] } });
+
+app.use(cors());
+app.use(express.json());
+app.use('/api/formats', formatRoutes);
+app.use('/api/credential-formats', formatRoutes); // alias — frontend calls this URL
+
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+if (logRoutes) {
+  app.use('/api/logs', logRoutes);
+}
+
+app.use('/api/supervision', supervisionRoutes);
+
+// Controller Emulator — downstream OSDP PD emulation
+const emulatorRoutes = require('./routes-emulator');
+app.use('/api/emulator', emulatorRoutes(io, (lvl, msg) => console.log(`[${lvl}] ${msg}`), () => osdpManager));
+app.use('/api/doors', require('./routes-doors')());
+app.use('/api/switch', require('./routes-switch')(io, () => switchManager, logSystemEvent));
+
+// ============================================
+// Initialize IOplus + Queue Manager
+// ============================================
+const ioplus = new IOplusController(1);
+const gpioQueue = new GPIOQueueManager(ioplus, {
+  maxQueueSize: 50,
+  minDelayBetweenCommands: 150,   // 150ms between I2C commands prevents bus flooding
+  maxBurstCommands: 20,            // max 20 commands per 2s window
+  burstProtectionWindow: 2000,
+  maxConsecutiveFailures: 3,       // flag unhealthy after 3 failures (not 5)
+  healthCheckInterval: 10000       // disabled above — here for reference only
+});
+
+// Watchdog — monitors queue health, triggers recovery with lock + cooldown
+// Checks every 15s, flags stale after 30s of no successful commands
+gpioQueue.startWatchdog = function(intervalMs = 15000, staleMs = 30000) {
+  if (this._watchdogTimer) clearInterval(this._watchdogTimer);
+  console.log(`[Watchdog] Started — ${intervalMs/1000}s interval, ${staleMs/1000}s stale threshold`);
+  this._watchdogTimer = setInterval(async () => {
+    if (this._recoveryInProgress) return;
+    const now = Date.now();
+    if (!this.stats.boardHealthy) {
+      const attempts = this._recoveryAttempts || 0;
+      const cooldown = Math.min(60000, attempts * 15000);
+      if (this._lastRecoveryAt && (now - this._lastRecoveryAt) < cooldown) return;
+      console.warn('[Watchdog] Board unhealthy — triggering recovery');
+      this._lastRecoveryAt = now;
+      await this.attemptBoardRecovery();
+      return;
+    }
+    if (this.stats.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+      console.warn(`[Watchdog] ${this.stats.consecutiveFailures} consecutive failures — recovery`);
+      this.stats.boardHealthy = false;
+      this._lastRecoveryAt = now;
+      await this.attemptBoardRecovery();
+      return;
+    }
+    const msSince = now - this.stats.lastSuccessTime;
+    if (msSince > staleMs && this.stats.totalRequests > 0 && this.queue.length === 0 && !this.processing) {
+      try { await this.enqueue('healthCheck'); console.log('[Watchdog] Health ping OK'); }
+      catch(e) { console.error('[Watchdog] Health ping failed:', e.message); this.stats.boardHealthy = false; this._lastRecoveryAt = now; await this.attemptBoardRecovery(); }
+    }
+  }, intervalMs);
+  if (this._watchdogTimer.unref) this._watchdogTimer.unref();
+};
+gpioQueue.startWatchdog(15000, 30000);
+
+// Event listeners
+gpioQueue.on('board-lockup', async (data) => {
+  console.error(`[Server] BOARD LOCKUP DETECTED - ${data.consecutiveFailures} consecutive failures`);
+  console.error('[Server] Attempting automatic recovery...');
+});
+
+gpioQueue.on('request-i2c-reset', async () => {
+  console.log('[Server] Attempting I2C bus reset...');
+  const scriptPath = path.join(__dirname, 'reset-i2c-bus.sh');
+
+  if (fs.existsSync(scriptPath)) {
+    try {
+      console.log('[Server] Running reset-i2c-bus.sh...');
+      const { stdout, stderr } = await execAsync(`bash "${scriptPath}"`, { timeout: 30000 });
+      console.log('[Server] I2C reset output:', stdout.trim());
+      if (stderr && stderr.trim()) console.warn('[Server] I2C reset stderr:', stderr.trim());
+      await new Promise(r => { const t = setTimeout(r, 2000); if (t.unref) t.unref(); });
+      return;
+    } catch (e) { console.warn('[Server] I2C reset script failed:', e.message); }
+  } else {
+    console.warn('[Server] reset-i2c-bus.sh not found at', scriptPath);
+  }
+
+  // Fallback: module reload
+  try {
+    await execAsync('modprobe -r i2c_bcm2835 2>/dev/null || true; modprobe -r i2c_dev 2>/dev/null || true; sleep 1; modprobe i2c_bcm2835 2>/dev/null || true; modprobe i2c_dev 2>/dev/null || true', { timeout: 15000 }).catch(() => {});
+    await execAsync('i2cdetect -y 1 > /dev/null 2>&1', { timeout: 5000 }).catch(() => {});
+    await new Promise(r => { const t = setTimeout(r, 1500); if (t.unref) t.unref(); });
+    console.log('[Server] Fallback I2C recovery complete');
+  } catch (e) { console.warn('[Server] Fallback I2C recovery:', e.message); }
+});
+
+gpioQueue.on('board-recovered', () => {
+  console.log('[Server] âœ… Board recovered successfully!');
+});
+
+gpioQueue.on('board-needs-power-cycle', () => {
+  console.error('[Server] âš ï¸  CRITICAL: Board needs POWER CYCLE - automatic recovery failed');
+  console.error('[Server] Please manually power cycle the Raspberry Pi or trigger hardware reset');
+});
+
+console.log('[Server] GPIO Queue Manager initialized');
+console.log('[Server] Burst protection: Max', gpioQueue.config.maxBurstCommands, 'commands per', gpioQueue.config.burstProtectionWindow + 'ms');
+console.log('[Server] Queue size limit:', gpioQueue.config.maxQueueSize);
+console.log('[Server] Min delay between commands:', gpioQueue.config.minDelayBetweenCommands + 'ms');
+
+// ---- Native Wiegand transmitter binary (optional) ----
+const WIEGAND_TX_PATH = path.join(__dirname, 'bin', 'wiegand_tx');
+const ALT_WIEGAND_TX_PATH = path.join(__dirname, 'wiegand', 'wiegand_tx');
+const RESOLVED_WIEGAND_TX_PATH = fs.existsSync(WIEGAND_TX_PATH) ? WIEGAND_TX_PATH
+  : (fs.existsSync(ALT_WIEGAND_TX_PATH) ? ALT_WIEGAND_TX_PATH : WIEGAND_TX_PATH);
+
+const wiegandHistory = [];
+const MAX_HISTORY = 100;
+
+// ---- Sequences storage dir ----
+const SEQUENCES_DIR = path.join(__dirname, 'data', 'sequences');
+(async () => {
+  try { await fsp.mkdir(SEQUENCES_DIR, { recursive: true }); }
+  catch (e) { console.error('[Sequences] mkdir failed:', e.message); }
+})();
+
+function safeId(str='') { return String(str).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 64) || String(Date.now()); }
+async function loadJson(file) { return JSON.parse(await fsp.readFile(file, 'utf8')); }
+
+class GPIOEventEmitter extends EventEmitter {}
+const gpioEvents = new GPIOEventEmitter();
+
+// Initialize systems
+let automationManager = null;
+let wiegandManager = null;
+let osdpManager = null;
+let nfcManager = null;
+let nfcBridge = null;
+let switchManager = null;
+
+const logger = ServerLogger ? new ServerLogger({
+  style: process.env.NODE_ENV === 'production' ? 'compact' : 'modern',
+  useColors: process.stdout.isTTY,
+  useBox: true
+}) : null;
+
+function createServiceInfo(ok, details = null, summary = null) {
+  return {
+    ok: !!ok,
+    details: details || null,
+    summary: summary || (ok ? 'available' : 'unavailable')
+  };
+}
+
+function logServerStatus() {
+  const quick = {
+    title: 'Server Status',
+    port: process.env.PORT || 3001,
+    services: {
+      'Automation': { enabled: !!automationManager },
+      'Wiegand': { enabled: !!wiegandManager },
+      'OSDP': { enabled: !!osdpManager },
+      'NFC': { enabled: !!(nfcManager && nfcManager.enabled) }
+    },
+    timestamp: new Date().toISOString()
+  };
+  if (logger && typeof logger.log === 'function') {
+    logger.log(quick);
+  } else {
+    console.log('[Server Status]', quick);
+  }
+}
+
+async function initializeWiegand() {
+  if (wiegandManager) return wiegandManager;
+  try {
+    wiegandManager = new WiegandManager();
+    await wiegandManager.initialize();
+    console.log('[Wiegand] Helper initializeWiegand succeeded');
+    return wiegandManager;
+  } catch (err) {
+    console.error('[Wiegand] Helper initializeWiegand failed:', err && err.message ? err.message : err);
+    wiegandManager = null;
+    throw err;
+  }
+}
+
+async function initializeSystems() {
+  try {
+    wiegandManager = new WiegandManager();
+    await wiegandManager.initialize();
+    console.log('[Wiegand] âœ“ System initialized successfully');
+  } catch (err) {
+    console.error('[Wiegand] âœ— Failed to initialize:', err && err.message ? err.message : err);
+    console.error('[Wiegand] Wiegand features will be disabled');
+    wiegandManager = null;
+  }
+
+  try {
+    osdpManager = new OSDPManager();
+    await osdpManager.initialize();
+    console.log('[OSDP] âœ“ System initialized successfully');
+
+    if (osdpManager && typeof osdpManager.on === 'function') {
+      osdpManager.on('wire-frame', f => io.emit('osdp-wire-frame', f));
+      osdpManager.on('led_command', d => io.emit('osdp_led_command', d));
+      osdpManager.on('buzzer_command', d => io.emit('osdp_buzzer_command', d));
+
+            osdpManager.on('card_read', (data) => {
+        console.log('[OSDP] Card read event:', data);
+        io.emit('osdp_card_read', data);
+
+        try {
+          logAccessEvent && logAccessEvent(`OSDP card read - reader ${data.readerId || 'unknown'} uid ${data.uid || data.card || 'n/a'}`, {
+            readerId: data.readerId,
+            uid: data.uid || null,
+            facility: data.facility ?? null,
+            card: data.card ?? null,
+            method: 'osdp'
+          });
+        } catch (e) {}
+      });
+    }
+         try {
+      const attachFirmwareRoutes = require('./routes-osdp-firmware');
+      attachFirmwareRoutes(app, osdpManager, io);
+    } catch (e) {
+      console.warn('[OSDP] Could not mount firmware routes:', e.message);
+    }
+  } catch (err) {
+    console.error('[OSDP] âœ— Failed to initialize:', err && err.message ? err.message : err);
+    console.error('[OSDP] OSDP features will be disabled');
+    osdpManager = null;
+  }
+
+  try {
+    const enableNfc = String(process.env.ENABLE_PN532 || '').trim() === '1';
+
+    if (!enableNfc) {
+      console.log('[NFC] PN532 initialization skipped (ENABLE_PN532 not set). To enable, set ENABLE_PN532=1');
+      nfcManager = null;
+    } else if (!PN532Manager) {
+      console.warn('[NFC] PN532Manager module is missing; cannot initialize NFC.');
+      nfcManager = null;
+    } else {
+      const i2cBus = Number(process.env.PN532_I2C_BUS || 1);
+      const addrs = process.env.PN532_I2C_ADDRS
+        ? process.env.PN532_I2C_ADDRS.split(',').map(s => Number(s.trim()))
+        : [0x24, 0x48];
+
+      nfcManager = new PN532Manager(io, { i2cBus, addresses: addrs });
+      await nfcManager.initialize();
+
+      if (nfcManager && nfcManager.enabled) {
+        console.log('[NFC] âœ“ PN532 NFC Reader initialized successfully');
+
+        nfcManager.on('card_read', (cardEvent) => {
+          console.log(`[NFC] Card read: ${cardEvent.uid}`);
+          io.emit('nfc:card', cardEvent);
+
+          try {
+            logAccessEvent && logAccessEvent(`NFC card read - uid ${cardEvent.uid}`, {
+              uid: cardEvent.uid,
+              type: cardEvent.type || null,
+              method: 'nfc'
+            });
+          } catch (e) {}
+        });
+
+        nfcManager.on('error', (error) => {
+          console.error('[NFC] Error:', error && error.message ? error.message : error);
+          io.emit('nfc:error', { error: error && error.message ? error.message : String(error) });
+
+          try {
+            logSystemEvent && logSystemEvent('NFC error: ' + (error && error.message ? error.message : String(error)), 'error');
+          } catch (e) {}
+        });
+      } else {
+        console.warn('[NFC] PN532 disabled or not available after init');
+        nfcManager = null;
+      }
+    }
+  } catch (err) {
+    console.error('[NFC] Failed to initialize:', err && err.message ? err.message : err);
+    console.error('[NFC] NFC features will be disabled');
+    nfcManager = null;
+  }
+
+  if (nfcManager && nfcManager.enabled && osdpManager) {
+    try {
+      nfcBridge = new (require('./nfc/NFCOSDPBridge'))(nfcManager, osdpManager);
+      await nfcBridge.initialize();
+
+      console.log('[NFC-OSDP Bridge] âœ“ Bridge initialized');
+      console.log('[NFC-OSDP Bridge] NFC cards will be forwarded to OSDP readers');
+
+      nfcBridge.on('card_sent', (data) => {
+        console.log('[NFC-OSDP Bridge] Card forwarded to OSDP');
+        io.emit('nfc:bridge:card_sent', data);
+
+        try {
+          logAccessEvent && logAccessEvent('NFC card forwarded to OSDP', { data });
+        } catch (e) {}
+      });
+
+      nfcBridge.on('error', (data) => {
+        console.error('[NFC-OSDP Bridge] Error:', data && data.error ? data.error : data);
+        io.emit('nfc:bridge:error', data);
+
+        try {
+          logSystemEvent && logSystemEvent('NFC-OSDP Bridge error: ' + (data && data.error ? data.error : 'unknown'), 'error');
+        } catch (e) {}
+      });
+    } catch (err) {
+      console.error('[NFC-OSDP Bridge] Failed to initialize:', err && err.message ? err.message : err);
+      nfcBridge = null;
+    }
+  } else {
+    console.log('[NFC-OSDP Bridge] Skipped - NFC or OSDP not available');
+  }
+
+   try {
+    switchManager = new SwitchManager();
+    await switchManager.initialize();
+    console.log('[Switch] ✓ System initialized successfully');
+
+    switchManager.on('port-change', d => io.emit('switch:port-change', d));
+    switchManager.on('deadman-revert', d => {
+      io.emit('switch:deadman-revert', d);
+      try { logSystemEvent(`Switch dead-man revert: ${d.profileId} port ${d.port}`, 'warning'); } catch (e) {}
+    });
+    switchManager.on('port-verify-failed', d => {
+      io.emit('switch:verify-failed', d);
+      try { logSystemEvent(`Switch verify failed: ${d.profileId} port ${d.port} expected ${d.expected}, got ${d.got}`, 'error'); } catch (e) {}
+    });
+    switchManager.on('reconcile', d => io.emit('switch:reconcile', d));
+  } catch (err) {
+    console.error('[Switch] ✗ Failed to initialize:', err && err.message ? err.message : err);
+    console.error('[Switch] Switch port control will be disabled');
+    switchManager = null;
+  }
+
+  try {
+    automationManager = new AutomationManager(gpioEvents, wiegandManager, switchManager);
+    await automationManager.initialize();
+    console.log('[Automation] âœ“ System initialized successfully');
+  } catch (err) {
+    console.error('[Automation] âœ— Failed to initialize:', err && err.message ? err.message : err);
+    automationManager = null;
+  }
+}
+
+initializeSystems().catch(err => {
+  console.error('[Init] initializeSystems() threw:', err && err.stack ? err.stack : err);
+});
+
+app.use((req, _res, next) => { 
+  try {
+    const body = req.body && Object.keys(req.body).length ? req.body : undefined;
+    console.log(`[REQ] ${req.method} ${req.url}`, body ? body : '');
+  } catch (e) {
+    console.log(`[REQ] ${req.method} ${req.url}`);
+  }
+  next(); 
+});
+
+const procs = new Map();
+const states = new Map();
+
+function killProc(pin) {
+  const p = procs.get(pin);
+  if (p && !p.killed) { 
+    try { 
+      process.kill(p.pid, 'SIGKILL'); 
+    } catch (e) {}
+  }
+  procs.delete(pin);
+}
+
+function holdLevel(pin, value) {
+  if (wiegandManager && typeof wiegandManager.isPinReserved === 'function' && wiegandManager.isPinReserved(pin)) {
+    const error = `GPIO ${pin} is RESERVED for Wiegand transmission. Use /api/wiegand endpoints instead.`;
+    console.error(`[GPIO] âœ— ${error}`);
+
+    try {
+      logSecurityEvent && logSecurityEvent(`Attempt to write reserved GPIO ${pin}`, 'warning', { pin });
+    } catch (e) {}
+
+    throw new Error(error);
+  }
+
+  killProc(pin);
+  const args = ['-c', CHIP, `${pin}=${value}`];
+  console.log(`[GPIO] Executing: gpioset ${args.join(' ')}`);
+  
+  const p = spawn('gpioset', args, { 
+    stdio: ['ignore', 'pipe', 'pipe'] 
+  });
+  
+  let stderrData = '';
+  p.stderr.on('data', (data) => {
+    stderrData += data.toString();
+  });
+  
+  procs.set(pin, p);
+  states.set(pin, value);
+  
+  gpioEvents.emit('gpio_change', { 
+    pin, 
+    value, 
+    timestamp: Date.now() 
+  });
+  
+  p.on('exit', (code) => { 
+    if (procs.get(pin) === p) {
+      procs.delete(pin);
+      if (code !== 0) {
+        console.error(`[GPIO] âœ— ERROR for pin ${pin}: Exit code ${code}`);
+        if (stderrData.trim()) console.error(`[GPIO] stderr: ${stderrData.trim()}`);
+      } else {
+        console.log(`[GPIO] âœ“ Pin ${pin} successfully set to ${value}`);
+      }
+    }
+  });
+  
+  p.on('error', (err) => {
+    console.error(`[GPIO] Error spawning gpioset for pin ${pin}:`, err && err.message ? err.message : err);
+  });
+  
+  console.log(`[GPIO] Pin ${pin} command sent (PID: ${p.pid})`);
+}
+
+function readLevel(pin) {
+  return new Promise((resolve, reject) => {
+    execFile('gpioget', ['-c', CHIP, String(pin)], (err, stdout, stderr) => {
+      if (err) return reject(new Error(stderr || err.message));
+      const txt = String(stdout).trim();
+      if (txt === '0' || txt === '1') return resolve(parseInt(txt, 10));
+      const m = txt.match(/=\s*(active|inactive)/i);
+      if (m) return resolve(m[1].toLowerCase() === 'active' ? 1 : 0);
+      resolve(states.get(pin) ?? 0);
+    });
+  });
+}
+
+async function pulse(pin, msec = 300) {
+  if (wiegandManager && typeof wiegandManager.isPinReserved === 'function' && wiegandManager.isPinReserved(pin)) {
+    try {
+      logSecurityEvent && logSecurityEvent(`Attempt to pulse reserved GPIO ${pin}`, 'warning', { pin, msec });
+    } catch (e) {}
+    throw new Error(`GPIO ${pin} is RESERVED for Wiegand transmission`);
+  }
+
+  console.log(`[GPIO] Pulsing pin ${pin} for ${msec}ms`);
+  holdLevel(pin, 1);
+  await new Promise(r => setTimeout(r, Math.max(1, msec)));
+  holdLevel(pin, 0);
+}
+
+gpioEvents.on('gpio_action', (data) => {
+  const { pin, value } = data;
+  console.log(`[Automation] Triggering GPIO ${pin} = ${value}`);
+  try {
+    holdLevel(pin, value);
+  } catch (e) {
+    console.error('[Automation] GPIO action blocked:', e && e.message ? e.message : e);
+    try {
+      logSecurityEvent && logSecurityEvent('Blocked automation GPIO action', 'warning', { pin, value, error: e && e.message ? e.message : String(e) });
+    } catch (ee) {}
+  }
+});
+
+// ============================================
+// QUEUE-PROTECTED GPIO API ROUTES
+// ============================================
+
+app.post('/api/gpio/write', async (req, res) => {
+  const { pin, value } = req.body;
+  
+  if (pin === undefined || value === undefined) {
+    return res.status(400).json({ error: 'Missing pin or value' });
+  }
+  
+  try {
+    const result = await gpioQueue.enqueue('setRelay', pin, value === 1 || value === true);
+    
+    res.json({
+      success: true,
+      pin,
+      value,
+      ...result
+    });
+  } catch (error) {
+    console.error('[GPIO] Write failed:', error.message);
+    res.status(500).json({
+      error: error.message,
+      queueStats: gpioQueue.getStats()
+    });
+  }
+});
+
+app.get('/api/gpio/read/:pin', async (req, res) => {
+  const pin = parseInt(req.params.pin);
+  
+  if (isNaN(pin)) {
+    return res.status(400).json({ error: 'Invalid pin number' });
+  }
+  
+  try {
+    const result = await gpioQueue.enqueue('getRelay', pin);
+    
+    res.json({
+      success: true,
+      pin,
+      state: result.state ? 1 : 0,
+      ...result
+    });
+  } catch (error) {
+    console.error('[GPIO] Read failed:', error.message);
+    res.status(500).json({
+      error: error.message,
+      queueStats: gpioQueue.getStats()
+    });
+  }
+});
+
+app.get('/api/gpio/input/:pin', async (req, res) => {
+  const pin = parseInt(req.params.pin);
+  
+  if (isNaN(pin)) {
+    return res.status(400).json({ error: 'Invalid pin number' });
+  }
+  
+  try {
+    const result = await gpioQueue.enqueue('readOptoInput', pin);
+    
+    res.json({
+      success: true,
+      pin,
+      state: result.state ? 1 : 0,
+      ...result
+    });
+  } catch (error) {
+    console.error('[GPIO] Input read failed:', error.message);
+    res.status(500).json({
+      error: error.message,
+      queueStats: gpioQueue.getStats()
+    });
+  }
+});
+
+app.post('/api/gpio/pulse', async (req, res) => {
+  const { pin, duration = 500 } = req.body;
+  
+  if (pin === undefined) {
+    return res.status(400).json({ error: 'Missing pin' });
+  }
+  
+  try {
+    const result = await gpioQueue.enqueue('pulseRelay', pin, duration);
+    
+    res.json({
+      success: true,
+      pin,
+      duration,
+      ...result
+    });
+  } catch (error) {
+    console.error('[GPIO] Pulse failed:', error.message);
+    res.status(500).json({
+      error: error.message,
+      queueStats: gpioQueue.getStats()
+    });
+  }
+});
+
+// Batch pulse — fires multiple relays simultaneously in ONE I2C transaction
+app.post('/api/gpio/batch-pulse', async (req, res) => {
+  const { pins, duration = 500 } = req.body;
+  if (!Array.isArray(pins) || pins.length === 0) return res.status(400).json({ error: 'pins array required' });
+  const validPins = pins.filter(p => Number.isInteger(p) && p >= 0 && p <= 7);
+  if (validPins.length === 0) return res.status(400).json({ error: 'No valid pins (0-7)' });
+  try {
+    const onMask = validPins.reduce((mask, pin) => mask | (1 << pin), 0);
+    await gpioQueue.enqueue('setAllRelaysBitmask', onMask);
+    const t = setTimeout(() => {
+      gpioQueue.enqueue('setAllRelaysBitmask', 0).catch(e => console.error('[GPIO] Batch OFF failed:', e.message));
+    }, duration);
+    if (t.unref) t.unref();
+    res.json({ success: true, pins: validPins, duration, bitmask: onMask });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Single pulse — server handles ON+OFF timing accurately
+app.post('/api/gpio/pulse-timed', async (req, res) => {
+  const { pin, duration = 500 } = req.body;
+  if (pin === undefined) return res.status(400).json({ error: 'Missing pin' });
+  try {
+    await gpioQueue.enqueue('setRelay', pin, true);
+    const t = setTimeout(() => {
+      gpioQueue.enqueue('setRelay', pin, false).catch(e => console.error(`[GPIO] Pulse OFF failed pin ${pin}:`, e.message));
+    }, duration);
+    if (t.unref) t.unref();
+    res.json({ success: true, pin, duration });
+  } catch (error) {
+    res.status(500).json({ error: error.message, queueStats: gpioQueue.getStats() });
+  }
+});
+
+// ── DAC Analog Output API ─────────────────────────────────────────────────
+app.get('/api/gpio/dac/:channel', async (req, res) => {
+  const channel = parseInt(req.params.channel);
+  if (isNaN(channel) || channel < 0 || channel > 3)
+    return res.status(400).json({ error: 'DAC channel must be 0-3' });
+  try {
+    const result = await gpioQueue.enqueue('getDAC', channel);
+    res.json({ success: true, channel, voltage: result.voltage });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/gpio/dac', async (req, res) => {
+  const { channel, voltage } = req.body;
+  if (channel === undefined || voltage === undefined)
+    return res.status(400).json({ error: 'channel and voltage required' });
+  const ch = parseInt(channel);
+  const v = parseFloat(voltage);
+  if (isNaN(ch) || ch < 0 || ch > 3) return res.status(400).json({ error: 'channel must be 0-3' });
+  if (isNaN(v) || v < 0 || v > 10) return res.status(400).json({ error: 'voltage must be 0-10' });
+  try {
+    const result = await gpioQueue.enqueue('setDAC', ch, v);
+    res.json({ success: true, channel: ch, voltage: result.voltage });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/gpio/dac', async (_req, res) => {
+  try {
+    const results = await Promise.all([0,1,2,3].map(ch => gpioQueue.enqueue('getDAC', ch)));
+    res.json({ success: true, channels: results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Board capabilities endpoint ───────────────────────────────────────────
+app.get('/api/gpio/capabilities', (_req, res) => {
+  res.json({
+    success: true,
+    board: 'Sequent IOplus',
+    outputs: {
+      relays: { count: 8, channels: [0,1,2,3,4,5,6,7], type: 'digital', description: 'Relay dry contacts (on/off)' },
+      dac: { count: 4, channels: [0,1,2,3], type: 'analog', description: 'DAC 0-10V analog outputs' }
+    },
+    inputs: {
+      opto: { count: 8, channels: [0,1,2,3,4,5,6,7], type: 'digital', description: 'Opto-isolated digital inputs' },
+      adc: { count: 8, channels: [0,1,2,3,4,5,6,7], type: 'analog', description: 'ADC 0-10V analog inputs' }
+    }
+  });
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post('/api/gpio/set', async (req, res) => {
+  const { pin, value } = req.body;
+  
+  if (pin === undefined || value === undefined) {
+    return res.status(400).json({ error: 'Missing pin or value' });
+  }
+  
+  try {
+    const result = await gpioQueue.enqueue('setRelay', pin, value === 1 || value === true);
+    io.emit('gpio_state_change', { pin, value });
+    res.json({
+      success: true,
+      pin,
+      value,
+      ...result
+    });
+  } catch (error) {
+    console.error('[GPIO] Set failed:', error.message);
+    res.status(500).json({
+      error: error.message,
+      queueStats: gpioQueue.getStats()
+    });
+  }
+});
+
+app.get('/api/gpio/states', (_req, res) => {
+  const s = {}; 
+  states.forEach((v, p) => s[p] = v);
+  res.json({ success: true, states: s });
+});
+
+// Alias: /api/gpio/opto/:channel — read opto input by channel index (0-7)
+// Used by scenario testing to read panel outputs (lock relay, alarm, etc.)
+app.get('/api/gpio/opto/:channel', async (req, res) => {
+  const channel = parseInt(req.params.channel);
+  if (isNaN(channel) || channel < 0 || channel > 7) {
+    return res.status(400).json({ error: 'Channel must be 0-7' });
+  }
+  try {
+    const result = await gpioQueue.enqueue('readOptoInput', channel);
+    res.json({ success: true, channel, state: result.state ? 1 : 0, value: result.state ? 1 : 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// /api/gpio/status — full board snapshot: all relays + all opto inputs
+// Used by scenario testing and dashboard live monitoring
+app.get('/api/gpio/status', async (req, res) => {
+  try {
+    const [relayResults, optoResults] = await Promise.all([
+      Promise.all([0,1,2,3,4,5,6,7].map(ch =>
+        gpioQueue.enqueue('getRelay', ch).catch(e => ({ pin: ch, state: false, error: e.message }))
+      )),
+      Promise.all([0,1,2,3,4,5,6,7].map(ch =>
+        gpioQueue.enqueue('readOptoInput', ch).catch(e => ({ pin: ch, state: false, error: e.message }))
+      ))
+    ]);
+
+    const relays = relayResults.map((r, i) => ({
+      channel: i, state: r.state ? 1 : 0, error: r.error || null
+    }));
+    const inputs = optoResults.map((r, i) => ({
+      channel: i, state: r.state ? 1 : 0, error: r.error || null
+    }));
+
+    res.json({ success: true, relays, inputs, timestamp: Date.now() });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Queue management endpoints
+app.get('/api/gpio/queue/stats', (req, res) => {
+  res.json(gpioQueue.getStats());
+});
+
+app.post('/api/gpio/queue/pause', (req, res) => {
+  gpioQueue.pause();
+  res.json({ success: true, message: 'Queue paused' });
+});
+
+app.post('/api/gpio/queue/resume', (req, res) => {
+  gpioQueue.resume();
+  res.json({ success: true, message: 'Queue resumed' });
+});
+
+app.post('/api/gpio/queue/clear', (req, res) => {
+  const count = gpioQueue.clear();
+  res.json({ success: true, message: `Cleared ${count} pending requests` });
+});
+
+app.post('/api/gpio/recovery/manual', async (req, res) => {
+  console.log('[Server] Manual recovery requested');
+  const success = await gpioQueue.manualRecovery();
+  
+  res.json({
+    success,
+    message: success ? 'Recovery successful' : 'Recovery failed - board still not responding',
+    stats: gpioQueue.getStats()
+  });
+});
+
+app.post('/api/gpio/reset-i2c', async (req, res) => {
+  console.log('[Server] Manual I2C reset requested');
+  
+  gpioQueue.emit('request-i2c-reset');
+  await new Promise(r => { const t = setTimeout(r, 2000); if (t.unref) t.unref(); });
+  res.json({ success: true, message: 'I2C reset triggered' });
+});
+
+// ---- Health ----
+app.get(['/api/health','/health'], (_req, res) => {
+  res.json({ 
+    success: true, 
+    driver: 'libgpiod-tools', 
+    chip: CHIP, 
+    activePins: procs.size,
+    automationEnabled: !!automationManager,
+    wiegandEnabled: !!wiegandManager,
+        osdpEnabled: !!osdpManager,
+    switchEnabled: !!(switchManager && switchManager.initialized),
+    switchHeldPorts: switchManager ? switchManager.getStatus().heldPorts.length : 0,
+    nfcEnabled: !!(nfcManager && nfcManager.enabled),
+    bridgeEnabled: !!(nfcBridge && typeof nfcBridge.isEnabled === 'function' && nfcBridge.isEnabled()),
+    nativeTransmitter: fs.existsSync(RESOLVED_WIEGAND_TX_PATH),
+    formatApiEnabled: true,
+    queueEnabled: true,
+    queueStats: gpioQueue.getStats(),
+    timestamp: new Date().toISOString() 
+  });
+});
+
+// ==============================================
+// Sequences API
+// ==============================================
+
+app.get('/api/emulations', async (_req, res) => {
+  try {
+    const files = (await fsp.readdir(SEQUENCES_DIR)).filter(f => f.endsWith('.json'));
+    const items = [];
+    for (const f of files) {
+      try {
+        const j = await loadJson(path.join(SEQUENCES_DIR, f));
+        items.push({
+          id: j.id, name: j.name,
+          createdAt: j.createdAt, updatedAt: j.updatedAt,
+          stepsCount: Array.isArray(j.steps) ? j.steps.length : 0
+        });
+      } catch (_) {}
+    }
+    res.json({ success: true, items });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.get('/api/emulations/:id', async (req, res) => {
+  try {
+    const id = safeId(req.params.id);
+    const file = path.join(SEQUENCES_DIR, `${id}.json`);
+    const seq = await loadJson(file);
+    res.json({ success: true, sequence: seq });
+  } catch (e) {
+    res.status(404).json({ success: false, error: 'Not found' });
+  }
+});
+
+app.post('/api/emulations', async (req, res) => {
+  try {
+    const { id, name, steps } = req.body || {};
+    if (!name || !Array.isArray(steps)) {
+      return res.status(400).json({ success: false, error: 'name and steps required' });
+    }
+    const now = new Date().toISOString();
+    const _id = safeId(id || name);
+    const file = path.join(SEQUENCES_DIR, `${_id}.json`);
+    let payload = { id: _id, name: String(name), steps, createdAt: now, updatedAt: now };
+    try {
+      const exists = await loadJson(file);
+      payload.createdAt = exists.createdAt || now;
+      payload.updatedAt = now;
+    } catch {}
+    await fsp.writeFile(file, JSON.stringify(payload, null, 2));
+    res.json({ success: true, id: _id });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.delete('/api/emulations/:id', async (req, res) => {
+  try {
+    const id = safeId(req.params.id);
+    const file = path.join(SEQUENCES_DIR, `${id}.json`);
+    await fsp.unlink(file);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(404).json({ success: false, error: 'Not found' });
+  }
+});
+
+app.get('/api/emulations/:id/export', async (req, res) => {
+  try {
+    const id = safeId(req.params.id);
+    const file = path.join(SEQUENCES_DIR, `${id}.json`);
+    const txt = await fsp.readFile(file, 'utf8');
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${id}.json"`);
+    res.status(200).send(txt);
+  } catch (e) {
+    res.status(404).json({ success: false, error: 'Not found' });
+  }
+});
+
+app.post('/api/emulations/import', async (req, res) => {
+  try {
+    const payload = req.body;
+    const list = Array.isArray(payload) ? payload : [payload];
+    const saved = [];
+    for (const item of list) {
+      if (!item || !item.name || !Array.isArray(item.steps)) continue;
+      const now = new Date().toISOString();
+      const _id = safeId(item.id || item.name);
+      const file = path.join(SEQUENCES_DIR, `${_id}.json`);
+      const record = {
+        id: _id,
+        name: String(item.name),
+        steps: item.steps,
+        createdAt: item.createdAt || now,
+        updatedAt: now
+      };
+      await fsp.writeFile(file, JSON.stringify(record, null, 2));
+      saved.push(_id);
+    }
+    res.json({ success: true, imported: saved.length, ids: saved });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// ==================================================
+// AUTOMATION API ROUTES
+// ==================================================
+app.get('/api/automation/rules', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  res.json({ success: true, rules: automationManager.getRules() });
+});
+
+app.get('/api/automation/stats', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  res.json({ success: true, stats: automationManager.getStats() });
+});
+
+app.post('/api/automation/rules', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    automationManager.addRule(req.body);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.put('/api/automation/rules/:id', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    automationManager.updateRule(req.params.id, req.body);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.delete('/api/automation/rules/:id', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    automationManager.removeRule(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(404).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.patch('/api/automation/rules/:id/enable', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    automationManager.enableRule(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(404).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.patch('/api/automation/rules/:id/disable', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    automationManager.disableRule(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(404).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.post('/api/automation/reload', async (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    await automationManager._loadRulesFromDisk();
+    automationManager._applySchedules();
+    const rules = automationManager.getRules();
+    res.json({ success: true, reloadedRules: rules.length });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// ==================================================
+// WIEGAND API ROUTES
+// ==================================================
+
+const WIEGAND_INLINE_CONFIG = {
+  ok: true,
+  chip: CHIP,
+  doors: [
+    {
+      door: 1,
+      name: 'Door 1 (Reader A, rewired to 13/16)',
+      d0: 17,
+      d1: 27,
+      readerId: 'reader1'
+    },
+    {
+      door: 2,
+      name: 'Door 2 (Reader B, shared w/ Door 4)',
+      d0: 22,
+      d1: 23,
+      readerId: 'reader2'
+    }
+  ],
+  reserved: [2, 3, 4, 7, 8, 9, 10, 11, 14, 15]
+};
+
+function getDoorConfig(doorNumber) {
+  const n = Number(doorNumber);
+  return WIEGAND_INLINE_CONFIG.doors.find(d => d.door === n) || null;
+}
+
+function resolveWiegandTarget({ door, readerId }) {
+  if (door != null) {
+    const dc = getDoorConfig(door);
+    if (!dc) throw new Error('Invalid door (must be 1 or 2)');
+    return { readerId: dc.readerId, doorCfg: dc };
+  }
+  if (!readerId) throw new Error('readerId or door required');
+  const doorCfg = WIEGAND_INLINE_CONFIG.doors.find(d => d.readerId === readerId) || null;
+  return { readerId, doorCfg };
+}
+
+app.get('/api/wiegand/config', (_req, res) => {
+  res.json(WIEGAND_INLINE_CONFIG);
+});
+
+app.get('/api/wiegand/status', (req, res) => {
+  const nativeExists = fs.existsSync(RESOLVED_WIEGAND_TX_PATH);
+  const nativeExecutable = nativeExists ? (() => {
+    try {
+      fs.accessSync(RESOLVED_WIEGAND_TX_PATH, fs.constants.X_OK);
+      return true;
+    } catch { return false; }
+  })() : false;
+
+  if (!wiegandManager) {
+    return res.status(503).json({
+      success: false,
+      error: 'Wiegand system not initialized',
+      nativeTransmitter: nativeExists,
+      nativeExecutable
+    });
+  }
+  res.json({ success: true, status: wiegandManager.getStatus(), nativeTransmitter: nativeExists, nativeExecutable });
+});
+
+app.get('/api/wiegand/readers', (req, res) => {
+  if (!wiegandManager) {
+    return res.status(503).json({ success: false, error: 'Wiegand system not initialized' });
+  }
+  res.json({ success: true, readers: wiegandManager.getReaders() });
+});
+
+app.get('/api/wiegand/readers/:readerId', (req, res) => {
+  if (!wiegandManager) {
+    return res.status(503).json({ success: false, error: 'Wiegand system not initialized' });
+  }
+  const reader = wiegandManager.getReader(req.params.readerId);
+  if (!reader) {
+    return res.status(404).json({ success: false, error: 'Reader not found' });
+  }
+  res.json({ success: true, reader });
+});
+
+app.post('/api/wiegand/send', async (req, res) => {
+  if (!wiegandManager) {
+    return res.status(503).json({ success: false, error: 'Wiegand system not initialized' });
+  }
+  try {
+    const { door, readerId, facility, card, format } = req.body || {};
+    const { readerId: targetReaderId, doorCfg } = resolveWiegandTarget({ door, readerId });
+
+    if (facility === undefined || card === undefined) {
+      return res.status(400).json({ success: false, error: 'facility and card required' });
+    }
+    const fmt = format != null ? Number(String(format).replace(/^W/i, '')) : null;
+    const fac = Number(facility);
+    const crd = Number(card);
+    if (!Number.isFinite(fac) || !Number.isFinite(crd)) {
+      return res.status(400).json({ success: false, error: 'facility and card must be numbers' });
+    }
+
+    const label = doorCfg ? `${doorCfg.name}` : `Reader ${targetReaderId}`;
+    console.log(`[Wiegand] Sending credential -> ${label}`);
+    if (doorCfg) console.log(`  GPIO: D0=${doorCfg.d0}, D1=${doorCfg.d1}`);
+    console.log(`  Format: ${fmt ? `W${fmt}` : '(auto/default)'}`);
+    console.log(`  Facility: ${fac}  Card: ${crd}`);
+
+    const result = await wiegandManager.sendCard(targetReaderId, fac, crd, fmt);
+
+    try {
+      logAccessEvent && logAccessEvent(`Door ${doorCfg ? doorCfg.door : targetReaderId} unlocked by Wiegand card ${crd}`, {
+        door: doorCfg ? doorCfg.door : null,
+        readerId: targetReaderId,
+        facility: fac,
+        card: crd,
+        method: 'wiegand'
+      });
+    } catch (e) {}
+
+    return res.json({
+      success: true,
+      message: 'Credential sent',
+      readerId: targetReaderId,
+      door: doorCfg ? doorCfg.name : null,
+      pins: doorCfg ? { d0: doorCfg.d0, d1: doorCfg.d1 } : null,
+      ...result
+    });
+  } catch (err) {
+    console.error('[Wiegand] Send error:', err && err.message ? err.message : err);
+    return res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/wiegand/raw', async (req, res) => {
+  if (!wiegandManager) {
+    return res.status(503).json({ success: false, error: 'Wiegand system not initialized' });
+  }
+  try {
+    const { readerId, bits } = req.body;
+    if (!readerId || !bits) {
+      return res.status(400).json({ success: false, error: 'readerId and bits required' });
+    }
+    const result = await wiegandManager.sendRaw(readerId, bits);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[Wiegand] Raw send error:', err && err.message ? err.message : err);
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/wiegand/test/:readerId', async (req, res) => {
+  if (!wiegandManager) {
+    return res.status(503).json({ success: false, error: 'Wiegand system not initialized' });
+  }
+  try {
+    const result = await wiegandManager.testReader(req.params.readerId);
+    res.json({ success: true, message: 'Test transmission successful', ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+// ==================================================
+// Native Wiegand transmitter endpoints
+// ==================================================
+app.post('/api/wiegand/transmit', (req, res) => {
+  const { d0Pin, d1Pin, facility, card, bits = 26, pulseWidth = 50 } = req.body;
+
+  if (d0Pin === undefined || d1Pin === undefined || facility === undefined || card === undefined) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required parameters: d0Pin, d1Pin, facility, card'
+    });
+  }
+
+  const d0 = Number(d0Pin), d1 = Number(d1Pin);
+  if (!Number.isInteger(d0) || !Number.isInteger(d1) || d0 < 0 || d0 > 27 || d1 < 0 || d1 > 27 || d0 === d1) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid GPIO pins. Must be integers 0-27 and different from each other'
+    });
+  }
+
+  const bitsNum = Number(bits);
+  const supportedFormats = [26, 30, 32, 34, 35, 37, 38, 40, 46, 48, 56, 64];
+  if (!supportedFormats.includes(bitsNum)) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid Wiegand format. Supported: ${supportedFormats.join(', ')} bits`
+    });
+  }
+
+  if (bitsNum === 26) {
+    if (facility < 0 || facility > 255) {
+      return res.status(400).json({ success: false, error: '26-bit format: facility must be 0-255' });
+    }
+    if (card < 0 || card > 65535) {
+      return res.status(400).json({ success: false, error: '26-bit format: card must be 0-65535' });
+    }
+  }
+
+  const binPath = RESOLVED_WIEGAND_TX_PATH;
+  if (!fs.existsSync(binPath)) {
+    return res.status(500).json({
+      success: false,
+      error: `Wiegand transmitter not found at ${binPath}. Please compile it first.`
+    });
+  }
+
+  const args = [String(d0), String(d1), String(facility), String(card), String(bitsNum), String(pulseWidth)];
+  console.log(`[WIEGAND-NATIVE] Command: ${binPath} ${args.join(' ')}`);
+  const startTime = Date.now();
+
+  const p = spawn(binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
+  p.stdout.on('data', d => {
+    const output = d.toString();
+    stdout += output;
+    const lines = output.split('\n');
+    lines.forEach(line => {
+      if (line.trim()) {
+        console.log(`[WIEGAND-NATIVE] ${line.trim()}`);
+      }
+    });
+    const binaryMatch = output.match(/Binary: ([01]+) \((\d+) bits\)/);
+    if (binaryMatch) {
+      const binary = binaryMatch[1];
+      const bits = binaryMatch[2];
+      console.log(`[WIEGAND-BINARY] ${bits}-bit: ${binary}`);
+    }
+  });
+  p.stderr.on('data', d => { stderr += d.toString(); });
+
+  p.on('error', (err) => {
+    const duration = Date.now() - startTime;
+    const result = {
+      timestamp: new Date().toISOString(), facility, card, bits: bitsNum, d0Pin: d0, d1Pin: d1, pulseWidth, duration,
+      success: false, output: stdout, error: err.message
+    };
+    wiegandHistory.unshift(result);
+    if (wiegandHistory.length > MAX_HISTORY) wiegandHistory.pop();
+    console.error('[WIEGAND-NATIVE] Spawn error:', err.message);
+    return res.status(500).json({ success: false, error: err.message, result });
+  });
+
+  p.on('exit', (code) => {
+    const duration = Date.now() - startTime;
+    const success = code === 0;
+    const result = {
+      timestamp: new Date().toISOString(), facility, card, bits: bitsNum, d0Pin: d0, d1Pin: d1, pulseWidth, duration,
+      success, output: stdout, error: success ? null : (stderr || `exit ${code}`)
+    };
+    wiegandHistory.unshift(result);
+    if (wiegandHistory.length > MAX_HISTORY) wiegandHistory.pop();
+
+    if (!success) {
+      console.error('[WIEGAND-NATIVE] Transmission failed:', result.error);
+      return res.status(500).json({ success: false, error: result.error, result });
+    }
+
+    console.log(`[WIEGAND-NATIVE] Transmission successful (${duration}ms)`);
+
+    try {
+      logAccessEvent && logAccessEvent(`Native Wiegand TX - d0:${d0} d1:${d1} card:${card} bits:${bitsNum}`, {
+        d0, d1, card, facility, bits: bitsNum, method: 'native'
+      });
+    } catch (e) {}
+
+    res.json({ success: true, message: 'Wiegand transmission completed', result });
+  });
+});
+
+app.get('/api/wiegand/history', (req, res) => {
+  const limit = Math.min(100, Number(req.query.limit) || 50);
+  res.json({ success: true, history: wiegandHistory.slice(0, limit), total: wiegandHistory.length });
+});
+
+app.delete('/api/wiegand/history', (req, res) => {
+  wiegandHistory.length = 0;
+  res.json({ success: true, message: 'History cleared' });
+});
+
+app.post('/api/wiegand/quick-test', (req, res, next) => {
+  req.body = {
+    d0Pin: 23,
+    d1Pin: 24,
+    facility: 123,
+    card: 45678,
+    bits: 26,
+    pulseWidth: 50
+  };
+  return app._router.handle(req, res, next);
+});
+
+// ==================================================
+// OSDP API ROUTES
+// ==================================================
+app.get('/api/osdp/status', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  res.json({ success: true, status: osdpManager.getStatus() });
+});
+
+app.get('/api/osdp/readers', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  res.json({ success: true, readers: osdpManager.getReaders() });
+});
+
+app.get('/api/osdp/readers/:readerId', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  const reader = osdpManager.getReader(req.params.readerId);
+  if (!reader) {
+    return res.status(404).json({ success: false, error: 'Reader not found' });
+  }
+  res.json({ success: true, reader });
+});
+
+app.post('/api/osdp/card-read', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const { readerId, facility, card, format } = req.body;
+    if (!readerId || facility === undefined || card === undefined) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'readerId, facility, and card required' 
+      });
+    }
+    
+    const cardData = { facility: Number(facility), card: Number(card) };
+    const cardFormat = format || 'wiegand26';
+    
+    const result = await osdpManager.sendCardRead(readerId, cardData, cardFormat);
+
+    try {
+      logAccessEvent && logAccessEvent(`OSDP card-read API used - reader ${readerId} card ${card}`, {
+        readerId, facility: cardData.facility, card: cardData.card, method: 'osdp_api'
+      });
+    } catch (e) {}
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[OSDP] Card read error:', err && err.message ? err.message : err);
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/keyset', async (req, res) => {
+  try {
+    if (!osdpManager) return res.status(503).json({ success: false, error: 'OSDP not initialized' });
+    const { readerId, keyHex } = req.body || {};
+    if (!readerId || !keyHex) return res.status(400).json({ success: false, error: 'readerId and keyHex required' });
+
+    if (typeof keyHex !== 'string' || !/^[0-9a-fA-F]+$/.test(keyHex) || (keyHex.length !== 32 && keyHex.length !== 64)) {
+      return res.status(400).json({ success: false, error: 'keyHex must be 32 (128-bit) or 64 hex chars' });
+    }
+
+    if (typeof osdpManager.applyKeyset === 'function') {
+      await osdpManager.applyKeyset(readerId, Buffer.from(keyHex, 'hex'));
+      try { logSystemEvent && logSystemEvent(`Applied keyset to reader ${readerId}`, 'info'); } catch (e) {}
+      return res.json({ success: true, message: 'KEYSET applied' });
+    } else {
+      return res.status(501).json({ success: false, error: 'osdpManager.applyKeyset not implemented' });
+    }
+  } catch (err) {
+    console.error('[OSDP API] keyset error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/led', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const { readerId, color, state, duration } = req.body;
+    if (!readerId || !color || !state) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'readerId, color, and state required' 
+      });
+    }
+    
+    const result = await osdpManager.setLED(
+      readerId, 
+      color, 
+      state, 
+      duration ? Number(duration) : 0
+    );
+
+    // Mirror LED to InteractiveReader UI
+    try {
+      const reader = osdpManager.readers.get(readerId);
+      if (reader && osdpManager._emitLedEvent) {
+        const dur = duration ? Number(duration) : 0;
+        const isTemp  = dur > 0;
+        const isBlink = state === 'blink' || state === 'flash';
+        const isOff   = state === 'off';
+        osdpManager._emitLedEvent(reader, isTemp ? {
+          temporary: {
+            controlName: 'set',
+            onColor:     isOff ? 'off' : color,
+            offColor:    isBlink ? 'off' : (isOff ? 'off' : color),
+            onTimeMs:    isBlink ? 500 : 1000,
+            offTimeMs:   isBlink ? 500 : 0,
+            timerMs:     dur,
+          }
+        } : {
+          permanent: {
+            controlName: 'set',
+            onColor:     isOff ? 'off' : color,
+            offColor:    'off',
+            onTimeMs:    isBlink ? 500 : 1000,
+            offTimeMs:   isBlink ? 500 : 0,
+          }
+        });
+      }
+    } catch(e) { console.warn('[LED] mirror emit failed:', e.message); }
+
+    try { logSystemEvent && logSystemEvent(`OSDP LED ${state} for reader ${readerId} color ${color}`, 'info'); } catch (e) {}
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[OSDP] LED control error:', err && err.message ? err.message : err);
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/buzzer', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const { readerId, duration } = req.body;
+    if (!readerId) {
+      return res.status(400).json({ success: false, error: 'readerId required' });
+    }
+    
+    const result = await osdpManager.buzz(readerId, duration ? Number(duration) : 200);
+    try { logSystemEvent && logSystemEvent(`OSDP buzzer triggered for reader ${readerId}`, 'info'); } catch (e) {}
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[OSDP] Buzzer control error:', err && err.message ? err.message : err);
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/keypad', async (req, res) => {
+  console.log('[OSDP Route] POST /api/osdp/keypad called');
+  console.log('[OSDP Route] Body:', JSON.stringify(req.body));
+
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+
+  try {
+    const { readerId, data, format, facilityCode } = req.body;
+
+    if (!readerId) {
+      return res.status(400).json({ success: false, error: 'readerId required' });
+    }
+    if (!data) {
+      return res.status(400).json({ success: false, error: 'keypad data required' });
+    }
+
+    const wiegandFormat = format || '8bit';
+    const fc = facilityCode ? parseInt(facilityCode, 10) : 0;
+
+    console.log(`[OSDP Route] Calling sendKeypadData: readerId=${readerId}, data=${data}, format=${wiegandFormat}, fc=${fc}`);
+    const result = await osdpManager.sendKeypadData(readerId, data, wiegandFormat, fc);
+
+    // Mirror buzzer to InteractiveReader UI
+    try {
+      const reader = osdpManager.readers.get(req.body.readerId);
+      if (reader && osdpManager._emitBuzzerEvent) {
+        osdpManager._emitBuzzerEvent(reader, {
+          toneName:    'default',
+          onTimeMs:    Number(req.body.duration) || 200,
+          offTimeMs:   0,
+          repeatCount: 1,
+        });
+      }
+    } catch(e) { console.warn('[BUZ] mirror emit failed:', e.message); }
+
+    try {
+      logAccessEvent && logAccessEvent(`OSDP keypad data sent to reader ${readerId}`, { readerId, dataLength: String(data).length, method: 'keypad' });
+    } catch (e) {}
+
+    console.log('[OSDP Route] sendKeypadData result:', JSON.stringify(result));
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[OSDP Route] ERROR:', err && err.message ? err.message : err);
+    console.error('[OSDP Route] Stack:', err && err.stack ? err.stack : '');
+    try {
+      logSecurityEvent && logSecurityEvent('OSDP keypad route error', 'warning', { error: err && err.message ? err.message : String(err) });
+    } catch (e) {}
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/test/:readerId', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = await osdpManager.testReader(req.params.readerId);
+    res.json({ success: true, message: 'Reader test successful', ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.put('/api/osdp/readers/:readerId', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = await osdpManager.updateReader(req.params.readerId, req.body);
+    res.json({ success: true, reader: result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.patch('/api/osdp/reader/:id', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = await osdpManager.updateReader(req.params.id, req.body);
+    res.json({ success: true, reader: result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/readers', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = await osdpManager.addReader(req.body);
+    res.json({ success: true, reader: result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.delete('/api/osdp/readers/:readerId', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    await osdpManager.removeReader(req.params.readerId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(404).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.get('/api/osdp/stats', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  res.json({ success: true, stats: osdpManager.getStats() });
+});
+
+app.get('/api/osdp/baudrate', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  res.json({ success: true, baudRate: osdpManager.config.baudRate });
+});
+
+app.post('/api/osdp/baudrate', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const baudRate = parseInt(req.body.baudRate, 10);
+    const valid = [9600, 19200, 38400, 57600, 115200, 230400];
+    if (!valid.includes(baudRate)) {
+      return res.status(400).json({ success: false, error: `Invalid baud rate. Valid: ${valid.join(', ')}` });
+    }
+    const result = await osdpManager.changeBaudRate(req.body.port, baudRate);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.get('/api/osdp/formats', (req, res) => {
+  if (!osdpManager) {
+    const fallback = [
+      { id: 'wiegand26', label: 'Wiegand 26-bit (8/16 + parity)', bitCount: 26 },
+      { id: 'wiegand34', label: 'Wiegand 34-bit (16/16 + parity)', bitCount: 34 },
+      { id: 'wiegand30', label: 'Wiegand 30-bit', bitCount: 30 },
+      { id: 'wiegand32', label: 'Wiegand 32-bit', bitCount: 32 },
+      { id: 'wiegand35', label: 'Wiegand 35-bit', bitCount: 35 },
+      { id: 'wiegand37', label: 'Wiegand 37-bit', bitCount: 37 },
+      { id: 'wiegand40', label: 'Wiegand 40-bit', bitCount: 40 },
+      { id: 'wiegand48', label: 'Wiegand 48-bit', bitCount: 48 },
+      { id: 'wiegand56', label: 'Wiegand 56-bit', bitCount: 56 },
+      { id: 'wiegand64', label: 'Wiegand 64-bit', bitCount: 64 },
+    ];
+    return res.json({ success: true, formats: fallback });
+  }
+
+  try {
+    const formats = (typeof osdpManager.getAvailableFormats === 'function')
+      ? osdpManager.getAvailableFormats()
+      : [
+          { id: 'wiegand26', label: 'Wiegand 26-bit (8/16 + parity)', bitCount: 26 },
+          { id: 'wiegand34', label: 'Wiegand 34-bit (16/16 + parity)', bitCount: 34 },
+          { id: 'wiegand30', label: 'Wiegand 30-bit', bitCount: 30 },
+          { id: 'wiegand32', label: 'Wiegand 32-bit', bitCount: 32 },
+          { id: 'wiegand35', label: 'Wiegand 35-bit', bitCount: 35 },
+          { id: 'wiegand37', label: 'Wiegand 37-bit', bitCount: 37 },
+          { id: 'wiegand40', label: 'Wiegand 40-bit', bitCount: 40 },
+          { id: 'wiegand48', label: 'Wiegand 48-bit', bitCount: 48 },
+          { id: 'wiegand56', label: 'Wiegand 56-bit', bitCount: 56 },
+          { id: 'wiegand64', label: 'Wiegand 64-bit', bitCount: 64 },
+          { id: 'hid-h10301', label: 'HID H10301 (26-bit)', bitCount: 26 },
+          { id: 'hid-h10302', label: 'HID H10302 (37-bit)', bitCount: 37 },
+          { id: 'hid-h10304', label: 'HID H10304 (34-bit)', bitCount: 34 },
+          { id: 'hid-corp1000-35', label: 'HID Corporate 1000 (35-bit)', bitCount: 35 },
+          { id: 'hid-corp1000-48', label: 'HID Corporate 1000 (48-bit)', bitCount: 48 },
+          { id: 'raw32', label: 'Raw 32-bit (no parity)', bitCount: 32 },
+          { id: 'raw36', label: 'Raw 36-bit (no parity)', bitCount: 36 },
+          { id: 'raw37', label: 'Raw 37-bit (no parity)', bitCount: 37 },
+        ];
+
+    res.json({ success: true, formats });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.get('/api/osdp/security', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const security = osdpManager.getSecurityInfo();
+    res.json({ success: true, security });
+  } catch (err) {
+    console.error('[OSDP] Get security info error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/security/keyset', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const { address, key } = req.body;
+    if (address === undefined || !key) {
+      return res.status(400).json({ success: false, error: 'address and key required' });
+    }
+    
+    const result = await osdpManager.setCustomSCBK(address, key);
+    
+    try {
+      logSecurityEvent && logSecurityEvent(`Custom SCBK set for reader at address 0x${address.toString(16)}`, 'info', { address });
+    } catch (e) {}
+    
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[OSDP] Set custom SCBK error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/security/reset', async (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const { address } = req.body;
+    if (address === undefined) {
+      return res.status(400).json({ success: false, error: 'address required' });
+    }
+    
+    const result = await osdpManager.resetToDefaultKey(address);
+    
+    try {
+      logSecurityEvent && logSecurityEvent(`Reset to SCBK-D for reader at address 0x${address.toString(16)}`, 'info', { address });
+    } catch (e) {}
+    
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[OSDP] Reset to default key error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/osdp/capture/enable', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = osdpManager.enableCaptureMode();
+    console.log('[OSDP] Packet capture enabled');
+    return res.json(result);
+  } catch (e) {
+    console.error('[OSDP] Enable capture error:', e && e.message ? e.message : e);
+    return res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.post('/api/osdp/capture/disable', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = osdpManager.disableCaptureMode();
+    console.log('[OSDP] Packet capture disabled');
+    return res.json(result);
+  } catch (e) {
+    console.error('[OSDP] Disable capture error:', e && e.message ? e.message : e);
+    return res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.get('/api/osdp/capture/packets', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = osdpManager.getCapturedPackets();
+    return res.json({ success: true, ...result });
+  } catch (e) {
+    console.error('[OSDP] Get captured packets error:', e && e.message ? e.message : e);
+    return res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+app.post('/api/osdp/capture/clear', (req, res) => {
+  if (!osdpManager) {
+    return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
+  }
+  try {
+    const result = osdpManager.clearCapturedPackets();
+    console.log('[OSDP] Captured packets cleared');
+    return res.json(result);
+  } catch (e) {
+    console.error('[OSDP] Clear captured packets error:', e && e.message ? e.message : e);
+    return res.status(500).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// ==================================================
+// OSDP SNIFFER API ROUTES (Pi-as-ACU reader probe)
+// ==================================================
+const osdpSniffer = new OSDPSniffer({ getOpenPorts: () => (osdpManager && osdpManager.serialPorts) ? osdpManager.serialPorts : new Map() });
+osdpSniffer.on('frame', f => io.emit('osdp-sniffer-frame', f));
+osdpSniffer.on('started', i => io.emit('osdp-sniffer-status', { active: true, ...i }));
+osdpSniffer.on('stopped', () => io.emit('osdp-sniffer-status', { active: false }));
+osdpSniffer.on('error', e => io.emit('osdp-sniffer-error', e));
+
+app.get('/api/osdp/sniffer/ports', async (_req, res) => {
+  try { res.json({ ports: await osdpSniffer.listPorts() }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/osdp/sniffer/status', (_req, res) => res.json(osdpSniffer.getStatus()));
+
+app.post('/api/osdp/sniffer/start', async (req, res) => {
+  try {
+    const { port, baud, address, pollMs } = req.body || {};
+    if (!port) return res.status(400).json({ error: 'port required' });
+    res.json(await osdpSniffer.start({ port, baud, address, pollMs }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/osdp/sniffer/stop', async (_req, res) => {
+  try { res.json(await osdpSniffer.stop()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ──────────────────────────────────────────────────
+// Maintain-tab interfaces — wraps sniffer port enumeration
+// so the Maintain tab sees every USB/onboard serial dongle,
+// not just the ones explicitly configured in osdp-config.json.
+// ──────────────────────────────────────────────────
+// Only ttyAMA0 is the IOplus RS485 port; ttyAMA1+ are unrelated Pi 5 UARTs
+function _isOsdpRelevantPort(p) {
+  return /\/dev\/tty(ACM|USB)\d+$/.test(p.path) || p.path === '/dev/ttyAMA0';
+}
+
+function _osdpPortToInterface(p) {
+  const portPath = p.path;
+  const acm = portPath.match(/ACM(\d+)/);
+  const usb = portPath.match(/USB(\d+)/);
+  const ama = portPath.match(/AMA(\d+)/);
+  const friendlyName = portPath === '/dev/ttyAMA0'
+    ? 'IOplus RS485 (onboard)'
+    : ama
+      ? 'UART ' + ama[1] + ' (ttyAMA' + ama[1] + ')'
+      : acm
+        ? 'USB Module ' + (parseInt(acm[1]) + 1)
+        : usb
+          ? 'USB Serial ' + (parseInt(usb[1]) + 1)
+          : portPath;
+  const readers = (osdpManager && osdpManager.getReaders)
+    ? osdpManager.getReaders().filter(r => r.serialPort === portPath)
+    : [];
+  const readerNums = readers
+    .map(r => parseInt(String(r.id).replace(/\D/g, '')))
+    .filter(n => !isNaN(n));
+  const readerRange = readerNums.length > 0
+    ? Math.min.apply(null, readerNums) + '-' + Math.max.apply(null, readerNums)
+    : undefined;
+  const isOpen = !!(osdpManager && osdpManager.serialPorts &&
+                    osdpManager.serialPorts.has(portPath) &&
+                    osdpManager.serialPorts.get(portPath).isOpen);
+  return {
+    id: portPath,
+    name: friendlyName,
+    port: portPath,
+    type: /ttyAMA/.test(portPath) ? 'onboard' : 'usb',
+    online: isOpen,
+    baudRate: 9600,
+    readerRange: readerRange,
+    manufacturer: p.manufacturer || null,
+    reserved: !!p.reserved,
+  };
+}
+
+app.get('/api/osdp/interfaces', async (_req, res) => {
+  try {
+    if (!osdpManager) return res.status(503).json({ success: false, error: 'OSDP not initialized' });
+    const ports = (await osdpSniffer.listPorts()).filter(_isOsdpRelevantPort);
+    const interfaces = ports.map(_osdpPortToInterface);
+    const _cfgPorts = osdpManager.config?.serialPorts || [];
+    for (const _if of interfaces) {
+      const _c = _cfgPorts.find(p => p.port === _if.port);
+      if (_c && _c.baudRate) _if.baudRate = _c.baudRate;
+    }
+    res.json({ success: true, interfaces: interfaces, count: interfaces.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/osdp/reader', async (req, res) => {
+  if (!osdpManager) return res.status(503).json({ success: false, error: 'OSDP not initialized' });
+  try {
+    const { name, address, serialPort, secureChannel, capabilities } = req.body || {};
+    if (!name || address === undefined || !serialPort) {
+      return res.status(400).json({ success: false, error: 'name, address, serialPort are required' });
+    }
+    const reader = await osdpManager.addReader({
+      name: String(name).trim(),
+      address: Number(address),
+      serialPort: String(serialPort),
+      secureChannel: !!secureChannel,
+      enabled: true,
+      capabilities: Array.isArray(capabilities) && capabilities.length > 0
+        ? capabilities
+        : ['LED', 'BUZZER', 'CARD', 'KEYPAD'],
+    });
+    res.json({ success: true, reader });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/osdp/reader/:id', async (req, res) => {
+  if (!osdpManager) return res.status(503).json({ success: false, error: 'OSDP not initialized' });
+  try {
+    const result = await osdpManager.deleteReader(req.params.id);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/osdp/detect', async (_req, res) => {
+  try {
+    if (!osdpManager) return res.status(503).json({ success: false, error: 'OSDP not initialized' });
+    const ports = (await osdpSniffer.listPorts()).filter(_isOsdpRelevantPort);
+    // Auto-open any newly-detected USB serial ports so they go ONLINE.
+    const { SerialPort } = require('serialport');
+    for (const p of ports) {
+      const portPath = p.path;
+      if (/ACM|USB/.test(portPath) && !p.reserved && !osdpManager.serialPorts.has(portPath)) {
+        try {
+          const sp = new SerialPort({
+            path: portPath, baudRate: 9600, dataBits: 8, parity: 'none', stopBits: 1,
+            autoOpen: false, rtscts: false, xon: false, xoff: false
+          });
+          await new Promise((resolve, reject) => {
+            sp.open(err => { if (err) reject(err); else resolve(); });
+          });
+          sp.set({ rts: false }, () => {});
+          sp.on('error', e => console.error('[OSDP] ' + portPath + ' error:', e.message));
+          sp.on('data', d => osdpManager.handleIncomingData(d, portPath));
+          osdpManager.serialPorts.set(portPath, sp);
+          console.log('[OSDP] Auto-opened newly-detected port: ' + portPath);
+        } catch (e) {
+          console.warn('[OSDP] Could not auto-open ' + portPath + ': ' + e.message);
+        }
+      }
+    }
+    const interfaces = ports.map(_osdpPortToInterface);
+    res.json({ success: true, interfaces: interfaces, count: interfaces.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==================================================
+// NFC API ROUTES
+// ==================================================
+app.get('/api/nfc/status', (req, res) => {
+  if (!nfcManager) {
+    return res.json({ success: true, enabled: false, error: 'NFC Manager not initialized', status: null });
+  }
+  const status = nfcManager.getStatus();
+  res.json({ success: true, enabled: nfcManager.enabled, status });
+});
+
+app.post('/api/nfc/start', async (req, res) => {
+  if (!nfcManager) {
+    return res.status(503).json({ success: false, error: 'NFC Manager not initialized' });
+  }
+  try {
+    await nfcManager.startReading();
+    res.json({ success: true, message: 'NFC reading started' });
+  } catch (err) {
+    console.error('[NFC API] Start error:', err && err.message ? err.message : err);
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/nfc/stop', (req, res) => {
+  if (!nfcManager) {
+    return res.status(503).json({ success: false, error: 'NFC Manager not initialized' });
+  }
+  try {
+    nfcManager.stopReading();
+    res.json({ success: true, message: 'NFC reading stopped' });
+  } catch (err) {
+    console.error('[NFC API] Stop error:', err && err.message ? err.message : err);
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.get('/api/nfc/config', (req, res) => {
+  if (!nfcManager) {
+    return res.status(503).json({ success: false, error: 'NFC Manager not initialized' });
+  }
+  res.json({ success: true, config: nfcManager.config });
+});
+
+app.get('/api/nfc/bridge/status', (req, res) => {
+  if (!nfcBridge) {
+    return res.json({ success: true, available: false, enabled: false, message: 'Bridge not initialized' });
+  }
+  const stats = nfcBridge.getStats();
+  res.json({ success: true, available: true, ...stats });
+});
+
+app.post('/api/nfc/bridge/enable', (req, res) => {
+  if (!nfcBridge) {
+    return res.status(503).json({ success: false, error: 'Bridge not initialized' });
+  }
+  try {
+    nfcBridge.enable();
+    res.json({ success: true, message: 'Bridge enabled' });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/nfc/bridge/disable', (req, res) => {
+  if (!nfcBridge) {
+    return res.status(503).json({ success: false, error: 'Bridge not initialized' });
+  }
+  try {
+    nfcBridge.disable();
+    res.json({ success: true, message: 'Bridge disabled' });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.post('/api/nfc/bridge/config', (req, res) => {
+  if (!nfcBridge) {
+    return res.status(503).json({ success: false, error: 'Bridge not initialized' });
+  }
+  try {
+    const { defaultReaderId, defaultFormat, defaultFacilityCode } = req.body;
+    nfcBridge.setConfig({
+      defaultReaderId: defaultReaderId || nfcBridge.config.defaultReaderId,
+      defaultFormat: defaultFormat || nfcBridge.config.defaultFormat,
+      defaultFacilityCode: defaultFacilityCode !== undefined ? defaultFacilityCode : nfcBridge.config.defaultFacilityCode
+    });
+    res.json({ success: true, config: nfcBridge.getConfig() });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.get('/api/nfc/bridge/test', async (req, res) => {
+  if (!nfcBridge) {
+    return res.status(503).json({ success: false, error: 'Bridge not initialized' });
+  }
+  try {
+    const result = await nfcBridge.testConnection();
+    res.json({ success: true, connected: result, message: result ? 'Bridge connection OK' : 'Bridge connection failed' });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err && err.message ? err.message : String(err) });
+  }
+});
+
+app.get('/api/nfc/bridge/stats', (req, res) => {
+  if (!nfcBridge) {
+    return res.json({ success: true, stats: null });
+  }
+  res.json({ success: true, stats: nfcBridge.getStats() });
+});
+
+// ---- Socket.IO ----
+io.on('connection', (socket) => {
+  console.log('[Socket.IO] Client connected:', socket.id);
+  const s = {}; 
+  states.forEach((v, p) => s[p] = v);
+  socket.emit('initial_states', s);
+  
+  socket.on('set_gpio', ({ pin, value, pulseMs }) => {
+    if (Number.isInteger(pulseMs) && pulseMs > 0) {
+      pulse(pin, pulseMs).catch(err => console.error('[GPIO] Pulse error:', err && err.message ? err.message : err));
+    } else {
+      try {
+        holdLevel(pin, value ? 1 : 0);
+        io.emit('gpio_state_change', { pin, value: value ? 1 : 0 });
+      } catch (e) {
+        console.error('[Socket.IO] GPIO set blocked:', e && e.message ? e.message : e);
+      }
+    }
+  });
+
+  socket.on('nfc:getStatus', () => {
+    if (nfcManager) {
+      socket.emit('nfc:status', nfcManager.getStatus());
+    } else {
+      socket.emit('nfc:status', { enabled: false, error: 'NFC not available' });
+    }
+  });
+
+  socket.on('nfc:start', async () => {
+    if (nfcManager) {
+      try {
+        await nfcManager.startReading();
+        socket.emit('nfc:started');
+      } catch (err) {
+        socket.emit('nfc:error', { error: err && err.message ? err.message : String(err) });
+      }
+    } else {
+      socket.emit('nfc:error', { error: 'NFC not available' });
+    }
+  });
+
+  socket.on('nfc:stop', () => {
+    if (nfcManager) {
+      nfcManager.stopReading();
+      socket.emit('nfc:stopped');
+    } else {
+      socket.emit('nfc:error', { error: 'NFC not available' });
+    }
+  });
+
+  socket.on('nfc:bridge:getStatus', () => {
+    if (nfcBridge) {
+      socket.emit('nfc:bridge:status', nfcBridge.getStats());
+    } else {
+      socket.emit('nfc:bridge:status', { available: false });
+    }
+  });
+
+  socket.on('nfc:bridge:enable', () => {
+    if (nfcBridge) {
+      nfcBridge.enable();
+      socket.emit('nfc:bridge:enabled');
+    } else {
+      socket.emit('nfc:error', { error: 'Bridge not available' });
+    }
+  });
+
+  socket.on('nfc:bridge:disable', () => {
+    if (nfcBridge) {
+      nfcBridge.disable();
+      socket.emit('nfc:bridge:disabled');
+    } else {
+      socket.emit('nfc:error', { error: 'Bridge not available' });
+    }
+  });
+  
+  socket.on('disconnect', () => {
+    console.log('[Socket.IO] Client disconnected:', socket.id);
+  });
+});
+
+// ---- Cleanup ----
+process.on('SIGINT', async () => {
+  console.log('\n[Cleanup] Cleaning up gpioset holders...');
+  procs.forEach((p) => { 
+    try { process.kill(p.pid, 'SIGKILL'); } catch (e) {} 
+  });
+
+  if (nfcManager && typeof nfcManager.close === 'function') {
+    try {
+      await nfcManager.close();
+      console.log('[NFC] Closed');
+    } catch (err) {
+      console.error('[NFC] Cleanup error:', err && err.message ? err.message : err);
+    }
+  }
+
+  gpioQueue.destroy();
+  console.log('[Queue] Destroyed');
+
+  if (switchManager) {
+    try {
+      console.log('[Switch] Restoring held ports before shutdown...');
+      await switchManager.revertAll('server shutting down');
+      await switchManager.shutdown();
+    } catch (e) { console.error('[Switch] Shutdown revert failed:', e.message); }
+  }
+
+  try { logSystemEvent && logSystemEvent('System shutting down', 'info'); } catch (e) {}
+
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('[Server] SIGTERM received, cleaning up...');
+  gpioQueue.destroy();
+  process.exit(0);
+});
+
+// ---- Start Server ----
+const PORT = process.env.PORT || 3001;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[Server] Port ${PORT} in use — killing existing process and retrying...`);
+    require('child_process').exec(`fuser -k ${PORT}/tcp`, () => {
+      setTimeout(() => server.listen(PORT, '0.0.0.0'), 1500);
+    });
+  } else { throw err; }
+});
+server.listen(PORT, '0.0.0.0', () => {
+  const services = {
+    'Automation': createServiceInfo(!!automationManager, automationManager ? {
+      'Rules': typeof automationManager.getRules === 'function' ? automationManager.getRules().length : undefined,
+      'Active': automationManager?.activeRules ?? undefined
+    } : null),
+    
+    'Wiegand': createServiceInfo(!!wiegandManager, (wiegandManager ? {
+      'Reserved Pins': Array.from(wiegandManager.reservedPins || []).join(', '),
+      'Readers': typeof wiegandManager.getReaders === 'function' ? wiegandManager.getReaders().length : undefined
+    } : null)),
+    
+    'OSDP': createServiceInfo(!!osdpManager, (osdpManager ? {
+      'Readers': osdpManager.readers ? (osdpManager.readers.size || Object.keys(osdpManager.readers).length) : 0,
+      'Port': osdpManager.config?.serialPort || 'N/A'
+    } : null)),
+    
+    'NFC': createServiceInfo(!!nfcManager && !!nfcManager.enabled, (nfcManager && nfcManager.enabled ? {
+      'Device': nfcManager.deviceType || 'PN532',
+      'Mode': nfcManager.mode || 'Reader'
+    } : null)),
+    
+    'Bridge': createServiceInfo(!!nfcBridge && typeof nfcBridge.isEnabled === 'function' && nfcBridge.isEnabled(), (nfcBridge ? {
+      'Mode': nfcBridge.mode || 'Auto',
+      'Status': 'Active'
+    } : null)),
+    
+    'Native TX': createServiceInfo(fs.existsSync(RESOLVED_WIEGAND_TX_PATH), fs.existsSync(RESOLVED_WIEGAND_TX_PATH) ? {
+      'Path': RESOLVED_WIEGAND_TX_PATH,
+      'Version': '2.0'
+    } : null),
+    
+    'Format API': createServiceInfo(true, {
+      'Formats': (typeof (formatRoutes && formatRoutes.getFormatsCount) === 'function') ? formatRoutes.getFormatsCount() : 'standard',
+      'Custom': (typeof (formatRoutes && formatRoutes.getCustomFormatsCount) === 'function') ? formatRoutes.getCustomFormatsCount() : 0
+    }),
+
+    'GPIO Queue': createServiceInfo(true, {
+      'Max Burst': gpioQueue.config.maxBurstCommands + '/sec',
+      'Queue Size': gpioQueue.config.maxQueueSize,
+      'Min Delay': gpioQueue.config.minDelayBetweenCommands + 'ms'
+    })
+  };
+
+  const startupInfo = {
+    title: 'GPIO Control Server (libgpiod) + Queue Protection',
+    version: '2.1',
+    chip: CHIP,
+    port: PORT,
+    binding: '0.0.0.0',
+    services,
+    buildInfo: process.env.BUILD_INFO || null,
+    timestamp: new Date().toISOString()
+  };
+
+  if (logger && typeof logger.log === 'function') {
+    logger.log(startupInfo);
+  } else {
+    console.log('--- GPIO Control Server ---');
+    console.log('Version:', startupInfo.version);
+    console.log('Chip:', startupInfo.chip);
+    console.log('Port:', startupInfo.port);
+    console.log('Binding:', startupInfo.binding);
+    console.log('Services:', Object.keys(services).map(k => `${k}: ${services[k].ok ? 'ENABLED' : 'DISABLED'}`).join(', '));
+    console.log('Ready to accept connections');
+  }
+
+  try {
+    logSystemEvent && logSystemEvent('System started with GPIO queue protection', 'info');
+  } catch (e) {}
+
+  logServerStatus();
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// NETWORK CONFIGURATION API
+// Read and write Pi network settings via dhcpcd.conf / hostname
+// ══════════════════════════════════════════════════════════════════════════
+
+const DHCPCD_CONF = '/etc/dhcpcd.conf';
+const HOSTNAME_FILE = '/etc/hostname';
+const HOSTS_FILE = '/etc/hosts';
+
+// Parse dhcpcd.conf and extract static config for a given interface
+function parseDhcpcd(content, iface) {
+  const lines = content.split('\n');
+  let inBlock = false;
+  const cfg = { mode: 'dhcp', iface, ip: '', prefix: '24', gateway: '', dns: '' };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('#')) continue;
+    if (trimmed === `interface ${iface}`) { inBlock = true; continue; }
+    if (inBlock && trimmed.startsWith('interface ')) { inBlock = false; continue; }
+    if (!inBlock) continue;
+    const m_ip  = trimmed.match(/^static ip_address=(.+)/);
+    const m_gw  = trimmed.match(/^static routers=(.+)/);
+    const m_dns = trimmed.match(/^static domain_name_servers=(.+)/);
+    if (m_ip)  { cfg.mode = 'static'; const parts = m_ip[1].split('/'); cfg.ip = parts[0]; cfg.prefix = parts[1] || '24'; }
+    if (m_gw)  { cfg.gateway = m_gw[1].trim(); }
+    if (m_dns) { cfg.dns = m_dns[1].trim(); }
+  }
+  return cfg;
+}
+
+// Remove existing static block for an interface from dhcpcd.conf
+function removeDhcpcdBlock(content, iface) {
+  const lines = content.split('\n');
+  const out = [];
+  let inBlock = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === `interface ${iface}`) { inBlock = true; continue; }
+    if (inBlock && trimmed.startsWith('interface ')) { inBlock = false; }
+    if (!inBlock) out.push(line);
+  }
+  // Strip trailing blank lines we may have left
+  while (out.length && out[out.length - 1].trim() === '') out.pop();
+  return out.join('\n');
+}
+
+// GET /api/network/status — live interface info
+app.get('/api/network/status', async (req, res) => {
+  try {
+    const [ipOut, hostnameOut, ifaceOut] = await Promise.all([
+      execAsync('hostname -I 2>/dev/null').catch(() => ({ stdout: '' })),
+      execAsync('hostname 2>/dev/null').catch(() => ({ stdout: 'raspberrypi' })),
+      execAsync("ip -o link show | awk '{print $2}' | tr -d : | grep -v lo 2>/dev/null").catch(() => ({ stdout: '' })),
+    ]);
+
+    const ips = ipOut.stdout.trim().split(/\s+/).filter(Boolean);
+    const hostname = hostnameOut.stdout.trim();
+    const interfaces = ifaceOut.stdout.trim().split('\n').filter(Boolean);
+
+    // Get detailed interface info
+    const ifDetails = {};
+    for (const iface of interfaces) {
+      try {
+        const { stdout } = await execAsync(`ip addr show ${iface} 2>/dev/null`);
+        const ipMatch = stdout.match(/inet (\S+)/);
+        const macMatch = stdout.match(/link\/ether (\S+)/);
+        const stateMatch = stdout.match(/state (\S+)/);
+        ifDetails[iface] = {
+          ip: ipMatch ? ipMatch[1] : null,
+          mac: macMatch ? macMatch[1] : null,
+          state: stateMatch ? stateMatch[1] : 'UNKNOWN',
+        };
+      } catch (e) { ifDetails[iface] = { ip: null, mac: null, state: 'ERROR' }; }
+    }
+
+    res.json({ success: true, hostname, ips, interfaces, ifDetails });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/network/config?iface=eth0 — read dhcpcd.conf config for interface
+app.get('/api/network/config', async (req, res) => {
+  const iface = req.query.iface || 'eth0';
+  try {
+    const hostnameOut = await execAsync('hostname').catch(() => ({ stdout: 'raspberrypi' }));
+    let dhcpcdContent = '';
+    try { dhcpcdContent = await fs.promises.readFile(DHCPCD_CONF, 'utf8'); } catch (e) { dhcpcdContent = ''; }
+    const cfg = parseDhcpcd(dhcpcdContent, iface);
+    res.json({ success: true, hostname: hostnameOut.stdout.trim(), ...cfg });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/network/config — apply network config
+// Body: { iface, mode:'dhcp'|'static', ip, prefix, gateway, dns, hostname }
+app.post('/api/network/config', async (req, res) => {
+  const { iface = 'eth0', mode = 'dhcp', ip, prefix = '24', gateway, dns, hostname } = req.body;
+  try {
+    // 1. Update hostname if changed
+    if (hostname) {
+      const currentHostname = (await execAsync('hostname').catch(() => ({ stdout: '' }))).stdout.trim();
+      if (hostname !== currentHostname) {
+        await fs.promises.writeFile(HOSTNAME_FILE, hostname + '\n');
+        // Update /etc/hosts too
+        let hosts = await fs.promises.readFile(HOSTS_FILE, 'utf8').catch(() => '');
+        hosts = hosts.replace(
+          new RegExp(`^(127\.0\.1\.1\s+)${currentHostname}`, 'm'),
+          `$1${hostname}`
+        );
+        if (!hosts.includes('127.0.1.1')) {
+          hosts += `\n127.0.1.1\t${hostname}\n`;
+        }
+        await fs.promises.writeFile(HOSTS_FILE, hosts);
+        await execAsync(`hostname ${hostname}`).catch(() => {});
+        console.log(`[Network] Hostname changed to: ${hostname}`);
+      }
+    }
+
+    // 2. Update dhcpcd.conf
+    let content = await fs.promises.readFile(DHCPCD_CONF, 'utf8').catch(() => '');
+    content = removeDhcpcdBlock(content, iface);
+
+    if (mode === 'static') {
+      if (!ip) return res.status(400).json({ success: false, error: 'IP address required for static mode' });
+      const block = [
+        '',
+        `interface ${iface}`,
+        `static ip_address=${ip}/${prefix}`,
+        gateway ? `static routers=${gateway}` : '',
+        dns     ? `static domain_name_servers=${dns}` : '',
+      ].filter(l => l !== null && (l === '' || l.trim() !== '')).join('\n');
+      content = content + block;
+    }
+
+    await fs.promises.writeFile(DHCPCD_CONF, content);
+    console.log(`[Network] dhcpcd.conf updated — iface=${iface} mode=${mode}`);
+
+    // 3. Restart dhcpcd to apply (non-blocking — client may lose connection briefly)
+    execAsync('systemctl restart dhcpcd 2>/dev/null || service dhcpcd restart 2>/dev/null').catch(() => {});
+
+    res.json({
+      success: true,
+      message: mode === 'static'
+        ? `Static IP ${ip}/${prefix} applied to ${iface}. Network restarting — reconnect if needed.`
+        : `DHCP mode applied to ${iface}. Network restarting.`,
+      warning: 'If changing to a new static IP, reconnect to the new address.',
+    });
+  } catch (e) {
+    console.error('[Network] Config write failed:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/network/interfaces — list available interfaces
+app.get('/api/network/interfaces', async (req, res) => {
+  try {
+    const { stdout } = await execAsync("ip -o link show | awk '{print $2}' | tr -d : | grep -v lo");
+    const interfaces = stdout.trim().split('\n').filter(Boolean);
+    res.json({ success: true, interfaces });
+  } catch (e) {
+    res.json({ success: true, interfaces: ['eth0', 'wlan0'] });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+
+module.exports = { app, server, logger: logger || console, logServerStatus };
+
+

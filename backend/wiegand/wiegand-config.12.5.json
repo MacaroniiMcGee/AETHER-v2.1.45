@@ -1,0 +1,143 @@
+{
+  "version": "3.0",
+  "description": "2 Wiegand Readers with Separate RX/TX Pins - FULL FORMAT SUPPORT (63 formats)",
+  "chip": "gpiochip0",
+  "readers": [
+    {
+      "id": "door1-reader-in",
+      "name": "Main Door",
+      "door": "Door 1",
+      "direction": "in",
+      "pins": {
+        "d0": 23,
+        "d1": 24
+      },
+      "txPins": {
+        "d0": 12,
+        "d1": 13
+      },
+      "timing": {
+        "pulseUs": 50,
+        "spaceUs": 1000
+      },
+      "enabled": true,
+      "notes": "RX: GPIO 23,24 (OSDP reads) | TX: GPIO 12,13 (Wiegand transmit)"
+    },
+    {
+      "id": "door2-reader-in",
+      "name": "Back Door",
+      "door": "Door 2",
+      "direction": "in",
+      "pins": {
+        "d0": 16,
+        "d1": 20
+      },
+      "txPins": {
+        "d0": 5,
+        "d1": 6
+      },
+      "timing": {
+        "pulseUs": 50,
+        "spaceUs": 1000
+      },
+      "enabled": true,
+      "notes": "RX: GPIO 16,20 (OSDP reads) | TX: GPIO 5,6 (Wiegand transmit)"
+    }
+  ],
+  "nfc_reader": {
+    "enabled": true,
+    "type": "PN532",
+    "interface": "i2c",
+    "i2c_address": "0x24",
+    "pins": {
+      "sda": 2,
+      "scl": 3
+    },
+    "hardware_reserved": true
+  },
+  "rs485_hat": {
+    "enabled": true,
+    "type": "Waveshare RS485 CAN HAT",
+    "interface": "spi",
+    "pins": {
+      "ce1": 7,
+      "ce0": 8,
+      "miso": 9,
+      "mosi": 10,
+      "sclk": 11,
+      "irq": 25
+    },
+    "hardware_reserved": true
+  },
+  "io_map": {
+    "door1": {
+      "lockTrigger": 18,
+      "auxRelay": 17,
+      "doorPosition": 19,
+      "rexSensor": 21,
+      "lockSensor": 22
+    },
+    "door2": {
+      "lockTrigger": 26,
+      "auxRelay": 4,
+      "doorPosition": 27,
+      "rexSensor": null,
+      "lockSensor": null
+    }
+  },
+  "defaultFormat": 26,
+  "supportedFormats": [
+    26, 30, 32, 34, 35, 37, 38, 40, 46, 48, 56, 64, 75
+  ],
+  "formatCategories": {
+    "wiegand": [26, 30, 32, 34, 35, 37, 38, 40, 46, 48, 56, 64],
+    "hid": [26, 34, 35, 36, 37, 64],
+    "awid": [26, 34, 37, 50],
+    "indala": [26, 29],
+    "em": [40, 64],
+    "mifare": [32, 56],
+    "piv": [64, 75],
+    "proprietary": [32, 40, 64],
+    "generic": [8, 16, 24, 32]
+  },
+  "hardwareReservedPins": {
+    "i2c_nfc": [2, 3],
+    "spi_rs485": [7, 8, 9, 10, 11, 25],
+    "wiegand_rx": [16, 20, 23, 24],
+    "wiegand_tx": [5, 6, 12, 13]
+  },
+  "availableIOPins": [4, 17, 18, 19, 21, 22, 26, 27],
+  "notes": [
+    "VERSION 3.0 - COMPREHENSIVE FORMAT SUPPORT",
+    "",
+    "=== SUPPORTED FORMATS (63 total) ===",
+    "Standard Wiegand: W26, W30, W32, W34, W35, W37, W38, W40, W46, W48, W56, W64",
+    "HID Formats: H10301(26), H10302(37), H10304(37), H10320(36), Corporate 1000(35), SEOS(64)",
+    "AWID: 26-bit, 34-bit, 37-bit, 50-bit",
+    "Indala: 26-bit, 29-bit",
+    "EM Proximity: EM4100(40), EM4102(64)",
+    "MIFARE/NFC: UID 32-bit, UID 56-bit",
+    "Government PIV: PIV/FASC-N(75), CAC(64)",
+    "Proprietary: CASI Rusco, Keri, Kantech, STid, LEGIC",
+    "Testing: Generic 8, 16, 24, 32-bit",
+    "",
+    "=== PIN ALLOCATION ===",
+    "Hardware Reserved: 2,3,7,8,9,10,11,25 (I2C + SPI)",
+    "Wiegand RX (OSDP): 16,20,23,24 (read cards)",
+    "Wiegand TX (Send): 5,6,12,13 (transmit cards)",
+    "Door I/O: 4,17,18,19,21,22,26,27 (locks, sensors)",
+    "",
+    "=== DOOR 1 (Main) ===",
+    "RX Pins: GPIO 23 (D0), GPIO 24 (D1) - OSDP reads cards",
+    "TX Pins: GPIO 12 (D0), GPIO 13 (D1) - Send credentials",
+    "Lock: GPIO 18 | Aux: GPIO 17 | Door: GPIO 19 | REX: GPIO 21 | Sensor: GPIO 22",
+    "",
+    "=== DOOR 2 (Back) ===",
+    "RX Pins: GPIO 16 (D0), GPIO 20 (D1) - OSDP reads cards",
+    "TX Pins: GPIO 5 (D0), GPIO 6 (D1) - Send credentials",
+    "Lock: GPIO 26 | Aux: GPIO 4 | Door: GPIO 27",
+    "",
+    "OSDP can read cards while Wiegand transmits simultaneously!",
+    "All 63 credential formats supported for transmission"
+  ]
+}

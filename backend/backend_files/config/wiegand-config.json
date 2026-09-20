@@ -1,0 +1,161 @@
+{
+  "version": "5.0-sequent",
+  "description": "Sequent IOplus Configuration - 4 Wiegand RX Readers + 4 OSDP Readers",
+  "chip": "gpiochip0",
+  "readers": [
+    {
+      "id": "reader-1",
+      "name": "Main Entrance",
+      "door": 1,
+      "pins": {
+        "d0": 17,
+        "d1": 27
+      },
+      "enabled": true
+    },
+    {
+      "id": "reader-2",
+      "name": "Back Door",
+      "door": 2,
+      "pins": {
+        "d0": 22,
+        "d1": 23
+      },
+      "enabled": true
+    },
+    {
+      "id": "reader-3",
+      "name": "Side Door",
+      "door": 3,
+      "pins": {
+        "d0": 24,
+        "d1": 25
+      },
+      "enabled": true
+    },
+    {
+      "id": "reader-4",
+      "name": "Elevator",
+      "door": 4,
+      "pins": {
+        "d0": 5,
+        "d1": 6
+      },
+      "enabled": true
+    }
+  ],
+  "osdp_readers": [
+    {
+      "id": "osdp-1",
+      "name": "Main OSDP",
+      "door": 1,
+      "pins": {
+        "tx": 12,
+        "rx": 13
+      },
+      "address": 0,
+      "enabled": true
+    },
+    {
+      "id": "osdp-2",
+      "name": "Back OSDP",
+      "door": 2,
+      "pins": {
+        "tx": 16,
+        "rx": 26
+      },
+      "address": 1,
+      "enabled": true
+    },
+    {
+      "id": "osdp-3",
+      "name": "Side OSDP",
+      "door": 3,
+      "pins": {
+        "tx": 19,
+        "rx": 20
+      },
+      "address": 2,
+      "enabled": true
+    },
+    {
+      "id": "osdp-4",
+      "name": "Elevator OSDP",
+      "door": 4,
+      "pins": {
+        "tx": 21,
+        "rx": 4
+      },
+      "address": 3,
+      "enabled": true
+    }
+  ],
+  "sequent_ioplus": {
+    "enabled": true,
+    "type": "IOplus Home Automation",
+    "interface": "i2c",
+    "i2c_address": "0x28",
+    "pins": {
+      "sda": 2,
+      "scl": 3
+    },
+    "hardware_reserved": true,
+    "relays": 8,
+    "digital_inputs": 8
+  },
+  "hardwareReservedPins": {
+    "i2c_sequent": [
+      2,
+      3
+    ],
+    "spi_rs485": [],
+    "wiegand_rx": [
+      17,
+      27,
+      22,
+      23,
+      24,
+      25,
+      5,
+      6
+    ],
+    "osdp_serial": [
+      12,
+      13,
+      16,
+      26,
+      19,
+      20,
+      21,
+      4
+    ]
+  },
+  "availableIOPins": [],
+  "notes": [
+    "VERSION 5.0 - SEQUENT IOPLUS CONFIGURATION",
+    "",
+    "=== HARDWARE ===",
+    "Sequent IOplus: 8 Relays + 8 Supervised Inputs + 8 Digital Inputs",
+    "I2C Address: 0x28 (GPIO 2, 3)",
+    "",
+    "=== PIN ALLOCATION ===",
+    "Hardware Reserved (I2C): 2, 3",
+    "Wiegand Readers (RX): 17,27,22,23,24,25,5,6 (4 readers)",
+    "OSDP Readers (Serial): 12,13,16,26,19,20,21,4 (4 readers)",
+    "",
+    "=== DOOR MAPPING ===",
+    "Door 1: Wiegand(17,27) | OSDP(12,13) | Relay 0 | Input 0 | ADC 1",
+    "Door 2: Wiegand(22,23) | OSDP(16,26) | Relay 1 | Input 1 | ADC 2",
+    "Door 3: Wiegand(24,25) | OSDP(19,20) | Relay 2 | Input 2 | ADC 3",
+    "Door 4: Wiegand(5,6)   | OSDP(21,4)  | Relay 3 | Input 3 | ADC 4",
+    "",
+    "=== I/O CONTROL ===",
+    "All relay/input control via Sequent IOplus (not direct GPIO)",
+    "Use /api/gpio endpoints for relay control",
+    "Use /api/supervision endpoints for supervised zone monitoring",
+    "",
+    "=== NO GENERAL PURPOSE I/O ===",
+    "All GPIO pins are reserved for specific functions.",
+    "No pins available for general I/O expansion."
+  ]
+}

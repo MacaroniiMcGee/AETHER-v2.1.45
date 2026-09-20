@@ -1,0 +1,8 @@
+{
+  "watch": ["server.js", "osdp/", "nfc/"],
+  "ext": "js",
+  "ignore": [
+    "*.json",
+    "node_modules/"
+  ]
+}

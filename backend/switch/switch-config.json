@@ -1,0 +1,73 @@
+{
+  "enabled": true,
+  "globalDenyPorts": [],
+  "maxHoldMs": 604800000,
+  "defaultHoldMs": 3600000,
+  "commandTimeoutMs": 25000,
+  "minDelayBetweenCommandsMs": 250,
+  "verifyDelaysMs": [
+    1200,
+    3000,
+    6000
+  ],
+  "profiles": [
+    {
+      "id": "lab",
+      "name": "Desk Test Switch - GS970M/10PS",
+      "host": "192.168.1.201",
+      "port": 22,
+      "username": "manager",
+      "credentialEnv": "SWITCH_PASS_LAB",
+      "vendor": "allied",
+      "interfacePrefix": "port1.0.",
+      "portCount": 10,
+      "enablePassword": null,
+      "denyPorts": [],
+      "autoDetectSelfPort": false,
+      "portAliases": {
+        "1": "New Port 1",
+        "2": "New Port 2",
+        "3": "New Port 3",
+        "4": "New Port 4",
+        "5": "New Port 5",
+        "6": "New Port 6",
+        "7": "New Port",
+        "8": "New Port 8",
+        "9": "Empty Port 9",
+        "10": "Host Connection"
+      }
+    },
+    {
+      "id": "prestons",
+      "name": "Prestons - GS970M/10PS",
+      "host": "192.168.1.170",
+      "port": 22,
+      "username": "manager",
+      "interfacePrefix": "port1.0.",
+      "portCount": 10,
+      "denyPorts": [
+        1
+      ],
+      "autoDetectSelfPort": true,
+      "vendor": "allied",
+      "enablePassword": null,
+      "credentialEnv": "SWITCH_PASS_PRESTONS",
+      "portAliases": {}
+    },
+    {
+      "id": "id1",
+      "name": "ID1",
+      "host": "192.168.1.22",
+      "port": 22,
+      "username": "manager",
+      "interfacePrefix": "port1.0.",
+      "portCount": 52,
+      "denyPorts": [],
+      "autoDetectSelfPort": true,
+      "vendor": "allied",
+      "enablePassword": null,
+      "credentialEnv": "SWITCH_PASS_ID1",
+      "portAliases": {}
+    }
+  ]
+}

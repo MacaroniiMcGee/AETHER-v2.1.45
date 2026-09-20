@@ -1,0 +1,92 @@
+{
+  "name": "11-31_Test_1",
+  "savedAt": "2026-05-14T05:54:27.425Z",
+  "port": null,
+  "baud": 9600,
+  "devices": [
+    {
+      "address": 11,
+      "model": "IO168S"
+    },
+    {
+      "address": 12,
+      "model": "RI4S"
+    },
+    {
+      "address": 13,
+      "model": "RI2MS"
+    },
+    {
+      "address": 14,
+      "model": "RI2MS"
+    },
+    {
+      "address": 15,
+      "model": "RI4S"
+    },
+    {
+      "address": 16,
+      "model": "RI2MS"
+    },
+    {
+      "address": 17,
+      "model": "RI2MS"
+    },
+    {
+      "address": 18,
+      "model": "RI2MS"
+    },
+    {
+      "address": 19,
+      "model": "RI2MS"
+    },
+    {
+      "address": 20,
+      "model": "RI2MS"
+    },
+    {
+      "address": 21,
+      "model": "RI2MS"
+    },
+    {
+      "address": 22,
+      "model": "IO168S"
+    },
+    {
+      "address": 23,
+      "model": "RI2MS"
+    },
+    {
+      "address": 24,
+      "model": "RI2MS"
+    },
+    {
+      "address": 25,
+      "model": "RI2MS"
+    },
+    {
+      "address": 26,
+      "model": "RI2MS"
+    },
+    {
+      "address": 27,
+      "model": "IO168S"
+    },
+    {
+      "address": 28,
+      "model": "IO168S"
+    },
+    {
+      "address": 29,
+      "model": "IO168S"
+    },
+    {
+      "address": 30,
+      "model": "IO168S"
+    },
+    {
+      "address": 31,
+      "model": "IO168S"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+__pycache__/
+.pytest_cache
+*.log
+.DS_Store
+*.swp
+*.pyc
+dist/
+*.tar.gz
+.vscode/launch.json
+.vscode/settings.json

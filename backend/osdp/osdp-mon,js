@@ -1,0 +1,208 @@
+#!/usr/bin/env node
+/* osdp-mon.js — standalone OSDP port monitor with colour-highlighted LED decode.
+ *
+ *   node osdp-mon.js <port> [--baud 9600] [--led-only] [--show-noise]
+ *   node osdp-mon.js /dev/ttyAMA0
+ *   node osdp-mon.js /dev/ttyACM0 --led-only
+ *
+ * IMPORTANT: a serial port can only be opened by one process at a time.
+ * Stop the Aether server first, OR point this at a port the server is NOT
+ * using. If you see "Resource temporarily unavailable" / EBUSY, the server
+ * still holds the port.
+ *
+ * Run from the backend (or osdp/) dir so `require('serialport')` resolves.
+ */
+'use strict';
+
+let SerialPort;
+try { ({ SerialPort } = require('serialport')); }
+catch (e) {
+  console.error('Cannot load "serialport". Run this from the backend directory:\n' +
+    '  cd ~/Desktop/Aether/M1.2.2/backend/osdp && node osdp-mon.js <port>');
+  process.exit(1);
+}
+
+/* ---------- ANSI ---------- */
+const A = {
+  rst: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
+  red: '\x1b[91m', amber: '\x1b[33m', green: '\x1b[92m', blue: '\x1b[94m',
+  mag: '\x1b[95m', cyan: '\x1b[96m', white: '\x1b[97m', gray: '\x1b[90m',
+  bgRed: '\x1b[41m', bgGreen: '\x1b[42m', bgYel: '\x1b[43m',
+};
+const COLOR_ANSI = { red: A.red, amber: A.amber, green: A.green, blue: A.blue,
+  magenta: A.mag, cyan: A.cyan, white: A.white, off: A.gray };
+
+/* ---------- args ---------- */
+const argv = process.argv.slice(2);
+const port = argv.find(a => !a.startsWith('--'));
+const getOpt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
+const baud = parseInt(getOpt('--baud', '9600'), 10);
+const ledOnly = argv.includes('--led-only');
+const showNoise = argv.includes('--show-noise');
+
+if (!port) {
+  console.log('Usage: node osdp-mon.js <port> [--baud 9600] [--led-only] [--show-noise]\n');
+  SerialPort.list().then(list => {
+    const tty = list.filter(p => /tty(USB|ACM|AMA)/.test(p.path));
+    if (tty.length) {
+      console.log('Available serial ports:');
+      tty.forEach(p => console.log('  ' + p.path + (p.manufacturer ? '  (' + p.manufacturer + ')' : '')));
+    } else console.log('No tty USB/ACM/AMA ports found.');
+    process.exit(0);
+  }).catch(() => process.exit(0));
+} else {
+  start();
+}
+
+/* ---------- decode tables ---------- */
+const CMD = {0x60:'POLL',0x61:'ID',0x62:'CAP',0x64:'LSTAT',0x65:'ISTAT',0x66:'OSTAT',
+  0x67:'RSTAT',0x68:'OUT',0x69:'LED',0x6A:'BUZ',0x6B:'TEXT',0x6D:'COMSET',0x75:'KEYSET',
+  0x76:'CHLNG',0x77:'SCRYPT',0x7B:'MFG',0x80:'MFG'};
+const REPLY = {0x40:'ACK',0x41:'NAK',0x45:'PDID',0x46:'PDCAP',0x48:'LSTATR',0x49:'ISTATR',
+  0x4A:'OSTATR',0x4B:'RSTATR',0x50:'RAW',0x53:'KEYPAD',0x76:'CCRYPT',0x78:'RMAC_I',0x79:'BUSY'};
+const LEDC = {0:'off',1:'red',2:'green',3:'amber',4:'blue',5:'magenta',6:'cyan',7:'white'};
+const NAKE = {0:'No error',1:'Message/CRC error',2:'Command length error',
+  3:'Unknown/unsupported command',4:'Unexpected sequence',5:'Security block error',
+  6:'Comm security not met',9:'Unable to process command record'};
+const OUTC = {0:'no change',1:'permanent OFF',2:'permanent ON',3:'OFF then timed',
+  4:'ON then timed',5:'temporary ON',6:'temporary OFF'};
+
+function colourize(text) {
+  // wrap colour words in the gloss with matching ANSI so LEDs literally show
+  return text.replace(/\b(red|amber|green|blue|magenta|cyan|white|off)\b/g,
+    (m) => (COLOR_ANSI[m] || '') + A.bold + m + A.rst);
+}
+
+function decodeLED(d) {
+  const out = [];
+  for (let o = 0; o + 14 <= d.length; o += 14) {
+    const r = d.slice(o, o + 14), tCtl = r[2], pCtl = r[9];
+    const use = pCtl === 1 ? 'permanent' : tCtl === 2 ? 'temporary'
+      : tCtl === 1 ? 'cancel-temp' : 'nop';
+    let on, off, oc, fc;
+    if (pCtl === 1) { on = r[10]; off = r[11]; oc = r[12]; fc = r[13]; }
+    else { on = r[3]; off = r[4]; oc = r[5]; fc = r[6]; }
+    const cn = c => LEDC[c] || ('0x' + c.toString(16));
+    if (use === 'cancel-temp') out.push(`LED ${r[1]} cancel temp -> permanent`);
+    else if (use === 'nop') out.push(`LED ${r[1]} no-op`);
+    else if (oc === fc) out.push(`LED ${r[1]} steady ${cn(oc)} (${use})`);
+    else out.push(`LED ${r[1]} blink ${cn(oc)}/${cn(fc)} ${on*100}/${off*100}ms (${use})`);
+  }
+  return out;
+}
+function decodeBUZ(d) {
+  if (d.length < 5) return 'BUZ (truncated)';
+  const t = d[1] === 0 ? 'no-op' : d[1] === 1 ? 'off' : d[1] === 2 ? 'default' : 'tone 0x' + d[1].toString(16);
+  return `beep ${t} ${d[2]*100}/${d[3]*100}ms x${d[4]}`;
+}
+function wieg26(d) {
+  const c = d.slice(4), b = [];
+  for (let i = 0; i < c.length; i++) for (let k = 7; k >= 0; k--) b.push((c[i] >> k) & 1);
+  if (b.length < 26) return null;
+  const x = b.slice(0, 26);
+  return {
+    fc: parseInt(x.slice(1, 9).join(''), 2),
+    cn: parseInt(x.slice(9, 25).join(''), 2),
+    ok: ((x.slice(1,13).reduce((a,v)=>a+v,0)+x[0])%2===0) &&
+        ((x.slice(13,25).reduce((a,v)=>a+v,0)+x[25])%2===1),
+  };
+}
+function gloss(cmd, isReply, d) {
+  switch (cmd) {
+    case 0x60: return isReply ? '' : 'polling (keep-alive)';
+    case 0x40: return 'ACK, nothing pending';
+    case 0x41: return 'NAK - ' + (NAKE[d[0]] || 'error 0x' + (d[0]||0).toString(16));
+    case 0x69: { const r = decodeLED(d); return r.length ? r.join('  |  ') : 'LED (no record)'; }
+    case 0x6A: return decodeBUZ(d);
+    case 0x68: {
+      if (d.length < 2) return 'output (truncated)';
+      const t = d.length >= 4 ? (d[2] | (d[3] << 8)) : 0;
+      return `output ${d[0]} -> ${OUTC[d[1]] || 'code 0x' + d[1].toString(16)}` + (t ? ` (${t*100}ms)` : '');
+    }
+    case 0x50: {
+      if (d.length < 4) return 'card (truncated)';
+      const n = d[2] | (d[3] << 8); let e = '';
+      if (n === 26) { const w = wieg26(d); if (w) e = ` -> facility ${w.fc}, card ${w.cn} (parity ${w.ok?'OK':'FAIL'})`; }
+      return `card read - ${n} bits, fmt 0x${(d[1]||0).toString(16)}${e}`;
+    }
+    case 0x53: return 'keypad' + (d.length > 2 ? ': ' + Array.from(d.slice(2)).join('') : '');
+    case 0x61: return 'request reader ID';
+    case 0x62: return 'request capabilities';
+    case 0x45: return 'reader ID report';
+    case 0x46: return 'capability report';
+    case 0x48: case 0x49: case 0x4A: case 0x4B: return 'status report';
+    case 0x76: return isReply ? 'crypto response (CCRYPT)' : 'secure channel challenge';
+    case 0x77: return 'server cryptogram';
+    case 0x75: return 'set encryption key';
+    case 0x80: case 0x7B: return 'manufacturer-specific (vendor payload)';
+    default: return '';
+  }
+}
+function tag(cmd) {
+  if (cmd === 0x69) return A.bgYel + A.bold + ' LED ' + A.rst;
+  if (cmd === 0x50) return A.bgGreen + A.bold + ' CARD' + A.rst;
+  if (cmd === 0x6A) return A.mag + A.bold + '[BUZ ]' + A.rst;
+  if (cmd === 0x68) return A.cyan + '[OUT ]' + A.rst;
+  if (cmd === 0x41) return A.bgRed + A.bold + ' NAK ' + A.rst;
+  if (cmd === 0x60 || cmd === 0x40) return A.gray + '[ -- ]' + A.rst;
+  return A.blue + '[' + ((CMD[cmd] || REPLY[cmd] || ('0x'+cmd.toString(16))).padEnd(4)) + ']' + A.rst;
+}
+
+/* ---------- framing + run ---------- */
+function start() {
+  console.log(`${A.bold}OSDP Monitor${A.rst}  port=${port} baud=${baud}` +
+    (ledOnly ? '  [LED only]' : '') + (showNoise ? '  [showing POLL/ACK]' : ''));
+  console.log(`${A.dim}If this errors with EBUSY, stop the Aether server or use a free port. Ctrl+C to quit.${A.rst}\n`);
+
+  const sp = new SerialPort({ path: port, baudRate: baud, dataBits: 8, parity: 'none', stopBits: 1, autoOpen: false });
+  sp.open(err => {
+    if (err) {
+      console.error(`${A.red}Failed to open ${port}: ${err.message}${A.rst}`);
+      console.error(`${A.dim}The server probably has it open. Stop it, or pass a different port.${A.rst}`);
+      process.exit(1);
+    }
+    console.log(`${A.green}Listening...${A.rst}\n`);
+  });
+
+  let buf = Buffer.alloc(0);
+  sp.on('data', chunk => {
+    buf = Buffer.concat([buf, chunk]);
+    while (buf.length >= 6) {
+      const s = buf.indexOf(0x53);
+      if (s < 0) { buf = Buffer.alloc(0); return; }
+      if (s > 0) buf = buf.slice(s);
+      if (buf.length < 4) return;
+      const len = buf.readUInt16LE(2);
+      if (len < 6 || len > 512) { buf = buf.slice(1); continue; }
+      if (buf.length < len) return;
+      printFrame(buf.slice(0, len));
+      buf = buf.slice(len);
+    }
+  });
+  sp.on('error', e => console.error(`${A.red}Serial error: ${e.message}${A.rst}`));
+  process.on('SIGINT', () => { console.log('\nbye'); try { sp.close(); } catch (_) {} process.exit(0); });
+}
+
+function printFrame(frame) {
+  const addr = frame[1] & 0x7f;
+  const isReply = (frame[1] & 0x80) !== 0;
+  const ctrl = frame[4];
+  const cmd = frame[5];
+  const data = frame.slice(6, frame.length - 2);
+
+  if (ledOnly && cmd !== 0x69) return;
+  if (!showNoise && (cmd === 0x60 || cmd === 0x40)) return;
+
+  const t = new Date().toLocaleTimeString();
+  const dir = isReply ? `${A.amber}TX${A.rst}` : `${A.cyan}RX${A.rst}`;
+  const g = gloss(cmd, isReply, data);
+  const body = cmd === 0x69 ? colourize(g) : g;
+  const name = (CMD[cmd] || REPLY[cmd] || ('0x' + cmd.toString(16))).padEnd(7);
+  const a = '0x' + addr.toString(16).padStart(2, '0');
+
+  let line = `${A.gray}${t}${A.rst} ${dir} ${tag(cmd)} ${A.dim}${name}${A.rst} ${a}  ${body || A.dim + '—' + A.rst}`;
+  if (cmd === 0x69) line = `\n${A.bold}>>>${A.rst} ${line}`;       // make LED lines pop
+  else if (cmd === 0x50) line = `${A.green}${line}${A.rst}`;
+  console.log(line);
+  if (cmd === 0x69 || cmd === 0x50) console.log(`${A.dim}      ${frame.toString('hex').toUpperCase()}${A.rst}`);
+}

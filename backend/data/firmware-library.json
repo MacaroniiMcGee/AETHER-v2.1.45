@@ -1,0 +1,41 @@
+[
+  {
+    "id": "fw_1778606753625_f89f6fc0",
+    "filename": "CWL1_V_04_02_03_0_app_update.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1778606753625_f89f6fc0__CWL1_V_04_02_03_0_app_update.bin",
+    "sizeBytes": 244297,
+    "sha256": "f89f6fc0234dea0df6e24d6c1aa079d293a410465401799f0916ff0cc07cf203",
+    "addedAt": "2026-05-12T17:25:53.626Z",
+    "model": "WaveLynx CWL1",
+    "version": "v04.02.03",
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": "sample bin"
+  },
+  {
+    "id": "fw_1778638139880_b614fd37",
+    "filename": "CHAN2_541_FIRMWARE.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1778638139880_b614fd37__CHAN2_541_FIRMWARE.bin",
+    "sizeBytes": 629936,
+    "sha256": "b614fd374d0f8965861645862ee114922bb09577630e1b281ef9d9ad62de52e5",
+    "addedAt": "2026-05-13T02:08:59.881Z",
+    "model": "NOD-AX Series CHAN 2 ( NFC)",
+    "version": "5.4.1",
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": "NFC Enabled MyPass Disabled"
+  },
+  {
+    "id": "fw_1778639785707_ef026e54",
+    "filename": "CHAN1_541_FIRMWARE.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1778639785707_ef026e54__CHAN1_541_FIRMWARE.bin",
+    "sizeBytes": 629856,
+    "sha256": "ef026e54a38b1edd88c9ebf67502b669295eb5cb068cebfdc13e05963ec1e314",
+    "addedAt": "2026-05-13T02:36:25.707Z",
+    "model": "5.4.1 BLE",
+    "version": null,
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": null
+  }
+]

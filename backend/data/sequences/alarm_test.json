@@ -1,0 +1,39 @@
+{
+  "id": "alarm_testalarm_test",
+  "name": "Alarm Test - Sounder & Strobe",
+  "steps": [
+    {
+      "id": 1,
+      "type": "io",
+      "ioType": "output",
+      "ioId": 3,
+      "action": "activate",
+      "delay": 500
+    },
+    {
+      "id": 2,
+      "type": "io",
+      "ioType": "output",
+      "ioId": 5,
+      "action": "activate",
+      "delay": 2000
+    },
+    {
+      "id": 3,
+      "type": "io",
+      "ioType": "output",
+      "ioId": 3,
+      "action": "deactivate",
+      "delay": 500
+    },
+    {
+      "id": 4,
+      "type": "io",
+      "ioType": "output",
+      "ioId": 5,
+      "action": "deactivate",
+      "delay": 500
+    }
+  ],
+  "createdAt": "2025-01-01 00:00:00"
+}

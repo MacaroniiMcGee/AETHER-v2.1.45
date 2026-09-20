@@ -1,0 +1,59 @@
+{
+  "version": "managed",
+  "savedAt": "2026-09-02T08:31:18.166Z",
+  "rules": [
+    {
+      "id": "switch-smoke-test",
+      "name": "Switch action smoke test",
+      "enabled": true,
+      "priority": 10,
+      "conditions": {},
+      "actions": [
+        {
+          "type": "log",
+          "params": {
+            "message": "switch_port smoke test starting"
+          }
+        },
+        {
+          "type": "switch_port",
+          "params": {
+            "profileId": "lab",
+            "port": 6,
+            "action": "disable",
+            "holdMs": 30000,
+            "reason": "smoke test"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ss",
+      "name": "ss",
+      "description": "",
+      "enabled": true,
+      "priority": 5,
+      "trigger": {
+        "type": "schedule",
+        "time": "04:32"
+      },
+      "conditions": {
+        "schedule": {
+          "time": "04:32"
+        }
+      },
+      "actions": [
+        {
+          "type": "switch_port",
+          "params": {
+            "profileId": "lab",
+            "port": 1,
+            "action": "disable",
+            "holdMs": 30000,
+            "reason": ""
+          }
+        }
+      ]
+    }
+  ]
+}

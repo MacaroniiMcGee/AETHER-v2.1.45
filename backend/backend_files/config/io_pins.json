@@ -1,0 +1,87 @@
+{
+  "ioPins": [
+    4,
+    5,
+    6,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    27
+  ],
+  "hardwareReservedPins": [
+    2,
+    3,
+    7,
+    8,
+    9,
+    10,
+    11,
+    25
+  ],
+  "wiegandTransmitPins": [
+    12,
+    13,
+    16,
+    26
+  ],
+  "pinCategories": {
+    "nfc_i2c": {
+      "pins": [2, 3],
+      "description": "I2C communication for PN532 NFC reader",
+      "device": "PN532",
+      "interface": "I2C",
+      "usage": "SDA (GPIO 2), SCL (GPIO 3)"
+    },
+    "rs485_spi": {
+      "pins": [7, 8, 9, 10, 11, 25],
+      "description": "SPI communication for RS485 CAN HAT",
+      "device": "Waveshare RS485 HAT",
+      "interface": "SPI",
+      "usage": "CE1, CE0, MISO, MOSI, SCLK, IRQ"
+    },
+    "wiegand_transmit": {
+      "pins": [12, 13, 16, 26],
+      "description": "Wiegand protocol card transmission (emulation/simulation only)",
+      "device": "Wiegand Emulator",
+      "interface": "Wiegand Protocol",
+      "usage": "Reader 1: GPIO 12/13 (D0/D1), Reader 2: GPIO 16/26 (D0/D1)"
+    },
+    "door_io": {
+      "pins": [4, 5, 6, 17, 18, 19, 20, 21, 22, 23, 24, 27],
+      "description": "General purpose I/O shared across all pages",
+      "device": "Door Hardware / Sensors / Relays",
+      "interface": "GPIO",
+      "usage": "Lock triggers, relays, sensors, door position switches, REX buttons, etc."
+    }
+  },
+  "notes": [
+    "BCM (Broadcom) GPIO numbering used throughout",
+    "",
+    "VERSION 4.1 - Updated pin assignments",
+    "Changed Reader 2 from GPIO 5,6 to GPIO 16,26 (pull-up resistor issues)",
+    "",
+    "HARDWARE RESERVED (8 pins) - NEVER use for I/O:",
+    "  GPIO 2,3: I2C for NFC PN532 (SDA/SCL)",
+    "  GPIO 7,8,9,10,11,25: SPI for RS485 HAT",
+    "",
+    "WIEGAND TRANSMIT ONLY (4 pins) - Only for card emulation:",
+    "  GPIO 12,13: Emulated Reader 1 (TX D0/D1)",
+    "  GPIO 16,26: Emulated Reader 2 (TX D0/D1)",
+    "  Note: We do NOT receive from physical readers - only transmit/emulate",
+    "",
+    "AVAILABLE FOR I/O (12 pins) - Shared across all pages:",
+    "  GPIO 4,5,6,17,18,19,20,21,22,23,24,27",
+    "  These pins can be dynamically assigned to any I/O function",
+    "  Use for: locks, sensors, relays, door position, REX, etc.",
+    "",
+    "Total GPIO allocation: 24 pins",
+    "  - 8 hardware reserved (I2C + SPI)",
+    "  - 4 Wiegand transmit only",
+    "  - 12 available for general I/O"
+  ]
+}

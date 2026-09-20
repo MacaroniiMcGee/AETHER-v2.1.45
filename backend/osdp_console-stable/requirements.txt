@@ -1,0 +1,4 @@
+pyserial
+crcmod
+pycryptodome
+pytest

@@ -1,0 +1,273 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Automation Console</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #111; color: #eee; }
+    header { padding: 12px 16px; background: #222; position: sticky; top: 0; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+    .card { background: #1b1b1b; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
+    .card h2 { margin: 0; padding: 10px 12px; background: #151515; border-bottom: 1px solid #333; font-size: 16px; }
+    .content { padding: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #333; vertical-align: top; }
+    .logs { height: 360px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #000; color: #7CFC00; padding: 8px; }
+    .row { white-space: pre; }
+    button { background: #2b2b2b; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 6px 8px; cursor: pointer; }
+    button:hover { background: #333; }
+    input, textarea { background: #0f0f0f; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 6px 8px; width: 100%; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .pill { padding: 2px 6px; border-radius: 999px; font-size: 11px; }
+    .ok { background:#084; }
+    .no { background:#840; }
+    .muted { opacity: .7; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Automation Console</h1>
+  </header>
+  <main>
+    <section class="card">
+      <h2>Rules</h2>
+      <div class="content">
+        <table id="rules">
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Enabled</th><th>Priority</th><th>Actions</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <div style="margin-top:8px;" class="grid-2">
+          <button id="reload">Reload Rules from Disk</button>
+          <button id="refreshRules">Refresh Rules</button>
+        </div>
+
+        <hr style="border:0;border-top:1px solid #333;margin:12px 0" />
+
+        <div class="grid-2">
+          <div>
+            <h3 class="muted">Create Rule</h3>
+            <form id="createForm">
+              <div class="grid-2">
+                <label>Id<input name="id" placeholder="my-rule-id" required></label>
+                <label>Name<input name="name" placeholder="My Rule" required></label>
+                <label>Priority<input type="number" name="priority" value="100"></label>
+                <label>Enabled<input name="enabled" value="true" placeholder="true/false"></label>
+              </div>
+              <label>Description<input name="description" placeholder="What this rule does"></label>
+              <label>Conditions JSON
+                <textarea name="conditions" rows="4" placeholder='{"all":[{"event":"gpio_change","pin":17,"value":1}]}'></textarea>
+              </label>
+              <label>Actions JSON
+                <textarea name="actions" rows="4" placeholder='[{"type":"log","params":{"level":"info","message":"hi"}},{"type":"gpio","params":{"pin":14,"value":1,"duration":1000}}]'></textarea>
+              </label>
+              <button>Create</button>
+            </form>
+          </div>
+
+          <div>
+            <h3 class="muted">Update / Delete Rule</h3>
+            <form id="updateForm">
+              <label>Rule Id<input name="id" placeholder="existing-rule-id" required></label>
+              <div class="grid-2">
+                <label>Name<input name="name" placeholder="(leave blank to keep)"></label>
+                <label>Priority<input type="number" name="priority" placeholder="(keep)"></label>
+              </div>
+              <div class="grid-2">
+                <label>Enabled<input name="enabled" placeholder="true/false/(keep)"></label>
+                <label>Description<input name="description" placeholder="(keep)"></label>
+              </div>
+              <label>Conditions JSON (optional)
+                <textarea name="conditions" rows="3" placeholder="(keep)"></textarea>
+              </label>
+              <label>Actions JSON (optional)
+                <textarea name="actions" rows="3" placeholder="(keep)"></textarea>
+              </label>
+              <div class="grid-2" style="margin-top:8px;">
+                <button type="submit">Update</button>
+                <button type="button" id="deleteBtn" style="background:#5b1a1a;border-color:#7b2222">Delete</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Logs (live)</h2>
+      <div id="logs" class="logs"></div>
+      <div class="content grid-2">
+        <button id="refreshLogs">Refresh Logs</button>
+        <button id="clearLogs" style="background:#333">Clear View</button>
+      </div>
+    </section>
+  </main>
+
+<script>
+const logsEl = document.getElementById('logs');
+const rulesTbody = document.querySelector('#rules tbody');
+
+function line(e) {
+  const ts = new Date(e.ts || Date.now()).toISOString();
+  const lvl = (e.level || 'info').toUpperCase().padEnd(5,' ');
+  const type = (e.type || '').padEnd(20,' ');
+  const msg = e.message ? ` | ${e.message}` : '';
+  return `${ts} | ${lvl} | ${type}${msg} | ${JSON.stringify(e)}`;
+}
+function appendLog(e) {
+  const div = document.createElement('div');
+  div.className = 'row';
+  div.textContent = line(e);
+  logsEl.appendChild(div);
+  logsEl.scrollTop = logsEl.scrollHeight;
+}
+function toast(msg, ok=true){ appendLog({ level: ok?'info':'error', type: 'ui', message: msg }); }
+
+async function loadRules() {
+  const r = await fetch('/api/automation/rules').then(r=>r.json());
+  const rules = r.rules || [];
+  rulesTbody.innerHTML = '';
+  rules.forEach(rule => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${rule.id}</td>
+      <td>${rule.name || ''}</td>
+      <td><span class="pill ${rule.enabled?'ok':'no'}">${rule.enabled?'YES':'NO'}</span></td>
+      <td>${rule.priority ?? ''}</td>
+      <td class="space-x-2">
+        <button data-id="${rule.id}" data-act="${rule.enabled?'disable':'enable'}">${rule.enabled?'Disable':'Enable'}</button>
+        <button data-id="${rule.id}" data-edit="1">Edit →</button>
+        <button data-id="${rule.id}" data-del="1" style="background:#5b1a1a;border-color:#7b2222">Delete</button>
+      </td>
+    `;
+    rulesTbody.appendChild(tr);
+  });
+}
+
+rulesTbody.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const id = btn.dataset.id;
+
+  // Enable/Disable
+  if (btn.dataset.act) {
+    const act = btn.dataset.act;
+    const res = await fetch(`/api/automation/rules/${id}/${act}`, { method:'PATCH' }).then(r=>r.json());
+    toast(`${id} -> ${act}`, res.success);
+    return loadRules();
+  }
+
+  // Prefill Update form
+  if (btn.dataset.edit) {
+    const row = btn.closest('tr');
+    document.querySelector('#updateForm [name=id]').value = id;
+    document.querySelector('#updateForm [name=name]').value = row.children[1].textContent;
+    document.querySelector('#updateForm [name=priority]').value = row.children[3].textContent || '';
+    document.querySelector('#updateForm [name=enabled]').value = row.children[2].textContent === 'YES' ? 'true' : 'false';
+    toast(`Loaded rule ${id} into Update form`);
+  }
+
+  // Delete quick
+  if (btn.dataset.del) {
+    if (!confirm(`Delete rule ${id}?`)) return;
+    const res = await fetch(`/api/automation/rules/${id}`, { method:'DELETE' }).then(r=>r.json());
+    toast(`Delete ${id}: ${res.success?'OK':'ERR'}`, res.success);
+    return loadRules();
+  }
+});
+
+document.getElementById('reload').onclick = async () => {
+  const res = await fetch('/api/automation/reload', { method:'POST' }).then(r=>r.json());
+  toast(`Reloaded ${res.reloadedRules ?? 0} rules`, res.success);
+  loadRules();
+};
+document.getElementById('refreshRules').onclick = loadRules;
+
+document.getElementById('refreshLogs').onclick = async () => {
+  const buf = await fetch('/api/logs').then(r=>r.json());
+  logsEl.innerHTML = '';
+  (buf || []).forEach(appendLog);
+};
+document.getElementById('clearLogs').onclick = () => { logsEl.innerHTML = ''; };
+
+// Create
+document.getElementById('createForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const f = e.target;
+    const body = {
+      id: f.id.value.trim(),
+      name: f.name.value.trim(),
+      description: f.description.value.trim(),
+      enabled: f.enabled.value.trim().toLowerCase() !== 'false',
+      priority: Number(f.priority.value || 100),
+      conditions: f.conditions.value ? JSON.parse(f.conditions.value) : { all: [] },
+      actions: f.actions.value ? JSON.parse(f.actions.value) : []
+    };
+    const res = await fetch('/api/automation/rules', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    }).then(r=>r.json());
+    toast(`Create ${body.id}: ${res.success?'OK':'ERR'}`, res.success);
+    if (res.success) { f.reset(); loadRules(); }
+  } catch (err) {
+    toast(`Create error: ${err.message}`, false);
+  }
+};
+
+// Update
+document.getElementById('updateForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const f = e.target;
+    const id = f.id.value.trim();
+    if (!id) return toast('Update: id is required', false);
+
+    const patch = {};
+    if (f.name.value.trim()) patch.name = f.name.value.trim();
+    if (f.description.value.trim()) patch.description = f.description.value.trim();
+    if (f.priority.value.trim()) patch.priority = Number(f.priority.value);
+    if (f.enabled.value.trim()) patch.enabled = (f.enabled.value.trim().toLowerCase() === 'true');
+    if (f.conditions.value.trim()) patch.conditions = JSON.parse(f.conditions.value);
+    if (f.actions.value.trim()) patch.actions = JSON.parse(f.actions.value);
+
+    const res = await fetch(`/api/automation/rules/${id}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch)
+    }).then(r=>r.json());
+    toast(`Update ${id}: ${res.success?'OK':'ERR'}`, res.success);
+    if (res.success) loadRules();
+  } catch (err) {
+    toast(`Update error: ${err.message}`, false);
+  }
+};
+
+// Delete (from form)
+document.getElementById('deleteBtn').onclick = async () => {
+  const id = document.querySelector('#updateForm [name=id]').value.trim();
+  if (!id) return toast('Delete: id is required', false);
+  if (!confirm(`Delete rule ${id}?`)) return;
+  const res = await fetch(`/api/automation/rules/${id}`, { method:'DELETE' }).then(r=>r.json());
+  toast(`Delete ${id}: ${res.success?'OK':'ERR'}`, res.success);
+  if (res.success) { document.getElementById('updateForm').reset(); loadRules(); }
+};
+
+// Initial load + live logs
+(async () => {
+  await loadRules();
+  const initBuf = await fetch('/api/logs').then(r=>r.json());
+  logsEl.innerHTML = '';
+  (initBuf || []).forEach(appendLog);
+
+  const socket = io();
+  socket.on('logs_init', (buf) => {
+    logsEl.innerHTML = '';
+    (buf || []).forEach(appendLog);
+  });
+  socket.on('logs', appendLog);
+})();
+</script>
+</body>
+</html> 

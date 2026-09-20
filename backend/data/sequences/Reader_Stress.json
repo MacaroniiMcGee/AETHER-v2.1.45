@@ -1,0 +1,229 @@
+{
+  "id": "Reader_Stress",
+  "name": "Reader Stress",
+  "steps": [
+    {
+      "id": "col-1785903089057",
+      "blocks": [
+        {
+          "id": "block-1785902597198-lc80qtlb0",
+          "type": "reader",
+          "readerId": "osdp-reader-1785816871702",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 2100,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "cardEnd": 1250,
+          "cardStart": 1000,
+          "facilityEnd": 123,
+          "facilityStart": 123,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903539783-v6hkwsdr2",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1,
+          "waitMin": 1,
+          "waitMax": 25,
+          "waitUntilTime": "00:30"
+        },
+        {
+          "id": "block-1785902596380-opwpfx0xo",
+          "type": "reader",
+          "readerId": "osdp-reader-1778710422036",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 2500,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "facilityStart": 123,
+          "facilityEnd": 123,
+          "cardStart": 1000,
+          "cardEnd": 1250,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903585529-g23v48h81",
+          "type": "wait",
+          "waitType": "random",
+          "waitValue": 3,
+          "waitMin": 1,
+          "waitMax": 2,
+          "waitUntilTime": "00:30"
+        },
+        {
+          "id": "block-1785902594756-e95iszubr",
+          "type": "reader",
+          "readerId": "osdp-reader-1",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 3000,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "facilityStart": 123,
+          "facilityEnd": 123,
+          "cardStart": 1000,
+          "cardEnd": 1250,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903601778-9o4z4mnsi",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "00:30"
+        },
+        {
+          "id": "block-1785902591247-ihxwqjs83",
+          "type": "reader",
+          "readerId": "reader-2",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 4000,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "facilityStart": 123,
+          "facilityEnd": 123,
+          "cardStart": 1000,
+          "cardEnd": 1250,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903617278-hd621gifa",
+          "type": "wait",
+          "waitType": "random",
+          "waitValue": 3,
+          "waitMin": 1,
+          "waitMax": 1,
+          "waitUntilTime": "00:30"
+        },
+        {
+          "id": "block-1785902593686-moojyhuoo",
+          "type": "reader",
+          "readerId": "reader-4",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 5000,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "facilityStart": 123,
+          "facilityEnd": 123,
+          "cardStart": 1000,
+          "cardEnd": 1250,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903626327-y8c5z6is0",
+          "type": "wait",
+          "waitType": "random",
+          "waitValue": 3,
+          "waitMin": 1,
+          "waitMax": 1,
+          "waitUntilTime": "00:30"
+        },
+        {
+          "id": "block-1785902592479-q98dkol98",
+          "type": "reader",
+          "readerId": "reader-3",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 6000,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "facilityStart": 123,
+          "facilityEnd": 123,
+          "cardStart": 1000,
+          "cardEnd": 1250,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903635862-b0hfk31c4",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "00:30"
+        },
+        {
+          "id": "block-1785902589776-loicpki6d",
+          "type": "reader",
+          "readerId": "reader-1",
+          "format": "w26",
+          "mode": "range",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "random",
+          "delayBetweenCards": 7000,
+          "pinValue": "1234",
+          "keypadFormat": "4bit",
+          "facilityStart": 123,
+          "facilityEnd": 123,
+          "cardStart": 1000,
+          "cardEnd": 1250,
+          "cardCount": 150
+        },
+        {
+          "id": "block-1785903657620-0llzz5zj2",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "00:30"
+        }
+      ]
+    },
+    {
+      "id": "col-1785905214066",
+      "blocks": [
+        {
+          "id": "block-1785905196102-4ccbqep21",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 3,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "00:00"
+        },
+        {
+          "id": "block-1785905174910-po22rrw9z",
+          "type": "control",
+          "controlType": "loop",
+          "loopToColumn": 0
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-08-07T18:19:49.094Z",
+  "updatedAt": "2026-08-07T18:19:49.094Z"
+}

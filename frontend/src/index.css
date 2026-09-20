@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+
+
+/* select-dark-scheme */
+select {
+  color-scheme: dark;
+}
+select option {
+  background-color: #1f1f1f;
+  color: #e2e8f0;
+}
+select option:checked {
+  background-color: #2a2a2a;
+}

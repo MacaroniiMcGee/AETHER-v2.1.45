@@ -1,0 +1,36 @@
+{
+  "_comment": "v5.0 - aligned with wiegand-config.json. Wiegand RX pins are no longer general-purpose I/O.",
+  "ioPins": [4, 18, 20],
+  "hardwareReservedPins": [2, 3, 7, 8, 9, 10, 11, 25],
+  "wiegandReceivePins": [17, 27, 22, 23, 24, 25, 5, 6],
+  "wiegandTransmitPins": [12, 13, 16, 26],
+  "osdpSerialPins": [12, 13, 16, 26, 19, 20, 21, 4],
+  "pinCategories": {
+    "i2c": {
+      "pins": [2, 3],
+      "description": "I2C bus (Sequent IOplus 0x28, plus PN532 if enabled)"
+    },
+    "spi_rs485": {
+      "pins": [7, 8, 9, 10, 11, 25],
+      "description": "SPI for RS485 HAT"
+    },
+    "wiegand_receive": {
+      "pins": [17, 27, 22, 23, 24, 25, 5, 6],
+      "description": "Wiegand D0/D1 for 4 readers. RESERVED - do not expose as general I/O.",
+      "usage": "R1:17/27  R2:22/23  R3:24/25  R4:5/6"
+    },
+    "osdp_serial": {
+      "pins": [12, 13, 16, 26, 19, 20, 21, 4],
+      "description": "OSDP pins per wiegand-config.json (currently OSDPManager uses USB serial, so metadata only)"
+    },
+    "door_io": {
+      "pins": [4, 18, 20],
+      "description": "Spare GPIO. Most door I/O goes through IOplus over I2C, not raw GPIO."
+    }
+  },
+  "notes": [
+    "v5.0 - Wiegand RX pins (17,27,22,23,24,25,5,6) were previously in door_io.",
+    "That let UI pages drive them HIGH with gpioset and block wiegand_tx with EBUSY.",
+    "They are now reserved and only ioPins=[4,18,20] are free for door_io."
+  ]
+}

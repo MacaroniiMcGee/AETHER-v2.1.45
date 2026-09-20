@@ -1,0 +1,40 @@
+{
+  "id": "door_unlock_sequencedoor_unlock_sequence",
+  "name": "Door Unlock Sequence",
+  "steps": [
+    {
+      "id": 1,
+      "type": "door",
+      "doorId": 1,
+      "eventType": "rexIn",
+      "action": "activate",
+      "delay": 500
+    },
+    {
+      "id": 2,
+      "type": "door",
+      "doorId": 1,
+      "eventType": "lock",
+      "action": "activate",
+      "delay": 3000
+    },
+    {
+      "id": 3,
+      "type": "door",
+      "doorId": 1,
+      "eventType": "lock",
+      "action": "deactivate",
+      "delay": 1000
+    },
+    {
+      "id": 4,
+      "type": "door",
+      "doorId": 1,
+      "eventType": "rexIn",
+      "action": "deactivate",
+      "delay": 500
+    }
+  ],
+  "createdAt": "2025-01-01 00:00:00"
+}
+EOF
