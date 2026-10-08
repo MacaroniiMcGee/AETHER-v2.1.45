@@ -43,7 +43,7 @@
 
 #define DEFAULT_PULSE_US 50
 #define INTER_PULSE_MS 2
-#define MAX_BITS 128
+#define MAX_BITS 256
 #define MAX_FORMAT_ID 32
 
 // ============================================================

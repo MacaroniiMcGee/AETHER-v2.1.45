@@ -322,28 +322,28 @@ const FORMATS: Record<string, FormatSpec> = {
 };
 
 const COLOR_MAP: Record<string, string> = {
-  'parity-even': '#4ade80',
-  'parity-odd': '#fbbf24',
-  'parity-whole-odd': '#ef4444',
-  'facility': '#60a5fa',
-  'card': '#a78bfa',
-  'header': '#f472b6',
-  'oem': '#fb923c',
-  'issue-level': '#8b5cf6',
-  'xor-checksum': '#06b6d4',
-  'multi-row-ep1': '#22c55e',
-  'multi-row-op': '#eab308',
-  'multi-row-x': '#6b7280',
-  'multi-row-ep2': '#22c55e'
+  'parity-even': 'rgb(var(--hv-data-green))',
+  'parity-odd': 'rgb(var(--hv-data-yellow))',
+  'parity-whole-odd': 'rgb(var(--hv-data-red))',
+  'facility': 'rgb(var(--hv-data-blue))',
+  'card': 'rgb(var(--hv-data-purple))',
+  'header': 'rgb(var(--hv-data-pink))',
+  'oem': 'rgb(var(--hv-data-orange))',
+  'issue-level': 'rgb(var(--hv-data-violet))',
+  'xor-checksum': 'rgb(var(--hv-data-sapphire))',
+  'multi-row-ep1': 'rgb(var(--hv-data-emerald))',
+  'multi-row-op': 'rgb(var(--hv-data-coral))',
+  'multi-row-x': 'rgb(var(--hv-data-gray))',
+  'multi-row-ep2': 'rgb(var(--hv-data-emerald))'
 };
 
 const PARITY_COLORS: Record<string, string> = {
-  'std': '#4ade80',
-  'none': '#6b7280',
-  'interleaved': '#f59e0b',
-  'multi-row': '#ef4444',
-  'xor': '#06b6d4',
-  'scrambled': '#ec4899'
+  'std': 'rgb(var(--hv-success-text))',
+  'none': 'rgb(var(--hv-text-3))',
+  'interleaved': 'rgb(var(--hv-warning))',
+  'multi-row': 'rgb(var(--hv-error))',
+  'xor': 'rgb(var(--hv-info-strong))',
+  'scrambled': 'rgb(var(--hv-pink))'
 };
 
 export const WiegandFormatVisualizer: React.FC = () => {
@@ -380,25 +380,25 @@ export const WiegandFormatVisualizer: React.FC = () => {
       margin: '0 auto'
     } as React.CSSProperties,
     card: {
-      border: '1px solid #3a3a5a',
+      border: '1px solid rgb(var(--hv-line-strong))',
       borderRadius: '8px',
       padding: '20px',
-      backgroundColor: '#16213e',
-      color: '#eee',
+      backgroundColor: 'rgb(var(--hv-widget))',
+      color: 'rgb(var(--hv-text))',
       marginBottom: '20px'
     } as React.CSSProperties,
     title: {
       marginTop: 0,
-      color: '#00d9ff',
+      color: 'rgb(var(--hv-info-fg))',
       fontSize: '24px'
     } as React.CSSProperties,
     select: {
       width: '100%',
       padding: '10px',
-      border: '1px solid #4a4a6a',
+      border: '1px solid rgb(var(--hv-line-strong))',
       borderRadius: '4px',
-      backgroundColor: '#0f3460',
-      color: '#eee',
+      backgroundColor: 'rgb(var(--hv-info-tint))',
+      color: 'rgb(var(--hv-text))',
       fontSize: '14px',
       marginBottom: '10px',
       cursor: 'pointer'
@@ -406,15 +406,15 @@ export const WiegandFormatVisualizer: React.FC = () => {
     input: {
       width: '100%',
       padding: '10px',
-      border: '1px solid #4a4a6a',
+      border: '1px solid rgb(var(--hv-line-strong))',
       borderRadius: '4px',
-      backgroundColor: '#0f3460',
-      color: '#eee',
+      backgroundColor: 'rgb(var(--hv-info-tint))',
+      color: 'rgb(var(--hv-text))',
       fontSize: '14px'
     } as React.CSSProperties,
     button: {
       padding: '12px 24px',
-      backgroundColor: '#00d9ff',
+      backgroundColor: 'rgb(var(--hv-info))',
       color: '#000',
       border: 'none',
       borderRadius: '4px',
@@ -428,7 +428,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
       flexWrap: 'wrap' as const,
       gap: '2px',
       padding: '20px',
-      backgroundColor: '#0f3460',
+      backgroundColor: 'rgb(var(--hv-info-tint))',
       borderRadius: '8px',
       marginTop: '20px'
     } as React.CSSProperties,
@@ -752,7 +752,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
             style={{
               width: field.bits > 16 ? '24px' : '30px',
               height: '40px',
-              backgroundColor: COLOR_MAP[field.type] || '#666',
+              backgroundColor: COLOR_MAP[field.type] || 'rgb(var(--hv-text-3))',
               color: '#000',
               display: 'flex',
               alignItems: 'center',
@@ -801,7 +801,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
             <div
               style={{
                 ...styles.legendColor,
-                backgroundColor: COLOR_MAP[type] || '#666'
+                backgroundColor: COLOR_MAP[type] || 'rgb(var(--hv-text-3))'
               }}
             />
             <span style={{ fontSize: '14px' }}>{legendMap[type] || type}</span>
@@ -815,12 +815,12 @@ export const WiegandFormatVisualizer: React.FC = () => {
     <div style={styles.container}>
       <div style={styles.card}>
         <h3 style={styles.title}>🔢 Wiegand Format Visualizer v5.0</h3>
-        <p style={{ color: '#aaa', marginTop: '-10px' }}>
+        <p style={{ color: 'rgb(var(--hv-text-2))', marginTop: '-10px' }}>
           Visual bit structure generator with ALL parity types
         </p>
 
         <div style={{ marginTop: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>
             Select Format
           </label>
           <select
@@ -869,16 +869,16 @@ export const WiegandFormatVisualizer: React.FC = () => {
         {/* Format Info Panel */}
         <div style={{
           padding: '15px',
-          backgroundColor: '#2d2d44',
+          backgroundColor: 'rgb(var(--hv-box))',
           borderRadius: '4px',
           marginBottom: '20px',
           fontSize: '13px'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-            <strong style={{ color: '#00d9ff' }}>{format.name}</strong>
+            <strong style={{ color: 'rgb(var(--hv-info-fg))' }}>{format.name}</strong>
             <span style={{
               ...styles.parityBadge,
-              backgroundColor: PARITY_COLORS[format.parity] + '30',
+              backgroundColor: `color-mix(in srgb, ${PARITY_COLORS[format.parity]} 19%, transparent)`,
               color: PARITY_COLORS[format.parity],
               border: `1px solid ${PARITY_COLORS[format.parity]}`
             }}>
@@ -887,9 +887,9 @@ export const WiegandFormatVisualizer: React.FC = () => {
             {format.cardOnly && (
               <span style={{
                 ...styles.parityBadge,
-                backgroundColor: '#3b82f630',
-                color: '#3b82f6',
-                border: '1px solid #3b82f6'
+                backgroundColor: 'rgb(var(--hv-info) / 0.19)',
+                color: 'rgb(var(--hv-info-fg))',
+                border: '1px solid rgb(var(--hv-info))'
               }}>
                 CARD-ONLY
               </span>
@@ -897,35 +897,35 @@ export const WiegandFormatVisualizer: React.FC = () => {
             {format.hasIssueLevel && (
               <span style={{
                 ...styles.parityBadge,
-                backgroundColor: '#8b5cf630',
-                color: '#8b5cf6',
-                border: '1px solid #8b5cf6'
+                backgroundColor: 'rgb(var(--hv-purple) / 0.19)',
+                color: 'rgb(var(--hv-purple-fg))',
+                border: '1px solid rgb(var(--hv-purple))'
               }}>
                 ISSUE LEVEL
               </span>
             )}
           </div>
-          <div style={{ color: '#aaa' }}>{format.description}</div>
+          <div style={{ color: 'rgb(var(--hv-text-2))' }}>{format.description}</div>
           {format.warning && (
-            <div style={{ marginTop: '10px', color: '#fbbf24', fontSize: '12px' }}>
+            <div style={{ marginTop: '10px', color: 'rgb(var(--hv-warning-fg))', fontSize: '12px' }}>
               ⚠️ {format.warning}
             </div>
           )}
           <div style={{ marginTop: '10px', display: 'flex', gap: '30px' }}>
             {format.hasIssueLevel && (
               <div>
-                <span style={{ color: '#8b5cf6', fontWeight: 'bold' }}>Issue Level: </span>
+                <span style={{ color: 'rgb(var(--hv-purple-fg))', fontWeight: 'bold' }}>Issue Level: </span>
                 <span>0-{format.maxIssueLevel}</span>
               </div>
             )}
             {!format.cardOnly && (
               <div>
-                <span style={{ color: '#60a5fa', fontWeight: 'bold' }}>Facility: </span>
+                <span style={{ color: 'rgb(var(--hv-info-text))', fontWeight: 'bold' }}>Facility: </span>
                 <span>0-{format.facilityMax.toLocaleString()}</span>
               </div>
             )}
             <div>
-              <span style={{ color: '#a78bfa', fontWeight: 'bold' }}>Card: </span>
+              <span style={{ color: 'rgb(var(--hv-purple-text))', fontWeight: 'bold' }}>Card: </span>
               <span>0-{format.cardMax.toLocaleString()}</span>
             </div>
           </div>
@@ -940,7 +940,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
         }}>
           {format.hasIssueLevel && (
             <div>
-              <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#8b5cf6' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-purple-fg))' }}>
                 Issue Level (0-{format.maxIssueLevel})
               </label>
               <input
@@ -949,13 +949,13 @@ export const WiegandFormatVisualizer: React.FC = () => {
                 max={format.maxIssueLevel}
                 value={issueLevel}
                 onChange={(e) => setIssueLevel(Number(e.target.value))}
-                style={{...styles.input, borderColor: '#8b5cf6'}}
+                style={{...styles.input, borderColor: 'rgb(var(--hv-purple))'}}
               />
             </div>
           )}
           {!format.cardOnly && (
             <div>
-              <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>
                 Facility Code (0-{format.facilityMax.toLocaleString()})
               </label>
               <input
@@ -969,7 +969,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
             </div>
           )}
           <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>
               Card Number (0-{format.cardMax.toLocaleString()})
             </label>
             <input
@@ -985,8 +985,8 @@ export const WiegandFormatVisualizer: React.FC = () => {
 
         <button
           onClick={generateBits}
-          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#00b8d4'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#00d9ff'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgb(var(--hv-info-strong))'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgb(var(--hv-info))'; }}
           style={styles.button}
         >
           Generate Bit Structure
@@ -996,8 +996,8 @@ export const WiegandFormatVisualizer: React.FC = () => {
           <div style={{
             marginTop: '15px',
             padding: '10px',
-            backgroundColor: '#4d1a1a',
-            color: '#ff6b6b',
+            backgroundColor: 'rgb(var(--hv-error-tint))',
+            color: 'rgb(var(--hv-error-text))',
             borderRadius: '4px',
             fontSize: '14px'
           }}>
@@ -1008,11 +1008,11 @@ export const WiegandFormatVisualizer: React.FC = () => {
 
       {generatedBits && (
         <div style={styles.card}>
-          <h4 style={{ marginTop: 0, color: '#00d9ff' }}>Bit Structure Visualization</h4>
+          <h4 style={{ marginTop: 0, color: 'rgb(var(--hv-info-fg))' }}>Bit Structure Visualization</h4>
           
           <div style={{
             padding: '15px',
-            backgroundColor: '#2d2d44',
+            backgroundColor: 'rgb(var(--hv-box))',
             borderRadius: '4px',
             marginBottom: '15px',
             fontSize: '13px'
@@ -1023,14 +1023,14 @@ export const WiegandFormatVisualizer: React.FC = () => {
               fontFamily: 'monospace',
               fontSize: '16px',
               wordBreak: 'break-all',
-              color: '#00d9ff',
-              backgroundColor: '#0f3460',
+              color: 'rgb(var(--hv-info-fg))',
+              backgroundColor: 'rgb(var(--hv-info-tint))',
               padding: '10px',
               borderRadius: '4px'
             }}>
               {generatedBits}
             </div>
-            <div style={{ marginTop: '10px', color: '#aaa' }}>
+            <div style={{ marginTop: '10px', color: 'rgb(var(--hv-text-2))' }}>
               Length: {generatedBits.length} bits
             </div>
           </div>
@@ -1042,7 +1042,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
           {renderLegend()}
 
           <div style={{ marginTop: '20px' }}>
-            <h4 style={{ color: '#00d9ff', marginBottom: '10px' }}>Format Breakdown</h4>
+            <h4 style={{ color: 'rgb(var(--hv-info-fg))', marginBottom: '10px' }}>Format Breakdown</h4>
             <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
               {format.structure.map((field, idx) => {
                 let startBit = 0;
@@ -1056,7 +1056,7 @@ export const WiegandFormatVisualizer: React.FC = () => {
                   <div key={idx} style={{
                     padding: '8px',
                     marginBottom: '5px',
-                    backgroundColor: '#2d2d44',
+                    backgroundColor: 'rgb(var(--hv-box))',
                     borderRadius: '4px',
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -1067,18 +1067,18 @@ export const WiegandFormatVisualizer: React.FC = () => {
                         style={{
                           width: '15px',
                           height: '15px',
-                          backgroundColor: COLOR_MAP[field.type] || '#666',
+                          backgroundColor: COLOR_MAP[field.type] || 'rgb(var(--hv-text-3))',
                           borderRadius: '3px'
                         }}
                       />
                       <strong>{field.label}</strong>
-                      <span style={{ color: '#aaa' }}>
+                      <span style={{ color: 'rgb(var(--hv-text-2))' }}>
                         (Bits {startBit}-{endBit}, {field.bits} bit{field.bits > 1 ? 's' : ''})
                       </span>
                     </div>
                     <span style={{
                       fontFamily: 'monospace',
-                      color: '#00d9ff',
+                      color: 'rgb(var(--hv-info-fg))',
                       fontSize: '14px'
                     }}>
                       {fieldBits}

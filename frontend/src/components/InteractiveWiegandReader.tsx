@@ -14,14 +14,14 @@ import emulatorFormats from '../Readers/Emulator_Formats.json';
 // ===== Brick-wall background (painted-grey, offset/staggered) =====
 const BRICK_WALL_SVG =
   "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100'>" +
-  "<rect width='200' height='100' fill='#3a3a3a'/>" +
-  "<rect x='2' y='2' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='102' y='2' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='-48' y='34' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='52' y='34' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='152' y='34' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='2' y='66' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='102' y='66' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
+  "<rect width='200' height='100' fill='rgb(var(--hv-modal))'/>" +
+  "<rect x='2' y='2' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='102' y='2' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='-48' y='34' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='52' y='34' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='152' y='34' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='2' y='66' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='102' y='66' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
   "</svg>";
 const BRICK_WALL_BG =
   'url("data:image/svg+xml;utf8,' + encodeURIComponent(BRICK_WALL_SVG) + '")';
@@ -63,6 +63,11 @@ interface InteractiveWiegandReaderProps {
   onCardTap?:    () => void;
   onCardSent?:   (card: PocketCard) => void;
   defaultFormat?: number;
+  // When given, the reader hands sending to the page (exact format encoder and
+  // PIN burst routes) and keeps only the look: LED, card tap, keypad, recent list.
+  onSendCard?:   () => Promise<void>;
+  onSendPin?:    (pin: string) => Promise<void>;
+  pinModeLabel?: string;
 }
 
 interface RecentEntry {
@@ -74,10 +79,10 @@ interface RecentEntry {
 type LedState = 'idle' | 'sending' | 'ok' | 'err';
 
 const LED_COLOR: Record<LedState, string> = {
-  idle:    '#3b82f6',
-  sending: '#f59e0b',
-  ok:      '#22c55e',
-  err:     '#ef4444',
+  idle:    'rgb(var(--hv-info))',
+  sending: 'rgb(var(--hv-warning))',
+  ok:      'rgb(var(--hv-success))',
+  err:     'rgb(var(--hv-error))',
 };
 
 const FALLBACK_FORMATS: KeypadFormatDef[] = [
@@ -95,6 +100,9 @@ export default function InteractiveWiegandReader({
   onCardTap,
   onCardSent,
   defaultFormat = 26,
+  onSendCard,
+  onSendPin,
+  pinModeLabel,
 }: InteractiveWiegandReaderProps) {
   // ===== State =====
   const [ledState, setLedState]   = useState<LedState>('idle');
@@ -202,6 +210,23 @@ export default function InteractiveWiegandReader({
     setLedState('sending');
     flashTxIndicator(800);
 
+    if (onSendCard) {
+      try {
+        await onSendCard();
+        flashCardStatus('ok', `✓ Sent ${cardReadout}`);
+        flashLed('ok', 600);
+        pushRecent({ time: new Date().toLocaleTimeString(), type: 'CARD', description: `${cardReadout} · ${pocketCard!.format ?? ''} → ${reader.name}` });
+        onCardSent?.(pocketCard!);
+      } catch (err: any) {
+        flashCardStatus('err', `✗ ${err?.message || 'Send failed'}`);
+        flashLed('err', 800);
+        pushRecent({ time: new Date().toLocaleTimeString(), type: 'ERR', description: err?.message || 'Send failed' });
+      } finally {
+        cardSendingRef.current = false;
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`${backendUrl}/api/wiegand/transmit`, {
         method: 'POST',
@@ -284,7 +309,10 @@ export default function InteractiveWiegandReader({
     const pulseWidth = reader.pulseWidth ?? 50;
 
     try {
-      if (fmtDef.transmission === 'single') {
+      if (onSendPin) {
+        await onSendPin(pin);
+        pushRecent({ time: new Date().toLocaleTimeString(), type: 'PIN', description: `${maskPin ? '•'.repeat(pin.length) : pin} · ${pinModeLabel || 'PIN'} → ${reader.name}` });
+      } else if (fmtDef.transmission === 'single') {
         const pinNum = parseInt(pin, 10);
         if (!Number.isFinite(pinNum)) throw new Error('Invalid PIN');
 
@@ -359,22 +387,22 @@ export default function InteractiveWiegandReader({
   const txAnim    = `wg-tx-${id}`;
 
   const cardZoneBorder =
-    cardStatus.kind === 'ok'    ? '#22c55e'
-    : cardStatus.kind === 'err' ? '#ef4444'
-    : cardLoaded && cardHover   ? '#86efac'
-    : cardLoaded                ? '#166534'
-    : '#334155';
-  const cardZoneBg = cardLoaded && cardHover ? '#0a1f0e' : '#020617';
+    cardStatus.kind === 'ok'    ? 'rgb(var(--hv-success))'
+    : cardStatus.kind === 'err' ? 'rgb(var(--hv-error))'
+    : cardLoaded && cardHover   ? 'rgb(var(--hv-success-text))'
+    : cardLoaded                ? 'rgb(var(--hv-success-hover))'
+    : 'rgb(var(--hv-line))';
+  const cardZoneBg = cardLoaded && cardHover ? 'rgb(var(--hv-success-tint))' : 'rgb(var(--hv-surface))';
 
   const KEYPAD = ['1','2','3','4','5','6','7','8','9','*','0','#'];
 
   return (
     <div style={{
-      backgroundColor: '#3a3a3a',
+      backgroundColor: 'rgb(var(--hv-modal))',
       backgroundImage: BRICK_WALL_BG,
       backgroundSize: '200px 100px',
       backgroundRepeat: 'repeat',
-      border: '1px solid #2a2a2a',
+      border: '1px solid rgb(var(--hv-popup-panel))',
       borderRadius: 12,
       padding: 40,
       display: 'flex',
@@ -385,9 +413,9 @@ export default function InteractiveWiegandReader({
     }}>
       <style>{`
         @keyframes ${tapAnim} {
-          0%   { box-shadow: inset 0 0 0  rgba(34, 197, 94, 0.0); transform: scale(1); }
-          30%  { box-shadow: inset 0 0 16px rgba(34, 197, 94, 0.5); transform: scale(0.97); }
-          100% { box-shadow: inset 0 0 0  rgba(34, 197, 94, 0.0); transform: scale(1); }
+          0%   { box-shadow: inset 0 0 0  rgb(var(--hv-success) / 0.0); transform: scale(1); }
+          30%  { box-shadow: inset 0 0 16px rgb(var(--hv-success) / 0.5); transform: scale(0.97); }
+          100% { box-shadow: inset 0 0 0  rgb(var(--hv-success) / 0.0); transform: scale(1); }
         }
         @keyframes ${txAnim} {
           0%, 100% { opacity: 0.4; }
@@ -397,17 +425,17 @@ export default function InteractiveWiegandReader({
 
       {/* ===== Bezel ===== */}
       <div style={{
-        background: 'linear-gradient(145deg, #2a2a2e 0%, #1a1a1e 50%, #25252a 100%)',
-        border: '1px solid #1a1a1e',
+        background: 'linear-gradient(145deg, rgb(var(--hv-popup-panel)) 0%, rgb(var(--hv-widget-panel)) 50%, rgb(var(--hv-popup-panel)) 100%)',
+        border: '1px solid rgb(var(--hv-widget-panel))',
         borderRadius: 14,
         padding: 14,
         width: bezelWidth,
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.6), inset 0 1px 0 rgb(var(--hv-contrast) / 0.06)',
       }}>
-        <div style={{ fontSize: 10, color: '#cbd5e1', letterSpacing: '0.3em', textAlign: 'center' }}>
+        <div style={{ fontSize: 10, color: 'rgb(var(--hv-text))', letterSpacing: '0.3em', textAlign: 'center' }}>
           AETHER · WIEGAND
         </div>
 
@@ -448,18 +476,18 @@ export default function InteractiveWiegandReader({
           }}
         >
           {cardStatus.kind === 'sending' ? (
-            <span style={{ fontSize: 11, color: '#94a3b8' }}>{cardStatus.msg}</span>
+            <span style={{ fontSize: 11, color: 'rgb(var(--hv-text-2))' }}>{cardStatus.msg}</span>
           ) : cardStatus.kind === 'ok' ? (
-            <span style={{ fontSize: 11, color: '#4ade80' }}>{cardStatus.msg}</span>
+            <span style={{ fontSize: 11, color: 'rgb(var(--hv-success-text))' }}>{cardStatus.msg}</span>
           ) : cardStatus.kind === 'err' ? (
-            <span style={{ fontSize: 11, color: '#fca5a5' }}>{cardStatus.msg}</span>
+            <span style={{ fontSize: 11, color: 'rgb(var(--hv-error-text))' }}>{cardStatus.msg}</span>
           ) : (
             <>
-              <span style={{ fontSize: 10, color: cardLoaded ? '#86efac' : '#475569', letterSpacing: '0.05em' }}>
+              <span style={{ fontSize: 10, color: cardLoaded ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-line-strong))', letterSpacing: '0.05em' }}>
                 {cardLoaded ? 'Tap card' : 'Load a card →'}
               </span>
               {cardLoaded && cardReadout && (
-                <span style={{ fontSize: 10, color: '#475569', fontFamily: 'ui-monospace, monospace' }}>
+                <span style={{ fontSize: 10, color: 'rgb(var(--hv-text-disabled))', fontFamily: 'ui-monospace, monospace' }}>
                   {cardReadout}
                 </span>
               )}
@@ -475,10 +503,10 @@ export default function InteractiveWiegandReader({
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void sendPin(); } }}
           placeholder="Enter PIN…"
           style={{
-            background: 'rgba(0,0,0,0.4)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgb(var(--hv-surface) / 0.4)',
+            border: '1px solid rgb(var(--hv-contrast) / 0.08)',
             borderRadius: 4,
-            color: '#cbd5e1',
+            color: 'rgb(var(--hv-text))',
             fontFamily: 'ui-monospace, monospace',
             fontSize: 16,
             textAlign: 'center',
@@ -497,17 +525,17 @@ export default function InteractiveWiegandReader({
               key={k}
               onClick={() => handleKey(k)}
               style={{
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 50%, transparent 100%)',
-                color: '#f0f0f0',
-                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'linear-gradient(180deg, rgb(var(--hv-contrast) / 0.07) 0%, rgb(var(--hv-contrast) / 0.02) 50%, transparent 100%)',
+                color: 'rgb(var(--hv-text))',
+                border: '1px solid rgb(var(--hv-contrast) / 0.1)',
                 borderRadius: 6,
                 padding: '14px 0',
                 fontSize: 18,
                 fontWeight: 500,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
-                textShadow: '0 0 6px rgba(255,255,255,0.25), 0 1px 0 rgba(0,0,0,0.6)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                textShadow: '0 0 6px rgb(var(--hv-contrast) / 0.25), 0 1px 0 rgba(0,0,0,0.6)',
+                boxShadow: 'inset 0 1px 0 rgb(var(--hv-contrast) / 0.06)',
               }}
             >{k}</button>
           ))}
@@ -516,32 +544,32 @@ export default function InteractiveWiegandReader({
         {/* Action row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
           <button onClick={() => handleKey('Clear')} style={{
-            background: 'linear-gradient(180deg, #7f1d1d 0%, #450a0a 100%)', color: '#fff',
-            border: '1px solid #991b1b', borderRadius: 6, padding: '10px 0',
+            background: 'linear-gradient(180deg, rgb(var(--hv-error-tint-strong)) 0%, rgb(var(--hv-error-tint)) 100%)', color: 'rgb(var(--hv-text))',
+            border: '1px solid rgb(var(--hv-error-tint-strong))', borderRadius: 6, padding: '10px 0',
             fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
           }}>Clear</button>
           <button onClick={() => handleKey('Back')} style={{
-            background: 'linear-gradient(180deg, #374151 0%, #1f2937 100%)', color: '#fff',
-            border: '1px solid #4b5563', borderRadius: 6, padding: '10px 0',
+            background: 'linear-gradient(180deg, rgb(var(--hv-line)) 0%, rgb(var(--hv-widget)) 100%)', color: 'rgb(var(--hv-text))',
+            border: '1px solid rgb(var(--hv-line-strong))', borderRadius: 6, padding: '10px 0',
             fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
           }}>Back</button>
           <button onClick={() => handleKey('Send')} style={{
-            background: 'linear-gradient(180deg, #1d4ed8 0%, #1e3a8a 100%)', color: '#fff',
-            border: '1px solid #2563eb', borderRadius: 6, padding: '10px 0',
+            background: 'linear-gradient(180deg, rgb(var(--hv-info-strong)) 0%, rgb(var(--hv-info-tint-strong)) 100%)', color: 'rgb(var(--hv-text))',
+            border: '1px solid rgb(var(--hv-info))', borderRadius: 6, padding: '10px 0',
             fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
           }}>Send</button>
         </div>
 
         {/* Bottom info row */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-          <div style={{ fontSize: 9, color: '#64748b', fontFamily: 'monospace' }}>{pinReadout}</div>
+          <div style={{ fontSize: 9, color: 'rgb(var(--hv-text-3))', fontFamily: 'monospace' }}>{pinReadout}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button
               onClick={() => setMaskPin(m => !m)}
               title={maskPin ? 'Show PIN' : 'Mask PIN'}
               style={{
-                background: 'transparent', border: '1px solid rgba(255,255,255,0.12)',
-                color: '#94a3b8', fontSize: 10, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
+                background: 'transparent', border: '1px solid rgb(var(--hv-contrast) / 0.12)',
+                color: 'rgb(var(--hv-text-2))', fontSize: 10, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
               }}
             >{maskPin ? '👁' : '🙈'}</button>
             <div style={{
@@ -549,7 +577,7 @@ export default function InteractiveWiegandReader({
               opacity: txPulse ? 1 : 0.35,
               animation: txPulse ? `${txAnim} 200ms ease-in-out infinite` : 'none',
               transition: 'opacity 0.15s ease',
-              color: txPulse ? '#22c55e' : '#475569',
+              color: txPulse ? 'rgb(var(--hv-success))' : 'rgb(var(--hv-line-strong))',
             }}>
               <span style={{ fontSize: 9, fontWeight: 500, letterSpacing: '0.1em' }}>↗ TX</span>
             </div>
@@ -558,8 +586,8 @@ export default function InteractiveWiegandReader({
       </div>
 
       {/* ===== Status caption ===== */}
-      <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', minHeight: '1.5em' }}>
-        <span style={{ color: '#64748b' }}>Local:</span>{' '}
+      <div style={{ fontSize: 11, color: 'rgb(var(--hv-text-2))', textAlign: 'center', minHeight: '1.5em' }}>
+        <span style={{ color: 'rgb(var(--hv-text-3))' }}>Local:</span>{' '}
         {ledState === 'idle'      ? 'Ready'
          : ledState === 'sending' ? 'Transmitting…'
          : ledState === 'ok'      ? 'TX OK'
@@ -570,9 +598,9 @@ export default function InteractiveWiegandReader({
       <div style={{
         width: '100%',
         background: '#000000',
-        border: '1px solid rgba(255,255,255,0.15)',
+        border: '1px solid rgb(var(--hv-contrast) / 0.15)',
         borderRadius: 4,
-        boxShadow: 'inset 0 0 14px rgba(0,255,128,0.04), 0 2px 6px rgba(0,0,0,0.5)',
+        boxShadow: 'inset 0 0 14px rgb(var(--hv-success-text) / 0.04), 0 2px 6px rgba(0,0,0,0.5)',
         padding: '10px 12px',
         maxHeight: 330,
         overflowY: 'auto',
@@ -580,19 +608,19 @@ export default function InteractiveWiegandReader({
         flexDirection: 'column',
         gap: 6,
       }}>
-        <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-2))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Recent transmissions
         </div>
-        <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, color: '#e2e8f0', lineHeight: 1.85 }}>
+        <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, color: 'rgb(var(--hv-text))', lineHeight: 1.85 }}>
           {recent.length === 0 ? (
-            <div style={{ color: '#475569' }}>No transmissions yet.</div>
+            <div style={{ color: 'rgb(var(--hv-text-disabled))' }}>No transmissions yet.</div>
           ) : recent.map((r, i) => (
             <div key={i}>
-              <span style={{ color: '#94a3b8' }}>{r.time}</span>{' '}
+              <span style={{ color: 'rgb(var(--hv-text-2))' }}>{r.time}</span>{' '}
               <span style={{
-                color: r.type === 'CARD' ? '#4ade80'
-                     : r.type === 'PIN'  ? '#60a5fa'
-                     : '#fca5a5',
+                color: r.type === 'CARD' ? 'rgb(var(--hv-success-text))'
+                     : r.type === 'PIN'  ? 'rgb(var(--hv-info-text))'
+                     : 'rgb(var(--hv-error-text))',
               }}>{r.type}</span>{' '}
               {r.description}
             </div>

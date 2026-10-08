@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Wifi, WifiOff, Activity, Settings, FileText, PlayCircle, Circle, Radio, Building2, Cpu, Cloud, Terminal, Monitor, Network, Wrench } from 'lucide-react';
+import { Wifi, WifiOff, Activity, Settings, FileText, PlayCircle, Circle, Radio, Building2, Cpu, Cloud, Terminal, Monitor, Network, Wrench, Gauge } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import OSDPSection from './OSDPSection';
 import ReadersSection from './ReadersSection';
@@ -11,8 +11,12 @@ import DoorSection from './DoorSection';  // ✅ NEW: Extracted Door Section wit
 import OSDPTransferTool from './OSDPTransferTool'; 
 import ConfigSection from './ConfigSection'; 
 import Reports from './Reports';
-import StreamView from './StreamView';
+import StreamToolPanel from './stream/StreamToolPanel';
 import SwitchSection from './SwitchSection';
+import { TopBar, SideNav, PageHeader, useNavCollapsed, StatusDot } from './shell/AppShell';
+import type { ClusterNav, NavItem } from './shell/AppShell';
+import EOLCalibrationSection from './EOLCalibrationSection';
+import EmulatedBoardsSection from './EmulatedBoardsSection';
 /** ---------- Types ---------- */
 type InputType =
   | 'None' | 'REX-Button' | 'Entry Sensor' | 'Lock Sensor'
@@ -137,12 +141,20 @@ interface IOAccessEmulatorProps {
   nodeLabel?: string;
   /** Callback so ClusterManager can track live connection status per node */
   onConnectionChange?: (nodeId: string, connected: boolean) => void;
+  /** Node switcher for the top bar when running inside ClusterManager */
+  cluster?: ClusterNav;
 }
+/** Small count badge for 2-depth navigation items (4px gap to the label, per HV Navigation menu). */
+const NavBadge: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="ml-1 min-w-[20px] h-[18px] px-1.5 rounded-full bg-hv-contrast/10 text-hv-text-2 text-[11px] leading-[18px] text-center font-medium">{children}</span>
+);
+
 const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
   externalIp,
   nodeId,
   nodeLabel,
   onConnectionChange,
+  cluster,
 }) => {
   // Namespace localStorage per node so each Pi has its own saved config.
   // Falls back to the legacy 'systemConfig' key in standalone mode.
@@ -152,11 +164,11 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
   // When running inside a cluster the IP is controlled externally.
   const [ipAddress, setIpAddress] = useState(externalIp || 'localhost');
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [activeTab, setActiveTab] = useState<'access-control'|'readers'|'emulation'|'automation'|'controller-emulator'|'config'|'reports'|'tools'>('access-control');
+  const [activeTab, setActiveTab] = useState<'access-control'|'readers'|'emulation'|'automation'|'controller-emulator'|'config'>('access-control');
   const [activeAccessControlTab, setActiveAccessControlTab] = useState<'control'|'doors'|'elevator'>('control');
+  const [navCollapsed, toggleNav] = useNavCollapsed();
   // Switch control, console builder and stream view are grouped under Tools
   // rather than each holding a slot in the main bar.
-  const [activeToolsTab, setActiveToolsTab] = useState<'switch'|'oncafe'|'stream'>('switch');
   /** ---------- Shared State (used by multiple components) ---------- */
   const [readerPool, setReaderPool] = useState<Reader[]>([
     { id: 'reader1', name: 'Wiegand Reader 1', type: 'wiegand', enabled: true, d0: 17, d1: 27, assignedToDoor: 1, position: 'in' },
@@ -347,6 +359,9 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
     if (!connected) return;
     const item = controllerOutputs.find(o => o.id === id);
     if (!item) return;
+    // Emulated-board outputs (id >= 100) are driven by the controller over OSDP;
+    // they must never switch the HAT's relays.
+    if (id >= 100) return;
     const newState = !item.active;
     await postGpio(ipAddress, item.channel, newState ? 1 : 0);
     setControllerOutputs(prev => prev.map(o => o.id === id ? { ...o, active: newState } : o));
@@ -535,194 +550,121 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
       onConnectionChange(nodeId, connected);
     }
   }, [connected, nodeId, onConnectionChange]);
-  // Load saved config on mount
+  // Load saved config on mount: the copy on the Pi wins; the browser copy is the fallback
   useEffect(() => {
-    try {
-      const savedConfig = localStorage.getItem(storageKey);
-      if (savedConfig) {
-        const config = JSON.parse(savedConfig);
-        if (config.outputs) setOutputs(config.outputs);
-        if (config.inputs) setInputs(config.inputs);
-        if (config.controllerOutputs) setControllerOutputs(config.controllerOutputs);
-        if (config.readerPool) setReaderPool(config.readerPool);
-        if (config.credentialLibrary) setCredentialLibrary(config.credentialLibrary);
-      }
-    } catch (e) { 
-      console.error('Failed to load system config:', e); 
-    }
-  }, [storageKey]);
+    const apply = (config: any) => {
+      if (config.outputs) setOutputs(config.outputs);
+      if (config.inputs) setInputs(config.inputs);
+      if (config.controllerOutputs) setControllerOutputs(config.controllerOutputs.filter((o: any) => o.id < 100));
+      if (config.readerPool) setReaderPool(config.readerPool);
+      if (config.credentialLibrary) setCredentialLibrary(config.credentialLibrary);
+    };
+    let local: any = null;
+    try { const raw = localStorage.getItem(storageKey); if (raw) local = JSON.parse(raw); } catch (e) { console.error('Failed to load system config:', e); }
+    if (local) apply(local);
+    fetch(`http://${ipAddress}:3001/api/config/app`).then(r => r.json()).then(j => {
+      if (j?.success && j.config) apply(j.config);
+    }).catch(() => { /* backend offline: keep the browser copy */ });
+  }, [storageKey, ipAddress]);
   /** ---------- UI ---------- */
+  const NAV: NavItem[] = [
+    { id: 'access-control', label: 'Access Control', icon: <Building2 size={20} />, children: [
+      { id: 'control', label: 'Controls', badge: <NavBadge>{inputs.length + outputs.length}</NavBadge> },
+      { id: 'doors', label: 'Doors', badge: <NavBadge>{doors.filter(d => d.enabled).length}</NavBadge> },
+      { id: 'elevator', label: 'Elevator' },
+    ] },
+    { id: 'readers', label: 'Readers', icon: <Radio size={20} /> },
+    { id: 'emulation', label: 'Emulation', icon: <PlayCircle size={20} />,
+      badge: isEmulating ? <span className="ml-auto h-5 px-2 rounded-full bg-hv-success/15 text-hv-success-fg text-[11px] leading-5 font-semibold">Running</span> : undefined },
+    // Automation stays hidden from navigation (its render block below is kept).
+    { id: 'controller-emulator', label: 'Controller Emulator', icon: <Cpu size={20} /> },
+    { id: 'config', label: 'Setup & Tools', icon: <Settings size={20} /> },
+  ];
+  const navLabel = NAV.find(n => n.id === activeTab)?.label ?? 'Automation';
+  const subLabel = activeTab === 'access-control'
+    ? ({ control: 'Controls', doors: 'Doors', elevator: 'Elevator' } as const)[activeAccessControlTab] : undefined;
+  const crumbs = ['Aether', ...(nodeLabel ? [nodeLabel] : []), navLabel, ...(subLabel ? [subLabel] : [])];
   return (
-    <div className="min-h-screen text-white p-6" style={{ background: 'radial-gradient(900px 520px at 88% -8%, rgba(240,167,60,.10) 0%, transparent 60%), radial-gradient(700px 500px at 6% 2%, rgba(240,167,60,.045) 0%, transparent 55%), #1B1613' }}>
-      <div className="max-w-[1800px] mx-auto mb-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-           <h1 className="text-4xl font-bold bg-gradient-to-r from-[#FFC66E] to-[#F0A73C] bg-clip-text text-transparent">
-  Aether v1.5
-</h1>
-<p className="text-sm text-[#ADA294] tracking-wide mt-0.5">
-  Access Emulation Testing Hardware Evaluation Resource
-</p>
-<p className="text-[#786D60] mt-1">
-  {nodeLabel ? `Node: ${nodeLabel}` : 'Access Control Emulator - Modular Architecture'}
-</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="localhost"
-                value={ipAddress}
-                onChange={(e) => { if (!externalIp) setIpAddress(e.target.value); }}
-                disabled={connected || !!externalIp}
-                title={externalIp ? 'IP is managed by the Cluster Manager' : undefined}
-                className="border rounded-lg px-4 py-2 w-48 disabled:opacity-50"
-                style={{ background: '#241E19', borderColor: '#38302A' }}
-              />
-              <button
-                onClick={handleConnect}
-                className={`px-6 py-2 rounded-lg font-semibold flex items-center gap-2 ${
-                  connected ? 'bg-[#C6604F] hover:bg-[#A84E3F]' : 'bg-[#4F8B5C] hover:bg-[#3E6E48]'
-                }`}
-              >
-                {connected ? <WifiOff size={20} /> : <Wifi size={20} />}
-                {connected ? 'Disconnect' : 'Connect'}
-              </button>
-            </div>
-            <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-              connected ? 'bg-[#4F8B5C]/20 text-[#7BD497]' : 'text-[#786D60]'
-            }`} style={!connected ? { background: '#241E19' } : {}}>
-              <Circle size={12} fill={connected ? 'currentColor' : 'none'} />
-              {connected ? 'Connected' : 'Disconnected'}
-            </div>
-          </div>
-        </div>
-                {/* Main Tab Navigation */}
-        {/* Automation is hidden from the bar, not removed — its render block below
-            is untouched, so adding 'automation' back to this array restores it. */}
-        <div className="flex border-b justify-around" style={{ borderColor: '#38302A' }}>
-          {['access-control', 'readers', 'emulation', 'automation', 'controller-emulator', 'tools', 'config', 'reports'].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-3 py-3 font-semibold relative whitespace-nowrap ${
-                activeTab === tab ? 'text-[#F0A73C]' : 'text-[#786D60] hover:text-[#F3ECE3]'
-              }`}
-            >
-              {tab === 'access-control' && <Building2 className="inline mr-2" size={20} />}
-              {tab === 'readers' && <Radio className="inline mr-2" size={20} />}
-              {tab === 'emulation' && <PlayCircle className="inline mr-2" size={20} />}
-              {tab === 'automation' && <Activity className="inline mr-2" size={20} />}
-              {tab === 'controller-emulator' && <Cpu className="inline mr-2" size={20} />}
-              {tab === 'tools' && <Wrench className="inline mr-2" size={20} />}
-              {tab === 'config' && <Settings className="inline mr-2" size={20} />}
-              {tab === 'reports' && <FileText className="inline mr-2" size={20} />}
-              {tab === 'access-control' ? 'Access Control Modules' : tab === 'controller-emulator' ? 'Controller Emulator' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              {activeTab === tab && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#F0A73C]" />}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="min-h-screen flex flex-col bg-hv-surface text-hv-text">
+      <TopBar
+        onToggleNav={toggleNav}
+        navCollapsed={navCollapsed}
+        title="Aether"
+        version="v1.5"
+        subtitle="Access Emulation Testing Hardware Evaluation Resource"
+        cluster={cluster}
+      >
+        <label htmlFor={`node-ip-${nodeId ?? 'local'}`} className="text-xs text-hv-text-3 hidden md:inline">Node IP</label>
+        <input
+          id={`node-ip-${nodeId ?? 'local'}`}
+          type="text"
+          placeholder="localhost"
+          value={ipAddress}
+          onChange={(e) => { if (!externalIp) setIpAddress(e.target.value); }}
+          disabled={connected || !!externalIp}
+          title={externalIp ? 'IP is managed by the Cluster Manager' : undefined}
+          className="h-8 w-40 px-3 rounded-hv-xs border border-hv-line-strong bg-hv-contrast/[0.04] text-sm font-mono text-hv-text placeholder:text-hv-text-3 focus:outline-none focus:border-hv-info disabled:opacity-60"
+        />
+        <span className={`h-6 inline-flex items-center gap-1.5 px-2.5 rounded-full text-xs font-medium ${connected ? 'bg-hv-success/15 text-hv-success-fg' : 'bg-hv-contrast/5 text-hv-text-3'}`}>
+          <StatusDot on={connected} />
+          {connected ? 'Connected' : 'Disconnected'}
+        </span>
+        <button
+          onClick={handleConnect}
+          className={`h-8 min-w-[80px] px-4 rounded-hv-xs text-sm font-semibold inline-flex items-center justify-center gap-2 ${
+            connected ? 'bg-hv-contrast/15 hover:bg-hv-contrast/20 text-hv-text' : 'bg-hv-brand hover:bg-hv-brand-hover text-[#FFFFFF]'
+          }`}
+        >
+          {connected ? <WifiOff size={16} /> : <Wifi size={16} />}
+          {connected ? 'Disconnect' : 'Connect'}
+        </button>
+      </TopBar>
+      <div className="flex flex-1 min-h-0">
+        <SideNav
+          items={NAV}
+          active={activeTab}
+          activeChild={activeAccessControlTab}
+          collapsed={navCollapsed}
+          onSelect={(id, child) => {
+            setActiveTab(id as any);
+            if (id === 'access-control' && child) setActiveAccessControlTab(child as any);
+          }}
+        />
+        <main className="flex-1 min-w-0 p-6">
+          <PageHeader
+            crumbs={crumbs}
+            title={activeTab === 'access-control' ? subLabel : undefined}
+            description={activeTab === 'access-control'
+              ? ({ control: 'System inputs, outputs and controller GPIO', doors: 'Door simulation: locks, position and request-to-exit', elevator: 'Floor access control: relays and floor selection' } as const)[activeAccessControlTab]
+              : undefined}
+          />
       <div className="max-w-[1800px] mx-auto">
         {/* ACCESS CONTROL MODULES TAB */}
         {activeTab === 'access-control' && (
           <div className="space-y-6">
-            {/* Access Control Modules Header */}
-            <div className="rounded-xl p-6 border shadow-2xl" style={{ background: 'linear-gradient(160deg, #241E19, #1B1613)', borderColor: '#38302A' }}>
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                    <Building2 className="w-8 h-8 text-[#F0A73C]" />
-                    Access Control Modules
-                  </h1>
-                  <p className="text-[#ADA294] mt-2">Manage doors, controls, and elevators</p>
-                </div>
-              </div>
-              {/* Module Type Cards */}
-              <div className="grid grid-cols-3 gap-4">
-                {/* Controls Card */}
-                <button
-                  onClick={() => setActiveAccessControlTab('control')}
-                  className={`p-6 rounded-lg border-2 transition-all text-left ${
-                    activeAccessControlTab === 'control'
-                      ? 'border-[#F0A73C] bg-gradient-to-br from-[#F0A73C]/15 to-[#F0A73C]/5 shadow-lg shadow-[#F0A73C]/20'
-                      : 'border-[#38302A] bg-[#241E19]/50 hover:border-[#4A3F36]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Activity className={`w-8 h-8 ${activeAccessControlTab === 'control' ? 'text-[#F0A73C]' : 'text-[#786D60]'}`} />
-                    <span className="px-2 py-1 bg-[#F0A73C]/15 text-[#FFC66E] text-xs rounded-full border border-[#F0A73C]/30">
-                      {inputs.length + outputs.length} I/O
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-1">Controls</h3>
-                  <p className="text-sm text-[#ADA294]">System I/O management</p>
-                  <div className="mt-3 text-xs text-[#786D60]">Inputs | Outputs | Controller GPIO</div>
-                </button>
-                {/* Doors Card */}
-                <button
-                  onClick={() => setActiveAccessControlTab('doors')}
-                  className={`p-6 rounded-lg border-2 transition-all text-left ${
-                    activeAccessControlTab === 'doors'
-                      ? 'border-[#5FB7B0] bg-gradient-to-br from-[#5FB7B0]/15 to-[#5FB7B0]/5 shadow-lg shadow-[#5FB7B0]/20'
-                      : 'border-[#38302A] bg-[#241E19]/50 hover:border-[#4A3F36]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Activity className={`w-8 h-8 ${activeAccessControlTab === 'doors' ? 'text-[#5FB7B0]' : 'text-[#786D60]'}`} />
-                    <span className="px-2 py-1 bg-[#7BD497]/15 text-[#7BD497] text-xs rounded-full border border-[#7BD497]/30">
-                      {doors.filter(d => d.enabled).length} Active
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-1">Doors</h3>
-                  <p className="text-sm text-[#ADA294]">{doors.length} doors configured</p>
-                  <div className="mt-3 text-xs text-[#786D60]">Complete Door Simulation</div>
-                </button>
-                {/* Elevator Card */}
-                <button
-                  onClick={() => setActiveAccessControlTab('elevator')}
-                  className={`p-6 rounded-lg border-2 transition-all text-left ${
-                    activeAccessControlTab === 'elevator'
-                      ? 'border-[#8FB488] bg-gradient-to-br from-[#8FB488]/15 to-[#8FB488]/5 shadow-lg shadow-[#8FB488]/20'
-                      : 'border-[#38302A] bg-[#241E19]/50 hover:border-[#4A3F36]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Building2 className={`w-8 h-8 ${activeAccessControlTab === 'elevator' ? 'text-[#8FB488]' : 'text-[#786D60]'}`} />
-                    <span className="px-2 py-1 bg-[#8FB488]/15 text-[#8FB488] text-xs rounded-full border border-[#8FB488]/30">
-                      Multi-Floor
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-1">Elevators</h3>
-                  <p className="text-sm text-[#ADA294]">Floor access control</p>
-                  <div className="mt-3 text-xs text-[#786D60]">Relay control | Floor selection</div>
-                </button>
-              </div>
-            </div>
             {/* CONTROLS SUB-TAB */}
             {activeAccessControlTab === 'control' && (
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-6">
                   {/* Inputs */}
-                  <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+                  <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
                     <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                      <div className="w-3 h-3 bg-[#F0A73C] rounded-full animate-pulse" />
+                      <div className="w-3 h-3 bg-hv-brand rounded-full animate-pulse" />
                       Input Group (Relay Outputs)
                     </h2>
                     <div className="space-y-3">
                       {inputs.map(input => (
-                        <div key={input.id} className="rounded-lg p-4 border" style={{ background: 'rgba(21, 17, 11, 0.5)', borderColor: '#2A241E' }}>
+                        <div key={input.id} className="rounded-lg p-4 border" style={{ background: 'rgb(var(--hv-surface) / 0.5)', borderColor: 'rgb(var(--hv-popup-panel))' }}>
                           <div className="flex items-center justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-3">
-                                <div className={`w-4 h-4 rounded-full ${input.active ? 'bg-[#6FBF7E] shadow-lg shadow-[#6FBF7E]/40' : 'bg-[#4A3F36]'}`} />
+                                <div className={`w-4 h-4 rounded-full ${input.active ? 'bg-hv-success shadow-lg shadow-hv-success/40' : 'bg-hv-line-strong'}`} />
                                 <div>
                                   <div className="font-semibold">{input.name}</div>
-                                  <div className="text-xs text-[#786D60]">
+                                  <div className="text-xs text-hv-text-3">
                                     Channel {input.channel} • {input.type}
                                     {input.restingState && (
-                                      <span className="ml-2 px-2 py-0.5 bg-[#F0A73C]/15 rounded text-[#FFC66E]">
+                                      <span className="ml-2 px-2 py-0.5 bg-hv-brand/15 rounded text-hv-brand-text">
                                         {input.restingState}
                                       </span>
                                     )}
@@ -734,7 +676,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                               onClick={() => toggleInput(input.id)}
                               disabled={!connected}
                               className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                input.active ? 'bg-[#4F8B5C] hover:bg-[#3E6E48]' : 'bg-[#2A231C] hover:bg-[#322A22]'
+                                input.active ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong' : 'bg-hv-popup-panel hover:bg-hv-box'
                               } disabled:opacity-30 disabled:cursor-not-allowed`}
                             >
                               {input.active ? 'ACTIVE' : 'INACTIVE'}
@@ -745,9 +687,9 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                     </div>
                   </div>
                   {/* Outputs */}
-                  <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+                  <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
                     <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                      <div className="w-3 h-3 bg-[#5FB7B0] rounded-full animate-pulse" />
+                      <div className="w-3 h-3 bg-hv-info rounded-full animate-pulse" />
                       Output Group (Monitoring Inputs)
                     </h2>
                     <div className="space-y-3">
@@ -756,40 +698,40 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                         const supervisionState = output.supervisionState || 'normal';
                         
                         const stateColors = {
-                          normal: 'bg-[#2A231C] text-[#ADA294]',
-                          active: 'bg-[#4F8B5C]/40 text-[#CDEBD3]',
-                          trouble: 'bg-[#C79A34]/40 text-[#F3E4BE]',
-                          short: 'bg-[#C6604F]/40 text-[#F5D4CD]'
+                          normal: 'bg-hv-popup-panel text-hv-text-2',
+                          active: 'bg-hv-success-strong/40 text-hv-success-text',
+                          trouble: 'bg-hv-brand-hover/40 text-hv-brand-text',
+                          short: 'bg-hv-error-strong/40 text-hv-error-text'
                         };
                         
                         const indicatorColors = {
-                          normal: 'bg-[#4A3F36]',
-                          active: 'bg-[#6FBF7E] shadow-lg shadow-[#6FBF7E]/40',
-                          trouble: 'bg-[#E6C766] shadow-lg shadow-[#E6C766]/40',
-                          short: 'bg-[#E0705F] shadow-lg shadow-[#E0705F]/40'
+                          normal: 'bg-hv-line-strong',
+                          active: 'bg-hv-success shadow-lg shadow-hv-success/40',
+                          trouble: 'bg-hv-warning shadow-lg shadow-hv-warning/40',
+                          short: 'bg-hv-error shadow-lg shadow-hv-error/40'
                         };
                         
                         return (
-                          <div key={output.id} className="rounded-lg p-4 border" style={{ background: 'rgba(21, 17, 11, 0.5)', borderColor: '#2A241E' }}>
+                          <div key={output.id} className="rounded-lg p-4 border" style={{ background: 'rgb(var(--hv-surface) / 0.5)', borderColor: 'rgb(var(--hv-popup-panel))' }}>
                             <div className="flex items-center justify-between">
                               <div className="flex-1">
                                 <div className="flex items-center gap-3">
                                   <div className={`w-4 h-4 rounded-full ${
                                     isSupervised 
                                       ? indicatorColors[supervisionState]
-                                      : (output.active ? 'bg-[#6FBF7E] shadow-lg shadow-[#6FBF7E]/40' : 'bg-[#4A3F36]')
+                                      : (output.active ? 'bg-hv-success shadow-lg shadow-hv-success/40' : 'bg-hv-line-strong')
                                   }`} />
                                   <div>
                                     <div className="font-semibold">{output.name}</div>
-                                    <div className="text-xs text-[#786D60]">
+                                    <div className="text-xs text-hv-text-3">
                                       Channel {output.channel} • {output.type}
                                       {output.inputType && (
-                                        <span className="ml-2 px-2 py-0.5 bg-[#5FB7B0]/15 rounded text-[#8FD3CD]">
+                                        <span className="ml-2 px-2 py-0.5 bg-hv-info/15 rounded text-hv-info-text">
                                           {output.inputType === 'opto' ? 'Opto' : 'Analog 0-10V'}
                                         </span>
                                       )}
                                       {output.supervisionType && (
-                                        <span className="ml-2 px-2 py-0.5 bg-[#5FB7B0]/15 rounded text-[#8FD3CD]">
+                                        <span className="ml-2 px-2 py-0.5 bg-hv-info/15 rounded text-hv-info-text">
                                           {output.supervisionType}
                                         </span>
                                       )}
@@ -800,7 +742,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                               <div className={`px-4 py-2 rounded-lg font-semibold ${
                                 isSupervised 
                                   ? stateColors[supervisionState]
-                                  : (output.active ? 'bg-[#4F8B5C]/40 text-[#CDEBD3]' : 'bg-[#2A231C] text-[#786D60]')
+                                  : (output.active ? 'bg-hv-success-strong/40 text-hv-success-text' : 'bg-hv-popup-panel text-hv-text-3')
                               }`}>
                                 {isSupervised 
                                   ? supervisionState.toUpperCase()
@@ -815,21 +757,21 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                   </div>
                 </div>
                 {/* Controller Outputs */}
-                <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+                <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
                   <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                    <div className="w-3 h-3 bg-[#5FB7B0] rounded-full animate-pulse" />
-                    Controller Based Aux Inputs / Outputs
+                    <div className="w-3 h-3 bg-hv-info rounded-full animate-pulse" />
+                    Controller Aux Outputs
                   </h2>
                   <div className="grid grid-cols-2 gap-3">
-                    {controllerOutputs.map(output => (
-                      <div key={output.id} className="rounded-lg p-4 border" style={{ background: 'rgba(21, 17, 11, 0.5)', borderColor: '#2A241E' }}>
+                    {controllerOutputs.filter(o => o.id < 100).map(output => (
+                      <div key={output.id} className="rounded-lg p-4 border" style={{ background: 'rgb(var(--hv-surface) / 0.5)', borderColor: 'rgb(var(--hv-popup-panel))' }}>
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-3">
-                              <div className={`w-4 h-4 rounded-full ${output.active ? 'bg-[#5FB7B0] shadow-lg shadow-[#5FB7B0]/40' : 'bg-[#4A3F36]'}`} />
+                              <div className={`w-4 h-4 rounded-full ${output.active ? 'bg-hv-info shadow-lg shadow-hv-info/40' : 'bg-hv-line-strong'}`} />
                               <div>
                                 <div className="font-semibold">{output.name}</div>
-                                <div className="text-xs text-[#786D60]">Channel {output.channel} • {output.type}</div>
+                                <div className="text-xs text-hv-text-3">Channel {output.channel} • {output.type}</div>
                               </div>
                             </div>
                           </div>
@@ -837,7 +779,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                             onClick={() => toggleControllerOutput(output.id)}
                             disabled={!connected}
                             className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                              output.active ? 'bg-[#F0A73C] hover:bg-[#C9862E]' : 'bg-[#2A231C] hover:bg-[#322A22]'
+                              output.active ? 'bg-hv-brand hover:bg-hv-brand-hover' : 'bg-hv-popup-panel hover:bg-hv-box'
                             } disabled:opacity-30 disabled:cursor-not-allowed`}
                           >
                             {output.active ? 'TRIGGERED' : 'IDLE'}
@@ -847,6 +789,8 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                     ))}
                   </div>
                 </div>
+                {/* Emulated downstream boards: inputs sent over OSDP, outputs driven by the controller */}
+                <EmulatedBoardsSection ipAddress={ipAddress} connected={connected} socket={socket} logSystem={logSystem} />
               </div>
             )}
             {/* ✅ DOORS SUB-TAB - Now using extracted DoorSection component with corrected I/O architecture */}
@@ -890,8 +834,12 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
           />
         )}
         {/* EMULATION TAB */}
-        {activeTab === 'emulation' && (
+        {/* EMULATION stays mounted while you visit other pages: a workflow run lives
+            inside this component, so unmounting it orphaned the run (Stop could no
+            longer reach it) and cancelled scheduled runs. It is only hidden. */}
+        <div hidden={activeTab !== 'emulation'}>
           <EmulationSection
+            active={activeTab === 'emulation'}
             ipAddress={ipAddress}
             connected={connected}
             inputs={inputs}
@@ -907,7 +855,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
             logSystem={logSystem}
             postGpio={postGpio}
           />
-        )}
+        </div>
         {/* AUTOMATION TAB — hidden from the tab bar; kept so it can be restored */}
         {activeTab === 'automation' && (
           <AutomationSection
@@ -927,9 +875,50 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
             logSystem={logSystem}
           />
         )}
-        {/* CONFIG TAB */}
+        {/* SETUP & TOOLS TAB — configuration pages and the hands-on tools */}
         {activeTab === 'config' && (
           <ConfigSection
+            eolPanel={<EOLCalibrationSection ipAddress={ipAddress} connected={connected} logSystem={logSystem} logAudit={logAudit} />}
+            toolPanels={{
+              // Board Blueprint Studio: a standalone page (frontend/public). It fills the
+              // panel's width (beside the cluster sidebar) and may go full screen.
+              blueprint: (
+                <div style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 560 }}>
+                  <iframe src="/board-blueprint-studio.html?v=f4eb714f" title="Board Blueprint Studio" allowFullScreen
+                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, display: 'block', background: 'rgb(var(--hv-surface))' }} />
+                </div>
+              ),
+              switch: <SwitchSection ipAddress={ipAddress} connected={connected} socket={socket} logSystem={logSystem} logAudit={logAudit} />,
+              // The console builder breaks out to full viewport width on purpose:
+              // it is an iframe with its own layout and the page gutters crop it.
+              oncafe: (
+                <div style={{ width: '100%', height: 'calc(100vh - 210px)' }}>
+                  <iframe src="/oncafe-console-builder.html?v=aa79712a" title="OnCafe Console Builder"
+                    style={{ width: '100%', height: '100%', border: 'none', display: 'block' }} />
+                </div>
+              ),
+              stream: <StreamToolPanel ipAddress={ipAddress} />,
+              reports: (
+                <Reports
+                  apiUrl={`http://${ipAddress}:3001`}
+                  auditLog={auditLog}
+                  emulationLog={emulationLog}
+                  systemLog={systemLog}
+                  onClearAudit={() => {
+                    setAuditLog([]);
+                    logSystem('info', 'Audit log cleared');
+                  }}
+                  onClearEmulation={() => {
+                    setEmulationLog([]);
+                    logSystem('info', 'Emulation log cleared');
+                  }}
+                  onClearSystem={() => {
+                    setSystemLog([]);
+                    logSystem('info', 'System log cleared');
+                  }}
+                />
+              ),
+            }}
             inputs={inputs}
             outputs={outputs}
             controllerOutputs={controllerOutputs}
@@ -941,7 +930,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
               );
               logAudit(`Modified Controller Output ${id}: ${String(field)} = ${value}`);
             }}
-            onSaveConfig={() => {
+            onSaveConfig={async () => {
               try {
                 const config = {
                   version: '3.0',
@@ -952,11 +941,15 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                   readerPool,
                   credentialLibrary
                 };
-                localStorage.setItem(storageKey, JSON.stringify(config));
-                logSystem('success', 'System configuration saved successfully');
+                const cfg = { ...config, controllerOutputs: controllerOutputs.filter(o => o.id < 100) };
+                localStorage.setItem(storageKey, JSON.stringify(cfg));
+                const r = await fetch(`http://${ipAddress}:3001/api/config/app`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+                if (!r.ok) throw new Error(`the Pi answered HTTP ${r.status}`);
+                logSystem('success', 'System configuration saved to the Pi');
                 logAudit('Saved complete system configuration');
               } catch (e: any) {
                 logSystem('error', `Failed to save configuration: ${e.message}`);
+                throw e;
               }
             }}
             onLoadConfig={() => {
@@ -1056,127 +1049,8 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
             }}
           />
         )}
-        {/* TOOLS TAB — switch control, console builder and stream view */}
-        {activeTab === 'tools' && (
-          <div className="space-y-6">
-            <div className="rounded-xl p-6 border shadow-2xl" style={{ background: 'linear-gradient(160deg, #241E19, #1B1613)', borderColor: '#38302A' }}>
-              <div className="flex items-center justify-between mb-5 flex-wrap gap-4">
-                <div>
-                  <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-                    <Wrench className="w-8 h-8 text-[#F0A73C]" />
-                    Tools
-                  </h1>
-                  <p className="text-[#ADA294] mt-2">Switch control, console building and live video</p>
-                </div>
-              </div>
-              {/* Cards mirror the Access Control module picker so the two tabs
-                  read the same way, with a compact button row beneath for
-                  switching once you know where you are going. */}
-              <div className="grid grid-cols-3 gap-4">
-                <button
-                  onClick={() => setActiveToolsTab('switch')}
-                  className={`p-6 rounded-lg border-2 transition-all text-left ${
-                    activeToolsTab === 'switch'
-                      ? 'border-[#F0A73C] bg-gradient-to-br from-[#F0A73C]/15 to-[#F0A73C]/5 shadow-lg shadow-[#F0A73C]/20'
-                      : 'border-[#38302A] bg-[#241E19]/50 hover:border-[#4A3F36]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Network className={`w-8 h-8 ${activeToolsTab === 'switch' ? 'text-[#F0A73C]' : 'text-[#786D60]'}`} />
-                    <span className="px-2 py-1 bg-[#F0A73C]/15 text-[#FFC66E] text-xs rounded-full border border-[#F0A73C]/30">
-                      Live
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-1">Switch Ports</h3>
-                  <p className="text-sm text-[#ADA294]">Link and power control</p>
-                  <div className="mt-3 text-xs text-[#786D60]">Disconnects | PoE | Traffic</div>
-                </button>
-
-                <button
-                  onClick={() => setActiveToolsTab('oncafe')}
-                  className={`p-6 rounded-lg border-2 transition-all text-left ${
-                    activeToolsTab === 'oncafe'
-                      ? 'border-[#5FB7B0] bg-gradient-to-br from-[#5FB7B0]/15 to-[#5FB7B0]/5 shadow-lg shadow-[#5FB7B0]/20'
-                      : 'border-[#38302A] bg-[#241E19]/50 hover:border-[#4A3F36]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Terminal className={`w-8 h-8 ${activeToolsTab === 'oncafe' ? 'text-[#5FB7B0]' : 'text-[#786D60]'}`} />
-                    <span className="px-2 py-1 bg-[#5FB7B0]/15 text-[#8FD3CD] text-xs rounded-full border border-[#5FB7B0]/30">
-                      Builder
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-1">OnCAFE Console</h3>
-                  <p className="text-sm text-[#ADA294]">Console configuration</p>
-                  <div className="mt-3 text-xs text-[#786D60]">Layouts | Devices | Export</div>
-                </button>
-
-                <button
-                  onClick={() => setActiveToolsTab('stream')}
-                  className={`p-6 rounded-lg border-2 transition-all text-left ${
-                    activeToolsTab === 'stream'
-                      ? 'border-[#8FB488] bg-gradient-to-br from-[#8FB488]/15 to-[#8FB488]/5 shadow-lg shadow-[#8FB488]/20'
-                      : 'border-[#38302A] bg-[#241E19]/50 hover:border-[#4A3F36]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Monitor className={`w-8 h-8 ${activeToolsTab === 'stream' ? 'text-[#8FB488]' : 'text-[#786D60]'}`} />
-                    <span className="px-2 py-1 bg-[#8FB488]/15 text-[#8FB488] text-xs rounded-full border border-[#8FB488]/30">
-                      Video
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-white mb-1">Stream View</h3>
-                  <p className="text-sm text-[#ADA294]">Live camera feeds</p>
-                  <div className="mt-3 text-xs text-[#786D60]">Monitor | Verify | Record</div>
-                </button>
-              </div>
-
-            </div>
-            {activeToolsTab === 'switch' && (
-              <SwitchSection
-                ipAddress={ipAddress}
-                connected={connected}
-                socket={socket}
-                logSystem={logSystem}
-                logAudit={logAudit}
-              />
-            )}
-            {/* The console builder breaks out to full viewport width on purpose:
-                it is an iframe with its own layout and the page gutters crop it.
-                Height allows for the sub-tab header above it. */}
-            {activeToolsTab === 'oncafe' && (
-              <div style={{ width: '100vw', marginLeft: 'calc(50% - 50vw)', height: 'calc(100vh - 260px)' }}>
-                <iframe
-                  src="/oncafe-console-builder.html"
-                  title="OnCafe Console Builder"
-                  style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-                />
-              </div>
-            )}
-            {activeToolsTab === 'stream' && <StreamView />}
-          </div>
-        )}
-        {/* REPORTS TAB */}
-        {activeTab === 'reports' && (
-          <Reports
-            apiUrl={`http://${ipAddress}:3001`}
-            auditLog={auditLog}
-            emulationLog={emulationLog}
-            systemLog={systemLog}
-            onClearAudit={() => {
-              setAuditLog([]);
-              logSystem('info', 'Audit log cleared');
-            }}
-            onClearEmulation={() => {
-              setEmulationLog([]);
-              logSystem('info', 'Emulation log cleared');
-            }}
-            onClearSystem={() => {
-              setSystemLog([]);
-              logSystem('info', 'System log cleared');
-            }}
-          />
-        )}
+        </div>
+        </main>
       </div>
     </div>
   );

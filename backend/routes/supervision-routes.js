@@ -253,14 +253,192 @@ router.post('/calibrate/:board/:channel', async (req, res) => {
 router.get('/config', async (req, res) => {
   try {
     res.json({
-      rref: supervision.rref,
       vcc: supervision.vcc,
+      eolResistor: supervision.eolResistor,
+      alarmResistor: supervision.alarmResistor,
       thresholds: supervision.thresholds,
+      calibrationDate: supervision.calibration ? supervision.calibration.calibrationDate : null,
+      defaultProfile: supervision.getDefaultProfile().name,
+      zoneProfiles: supervision.store.zoneProfiles,
       zonesPerBoard: supervision.zonesPerBoard,
       maxBoards: supervision.maxBoards
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== 4-POINT EOL CALIBRATION ====================
+// Guided version of backend/4point.sh. Flow:
+//   start -> capture TAMPER, ALARM, NORMAL, TROUBLE (any order, re-capture allowed)
+//   -> review the preview -> apply as a named profile (e.g. "1k/2.2k", "3k/4.5k")
+// Profiles, the default profile and per-zone overrides are saved in
+// data/supervision-calibration.json.
+
+const badRequest = (res, error) => res.status(400).json({ success: false, error: error.message || String(error) });
+
+/**
+ * GET /api/supervision/calibration
+ * Current thresholds, last applied calibration, session in progress, history
+ */
+router.get('/calibration', (req, res) => {
+  try {
+    res.json({ success: true, ...supervision.getCalibrationInfo() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/supervision/calibration/start
+ * Body: { board, channel, eolResistor?, alarmResistor?, samples?, technician?, notes?,
+ *         profileId? (recalibrate an existing profile) }
+ */
+router.post('/calibration/start', (req, res) => {
+  try {
+    const { board = 0, channel, ...options } = req.body || {};
+    const session = supervision.startCalibration(parseInt(board, 10), parseInt(channel, 10), options);
+    res.json({ success: true, session });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * POST /api/supervision/calibration/capture
+ * Body: { state: 'TAMPER' | 'ALARM' | 'NORMAL' | 'TROUBLE', samples? }
+ */
+router.post('/calibration/capture', async (req, res) => {
+  try {
+    const { state, samples } = req.body || {};
+    const result = await supervision.captureCalibrationPoint(state, samples);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * GET /api/supervision/calibration/sample/:board/:channel?samples=5
+ * Averaged reading without touching the session (for the live meter)
+ */
+router.get('/calibration/sample/:board/:channel', async (req, res) => {
+  try {
+    const board = parseInt(req.params.board, 10);
+    const channel = parseInt(req.params.channel, 10);
+    const samples = parseInt(req.query.samples, 10) || 3;
+    const reading = await supervision.sampleVoltage(board, channel, samples, 50);
+    const profile = supervision.getZoneProfile(board, channel);
+    res.json({
+      success: true, ...reading,
+      state: supervision.getZoneState(reading.millivolts, board, channel),
+      profileId: profile.id, profileName: profile.name
+    });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * POST /api/supervision/calibration/apply
+ * Save the captured calibration as a named profile
+ * Body: { name?, profileId? (overwrite), makeDefault?, assignZone? }
+ */
+router.post('/calibration/apply', (req, res) => {
+  try {
+    const profile = supervision.applyCalibration(req.body || {});
+    res.json({ success: true, profile, calibration: profile, defaultProfileId: supervision.getDefaultProfile().id });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * POST /api/supervision/calibration/cancel
+ */
+router.post('/calibration/cancel', (req, res) => {
+  res.json({ success: true, cancelled: supervision.cancelCalibration() });
+});
+
+/**
+ * POST /api/supervision/calibration/reset
+ * Factory profile becomes the default and zone overrides are cleared.
+ * Saved profiles are kept.
+ */
+router.post('/calibration/reset', (req, res) => {
+  try {
+    supervision.resetCalibrationToDefaults();
+    res.json({ success: true, defaultProfileId: 'factory', thresholds: supervision.thresholds });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ---------- Profiles ----------
+
+/**
+ * GET /api/supervision/calibration/profiles
+ */
+router.get('/calibration/profiles', (req, res) => {
+  res.json({
+    success: true,
+    defaultProfileId: supervision.getDefaultProfile().id,
+    profiles: supervision.getProfiles(),
+    zoneProfiles: supervision.store.zoneProfiles
+  });
+});
+
+/**
+ * PUT /api/supervision/calibration/profiles/:id
+ * Body: { name }
+ */
+router.put('/calibration/profiles/:id', (req, res) => {
+  try {
+    const profile = supervision.renameProfile(req.params.id, (req.body || {}).name);
+    res.json({ success: true, profile });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * POST /api/supervision/calibration/profiles/:id/default
+ * Use this profile for every zone without its own override
+ */
+router.post('/calibration/profiles/:id/default', (req, res) => {
+  try {
+    const profile = supervision.setDefaultProfile(req.params.id);
+    res.json({ success: true, profile, thresholds: supervision.thresholds });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * DELETE /api/supervision/calibration/profiles/:id
+ * Zones using it go back to the default; if it was the default, factory takes over
+ */
+router.delete('/calibration/profiles/:id', (req, res) => {
+  try {
+    const result = supervision.deleteProfile(req.params.id);
+    res.json({ success: true, ...result, defaultProfileId: supervision.getDefaultProfile().id });
+  } catch (error) {
+    badRequest(res, error);
+  }
+});
+
+/**
+ * PUT /api/supervision/calibration/zones/:board/:channel
+ * Body: { profileId } — null or "default" to follow the default profile
+ */
+router.put('/calibration/zones/:board/:channel', (req, res) => {
+  try {
+    const result = supervision.assignZoneProfile(
+      parseInt(req.params.board, 10), parseInt(req.params.channel, 10), (req.body || {}).profileId
+    );
+    res.json({ success: true, ...result });
+  } catch (error) {
+    badRequest(res, error);
   }
 });
 
@@ -281,7 +459,19 @@ router.use((req, res) => {
       'GET /api/supervision/troubles',
       'POST /api/supervision/detect-boards',
       'POST /api/supervision/calibrate/:board/:channel',
-      'GET /api/supervision/config'
+      'GET /api/supervision/config',
+      'GET /api/supervision/calibration',
+      'POST /api/supervision/calibration/start',
+      'POST /api/supervision/calibration/capture',
+      'GET /api/supervision/calibration/sample/:board/:channel',
+      'POST /api/supervision/calibration/apply',
+      'POST /api/supervision/calibration/cancel',
+      'POST /api/supervision/calibration/reset',
+      'GET /api/supervision/calibration/profiles',
+      'PUT /api/supervision/calibration/profiles/:id',
+      'POST /api/supervision/calibration/profiles/:id/default',
+      'DELETE /api/supervision/calibration/profiles/:id',
+      'PUT /api/supervision/calibration/zones/:board/:channel'
     ]
   });
 });

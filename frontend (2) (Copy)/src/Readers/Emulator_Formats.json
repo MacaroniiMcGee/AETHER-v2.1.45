@@ -1,0 +1,236 @@
+{
+  "version": "1.0",
+  "description": "Keypad Emulation Formats - PIN entry modes (separate from card credentials)",
+  "lastUpdated": "2025-12-22",
+  "notes": [
+    "Keypad formats are fundamentally different from card credential formats",
+    "Keypad uses BURST MODE - one packet per keystroke",
+    "Card formats use SINGLE PACKET with facility + card number",
+    "Do not mix keypad formats with card credential formats"
+  ],
+  "keypadFormats": [
+    {
+      "id": "4bit",
+      "name": "4-bit Keypad (Standard)",
+      "category": "keypad",
+      "bitsPerKey": 4,
+      "encoding": "nibble",
+      "hasParity": false,
+      "terminator": "#",
+      "description": "Standard 4-bit Wiegand keypad format. Each key press sends 4 bits.",
+      "keyMap": {
+        "0": "0000",
+        "1": "0001",
+        "2": "0010",
+        "3": "0011",
+        "4": "0100",
+        "5": "0101",
+        "6": "0110",
+        "7": "0111",
+        "8": "1000",
+        "9": "1001",
+        "*": "1010",
+        "#": "1011"
+      },
+      "hexMap": {
+        "0": "0x00",
+        "1": "0x01",
+        "2": "0x02",
+        "3": "0x03",
+        "4": "0x04",
+        "5": "0x05",
+        "6": "0x06",
+        "7": "0x07",
+        "8": "0x08",
+        "9": "0x09",
+        "*": "0x0A",
+        "#": "0x0B"
+      },
+      "transmission": "burst",
+      "usage": "Most common keypad format. HID, Mercury, Honeywell panels.",
+      "popularity": "very-high",
+      "protocols": ["wiegand", "osdp"]
+    },
+    {
+      "id": "8bit",
+      "name": "8-bit Keypad (Extended/ASCII)",
+      "category": "keypad",
+      "bitsPerKey": 8,
+      "encoding": "ascii",
+      "hasParity": false,
+      "terminator": "#",
+      "terminatorCode": "0x0D",
+      "description": "8-bit ASCII keypad format. Each key sends ASCII code, # sends Enter (0x0D).",
+      "keyMap": {
+        "0": "00110000",
+        "1": "00110001",
+        "2": "00110010",
+        "3": "00110011",
+        "4": "00110100",
+        "5": "00110101",
+        "6": "00110110",
+        "7": "00110111",
+        "8": "00111000",
+        "9": "00111001",
+        "*": "00011011",
+        "#": "00001101"
+      },
+      "hexMap": {
+        "0": "0x30",
+        "1": "0x31",
+        "2": "0x32",
+        "3": "0x33",
+        "4": "0x34",
+        "5": "0x35",
+        "6": "0x36",
+        "7": "0x37",
+        "8": "0x38",
+        "9": "0x39",
+        "*": "0x1B",
+        "#": "0x0D"
+      },
+      "transmission": "burst",
+      "usage": "Extended keypad format. OSDP readers, some HID systems.",
+      "popularity": "high",
+      "protocols": ["wiegand", "osdp"],
+      "notes": [
+        "# key sends 0x0D (Enter/CR) not 0x23",
+        "* key sends 0x1B (Escape) not 0x2A",
+        "Digits 0-9 send ASCII codes 0x30-0x39"
+      ]
+    },
+    {
+      "id": "8bit-wiegand",
+      "name": "8-bit Wiegand Keypad (Farpointe)",
+      "category": "keypad",
+      "bitsPerKey": 8,
+      "encoding": "wiegand8bit",
+      "hasParity": false,
+      "terminator": "#",
+      "description": "Farpointe/legacy 8-bit Wiegand keypad encoding with complement nibbles.",
+      "keyMap": {
+        "0": "11110000",
+        "1": "11100001",
+        "2": "11010010",
+        "3": "11000011",
+        "4": "10110100",
+        "5": "10100101",
+        "6": "10010110",
+        "7": "10000111",
+        "8": "01111000",
+        "9": "01101001",
+        "*": "01011010",
+        "#": "01001011"
+      },
+      "hexMap": {
+        "0": "0xF0",
+        "1": "0xE1",
+        "2": "0xD2",
+        "3": "0xC3",
+        "4": "0xB4",
+        "5": "0xA5",
+        "6": "0x96",
+        "7": "0x87",
+        "8": "0x78",
+        "9": "0x69",
+        "*": "0x5A",
+        "#": "0x4B"
+      },
+      "transmission": "burst",
+      "usage": "Farpointe Data readers, some legacy systems.",
+      "popularity": "medium",
+      "protocols": ["wiegand"],
+      "notes": [
+        "Each byte is: [high nibble = complement of low nibble][low nibble = key value]",
+        "Example: Key 1 = 0xE1 = 1110 0001 (E is complement of 1)"
+      ]
+    },
+    {
+      "id": "26bit-pin",
+      "name": "26-bit PIN (Card Emulation)",
+      "category": "pin-as-card",
+      "bits": 26,
+      "encoding": "wiegand26",
+      "hasParity": true,
+      "parity": "std",
+      "description": "PIN sent as 26-bit Wiegand card credential. PIN becomes card number.",
+      "facilityCodeRequired": true,
+      "maxPin": 65535,
+      "transmission": "single",
+      "usage": "PIN-only mode on card readers. Mercury EP panels.",
+      "popularity": "high",
+      "protocols": ["wiegand", "osdp"],
+      "notes": [
+        "PIN is encoded as card number in standard W26 format",
+        "Facility code is configurable (often 0 or site-specific)",
+        "Single packet transmission (not burst)",
+        "Used when panel expects card credential but user enters PIN"
+      ]
+    }
+  ],
+  "osdpKeypadCommands": {
+    "osdp_KEYPAD": {
+      "command": "0x53",
+      "description": "OSDP Keypad command - sends keys as ASCII",
+      "format": "[reader=0x00][count][key1][key2]...",
+      "encoding": "ascii",
+      "terminatorMapping": {
+        "#": "0x0D",
+        "*": "0x1B"
+      },
+      "notes": [
+        "Real OSDP readers use this command",
+        "One key per POLL response in burst mode",
+        "Keys are ASCII encoded (0x30-0x39 for digits)",
+        "# sends 0x0D (Enter), not 0x23"
+      ]
+    },
+    "osdp_RAW": {
+      "command": "0x50",
+      "description": "OSDP Raw command - for 26-bit PIN-as-card",
+      "format": "[reader][format][bitcount_lo][bitcount_hi][data...]",
+      "encoding": "wiegand",
+      "notes": [
+        "Used for 26-bit PIN-as-card mode",
+        "PIN encoded as Wiegand 26 with facility code",
+        "Single packet (not burst)"
+      ]
+    }
+  },
+  "transmissionModes": {
+    "burst": {
+      "description": "One packet per keystroke, sent on each POLL",
+      "usedBy": ["4bit", "8bit", "8bit-wiegand"],
+      "timing": "~50ms between keys (one per POLL cycle)",
+      "termination": "# key signals end of PIN entry"
+    },
+    "single": {
+      "description": "Entire PIN encoded in single packet",
+      "usedBy": ["26bit-pin"],
+      "timing": "Single transmission after # pressed",
+      "termination": "N/A - sent as complete credential"
+    }
+  },
+  "panelCompatibility": {
+    "mercury": {
+      "supported": ["4bit", "8bit", "26bit-pin"],
+      "preferred": "8bit",
+      "notes": "Mercury EP panels support OSDP keypad via osdp_KEYPAD command"
+    },
+    "hid": {
+      "supported": ["4bit", "8bit", "26bit-pin"],
+      "preferred": "4bit",
+      "notes": "HID VertX/Edge typically use 4-bit Wiegand keypad"
+    },
+    "honeywell": {
+      "supported": ["4bit", "26bit-pin"],
+      "preferred": "4bit",
+      "notes": "Honeywell Pro-Watch uses 4-bit standard"
+    },
+    "lenel": {
+      "supported": ["4bit", "8bit", "26bit-pin"],
+      "preferred": "4bit",
+      "notes": "Lenel OnGuard supports multiple formats"
+    }
+  }
+}

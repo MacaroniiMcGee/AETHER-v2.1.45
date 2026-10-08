@@ -243,12 +243,12 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-[#1F1719] rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden border-2 border-[#4A3538] shadow-2xl">
+      <div className="bg-hv-widget-panel rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden border-2 border-hv-line-strong shadow-2xl">
         {/* Header */}
-        <div className="bg-[#2A1F22]/60 p-6 border-b border-[#4A3538]">
+        <div className="bg-hv-widget/60 p-6 border-b border-hv-line-strong">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+              <h2 className="text-2xl font-bold text-hv-text flex items-center gap-3">
                 <span className="text-3xl">⚙️</span>
                 Door Settings
               </h2>
@@ -258,7 +258,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
             </div>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-slate-400 hover:text-hv-text transition-colors"
             >
               <X size={28} />
             </button>
@@ -266,7 +266,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
         </div>
 
         {/* Section Tabs */}
-        <div className="flex gap-2 p-4 bg-[#231A1D]/60 border-b border-[#4A3538]">
+        <div className="flex gap-2 p-4 bg-hv-widget/60 border-b border-hv-line-strong">
           {[
             { id: 'basic', label: ' Basic', desc: 'Door Name' },
             { id: 'mandatory', label: ' Mandatory I/O', desc: 'Lock, DPS, REX' },
@@ -279,7 +279,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
               className={`flex-1 px-4 py-3 rounded-lg font-semibold text-sm transition-all relative ${
                 activeSection === section.id
                   ? 'bg-emerald-800/50 text-emerald-100 border border-emerald-700/40 shadow-lg'
-                  : 'bg-[#2A1F22]/60 text-slate-400 hover:bg-[#3D2F33] hover:text-slate-200'
+                  : 'bg-hv-widget/60 text-slate-400 hover:bg-hv-line hover:text-slate-200'
               }`}
             >
               <div>{section.label}</div>
@@ -296,7 +296,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
           {/* Basic Settings */}
           {activeSection === 'basic' && (
             <div className="space-y-4">
-              <div className="bg-[#231A1D]/60 rounded-lg p-6 border border-[#4A3538]">
+              <div className="bg-hv-widget/60 rounded-lg p-6 border border-hv-line-strong">
                 <label className="block text-sm font-semibold text-slate-300 mb-2">
                   Door Name
                 </label>
@@ -304,7 +304,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                   type="text"
                   value={editedDoor.name}
                   onChange={(e) => updateDoorName(e.target.value)}
-                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-4 py-3 text-white text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-[#7a5560]"
+                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-4 py-3 text-hv-text text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-hv-text-3"
                   placeholder="Enter door name"
                 />
                 <p className="text-xs text-slate-500 mt-2">
@@ -313,14 +313,14 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
               </div>
 
               {/* #3: single reader assignment (the reader used by this door) */}
-              <div className="bg-[#231A1D]/60 rounded-lg p-6 border border-[#4A3538]">
+              <div className="bg-hv-widget/60 rounded-lg p-6 border border-hv-line-strong">
                 <label className="block text-sm font-semibold text-slate-300 mb-2">
                   Reader
                 </label>
                 <select
                   value={editedDoor.reader || ''}
                   onChange={(e) => setEditedDoor({ ...editedDoor, reader: e.target.value || null })}
-                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-[#7a5560]"
+                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-4 py-3 text-hv-text focus:outline-none focus:ring-2 focus:ring-hv-text-3"
                 >
                   <option value="">-- No Reader --</option>
                   <optgroup label="Physical / Wiegand">
@@ -345,7 +345,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                 </p>
               </div>
 
-              <div className="bg-[#2A1F22]/40 rounded-lg p-4 border border-[#5C4449]/60">
+              <div className="bg-hv-widget/40 rounded-lg p-4 border border-hv-line-strong/60">
                 <div className="flex items-start gap-3">
                   <AlertCircle className="text-slate-400 flex-shrink-0 mt-1" size={20} />
                   <div className="text-sm text-slate-300">
@@ -359,7 +359,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
           {/* Mandatory I/O Settings */}
           {activeSection === 'mandatory' && (
             <div className="space-y-4">
-              <div className="bg-[#2A1F22]/40 rounded-lg p-4 border border-[#5C4449]/60">
+              <div className="bg-hv-widget/40 rounded-lg p-4 border border-hv-line-strong/60">
                 <div className="flex items-start gap-3">
                   <AlertCircle className="text-slate-400 flex-shrink-0 mt-1" size={20} />
                   <div className="text-sm text-slate-300">
@@ -373,7 +373,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
               </div>
 
               {/* Lock */}
-              <div className="bg-[#231A1D]/60 rounded-lg p-5 border border-[#4A3538]">
+              <div className="bg-hv-widget/60 rounded-lg p-5 border border-hv-line-strong">
                 <h3 className="text-lg font-bold text-slate-300 mb-4 flex items-center gap-2">
                   <span></span> Door Lock
                 </h3>
@@ -386,7 +386,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="text"
                       value={editedDoor.lock.name}
                       onChange={(e) => updateMandatoryIO('lock', 'name', e.target.value)}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     />
                   </div>
                   <div>
@@ -396,7 +396,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                     <select
                       value={editedDoor.lock.channel}
                       onChange={(e) => updateMandatoryIO('lock', 'channel', parseInt(e.target.value))}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     >
                       {emuBoard
                         ? Array.from({ length: emuBoard.numOutputs }, (_, ch) => (
@@ -414,10 +414,10 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="checkbox"
                       checked={editedDoor.lock.reverseSense || false}
                       onChange={(e) => updateMandatoryIO('lock', 'reverseSense', e.target.checked)}
-                      className="w-5 h-5 rounded bg-[#3D2F33] border-[#5C4449]/60 accent-[#7a5560]"
+                      className="w-5 h-5 rounded bg-hv-line border-hv-line-strong/60 accent-hv-text-3"
                     />
                     <div>
-                      <span className="text-sm font-semibold text-white">Reverse Sense (Active at Rest)</span>
+                      <span className="text-sm font-semibold text-hv-text">Reverse Sense (Active at Rest)</span>
                       <p className="text-xs text-slate-400">
                         {editedDoor.lock.reverseSense
                           ? ' GPIO HIGH = Locked (Active at Rest)'
@@ -429,7 +429,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
               </div>
 
               {/* DPS */}
-              <div className="bg-[#231A1D]/60 rounded-lg p-5 border border-[#4A3538]">
+              <div className="bg-hv-widget/60 rounded-lg p-5 border border-hv-line-strong">
                 <h3 className="text-lg font-bold text-slate-300 mb-4 flex items-center gap-2">
                   <span></span> Door Position Switch (INPUT)
                 </h3>
@@ -442,7 +442,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="text"
                       value={editedDoor.dps.name}
                       onChange={(e) => updateMandatoryIO('dps', 'name', e.target.value)}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     />
                   </div>
                   <div>
@@ -452,7 +452,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                     <select
                       value={editedDoor.dps.channel}
                       onChange={(e) => updateMandatoryIO('dps', 'channel', parseInt(e.target.value))}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     >
                       {emuBoard
                         ? Array.from({ length: emuBoard.numInputs }, (_, ch) => (
@@ -475,7 +475,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                           dps: { ...editedDoor.dps, inputType: e.target.value as 'opto' | 'analog' } as any
                         });
                       }}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     >
                       <option value="opto">Opto-Isolated (Digital)</option>
                       <option value="analog">Analog (0-10V)</option>
@@ -488,10 +488,10 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="checkbox"
                       checked={editedDoor.dps.reverseSense || false}
                       onChange={(e) => updateMandatoryIO('dps', 'reverseSense', e.target.checked)}
-                      className="w-5 h-5 rounded bg-[#3D2F33] border-[#5C4449]/60 accent-[#7a5560]"
+                      className="w-5 h-5 rounded bg-hv-line border-hv-line-strong/60 accent-hv-text-3"
                     />
                     <div>
-                      <span className="text-sm font-semibold text-white">Reverse Sense (Active at Rest)</span>
+                      <span className="text-sm font-semibold text-hv-text">Reverse Sense (Active at Rest)</span>
                       <p className="text-xs text-slate-400">
                         {editedDoor.dps.reverseSense
                           ? 'GPIO HIGH = Door Closed (Active at Rest)'
@@ -503,7 +503,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
               </div>
 
               {/* REX */}
-              <div className="bg-[#231A1D]/60 rounded-lg p-5 border border-[#4A3538]">
+              <div className="bg-hv-widget/60 rounded-lg p-5 border border-hv-line-strong">
                 <h3 className="text-lg font-bold text-slate-300 mb-4 flex items-center gap-2">
                   <span></span> Request to Exit (INPUT)
                 </h3>
@@ -516,7 +516,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="text"
                       value={editedDoor.rexIn.name}
                       onChange={(e) => updateMandatoryIO('rexIn', 'name', e.target.value)}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     />
                   </div>
                   <div>
@@ -526,7 +526,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                     <select
                       value={editedDoor.rexIn.channel}
                       onChange={(e) => updateMandatoryIO('rexIn', 'channel', parseInt(e.target.value))}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     >
                       {emuBoard
                         ? Array.from({ length: emuBoard.numInputs }, (_, ch) => (
@@ -549,7 +549,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                           rexIn: { ...editedDoor.rexIn, inputType: e.target.value as 'opto' | 'analog' } as any
                         });
                       }}
-                      className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                      className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                     >
                       <option value="opto">Opto-Isolated (Digital)</option>
                       <option value="analog">Analog (0-10V)</option>
@@ -562,10 +562,10 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="checkbox"
                       checked={editedDoor.rexIn.reverseSense || false}
                       onChange={(e) => updateMandatoryIO('rexIn', 'reverseSense', e.target.checked)}
-                      className="w-5 h-5 rounded bg-[#3D2F33] border-[#5C4449]/60 accent-[#7a5560]"
+                      className="w-5 h-5 rounded bg-hv-line border-hv-line-strong/60 accent-hv-text-3"
                     />
                     <div>
-                      <span className="text-sm font-semibold text-white">Reverse Sense (Active at Rest)</span>
+                      <span className="text-sm font-semibold text-hv-text">Reverse Sense (Active at Rest)</span>
                       <p className="text-xs text-slate-400">
                         {editedDoor.rexIn.reverseSense
                           ? '⚠️ GPIO HIGH = Idle (Active at Rest)'
@@ -598,19 +598,19 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                     setEditedDoor({ ...editedDoor, ios: [...editedDoor.ios, newIO] });
                   }}
                   disabled={editedDoor.ios.length >= 6}
-                  className="px-3 py-1.5 bg-[#3D2F33] hover:bg-[#4A3538] rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-30 border border-[#5C4449]/60"
+                  className="px-3 py-1.5 bg-hv-line hover:bg-hv-line-strong rounded-lg text-sm font-semibold flex items-center gap-2 disabled:opacity-30 border border-hv-line-strong/60"
                 >
                   <Plus size={16} /> Add I/O
                 </button>
               </div>
               {editedDoor.ios.length === 0 ? (
-                <div className="text-center py-12 bg-[#231A1D]/40 rounded-lg border border-dashed border-[#4A3538]">
+                <div className="text-center py-12 bg-hv-widget/40 rounded-lg border border-dashed border-hv-line-strong">
                   <p className="text-slate-500 mb-2">No custom I/O configured</p>
                   <p className="text-xs text-slate-600">Click "Add I/O" above to add inputs or outputs</p>
                 </div>
               ) : (
                 editedDoor.ios.map((io) => (
-                  <div key={io.id} className="bg-[#231A1D]/60 rounded-lg p-5 border border-[#4A3538]">
+                  <div key={io.id} className="bg-hv-widget/60 rounded-lg p-5 border border-hv-line-strong">
                     <div className="flex justify-end -mb-2">
                       <button
                         onClick={() => setEditedDoor({ ...editedDoor, ios: editedDoor.ios.filter(x => x.id !== io.id) })}
@@ -629,7 +629,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                           type="text"
                           value={io.name}
                           onChange={(e) => updateCustomIO(io.id, 'name', e.target.value)}
-                          className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                          className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                         />
                       </div>
                       <div>
@@ -640,7 +640,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                           type="number"
                           value={io.channel}
                           onChange={(e) => updateCustomIO(io.id, 'channel', parseInt(e.target.value) || 0)}
-                          className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                          className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                         />
                       </div>
                     </div>
@@ -653,7 +653,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                         <select
                           value={io.type}
                           onChange={(e) => updateCustomIO(io.id, 'type', e.target.value)}
-                          className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white"
+                          className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text"
                         >
                           <option value="General">General</option>
                           <option value="REX-Button">REX Button</option>
@@ -673,7 +673,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                         </label>
                         <button
                           onClick={() => toggleIODirection(io.id)}
-                          className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-3 py-2 text-white hover:bg-slate-700 transition-colors font-semibold"
+                          className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-3 py-2 text-hv-text hover:bg-slate-700 transition-colors font-semibold"
                         >
                           {io.direction === 'input' ? '📥 INPUT' : '📤 OUTPUT'}
                         </button>
@@ -686,10 +686,10 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                           type="checkbox"
                           checked={io.reverseSense || false}
                           onChange={(e) => updateCustomIO(io.id, 'reverseSense', e.target.checked)}
-                          className="w-5 h-5 rounded bg-[#3D2F33] border-[#5C4449]/60 accent-[#7a5560]"
+                          className="w-5 h-5 rounded bg-hv-line border-hv-line-strong/60 accent-hv-text-3"
                         />
                         <div>
-                          <span className="text-sm font-semibold text-white">Reverse Sense (Active at Rest)</span>
+                          <span className="text-sm font-semibold text-hv-text">Reverse Sense (Active at Rest)</span>
                           <p className="text-xs text-slate-400">
                             {io.reverseSense
                               ? '⚠️ GPIO HIGH when inactive (Active at Rest)'
@@ -707,7 +707,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
           {/* Custom Events Configuration */}
           {activeSection === 'events' && editedDoor.customEvents && (
             <div className="space-y-4">
-              <div className="bg-[#2A1F22]/40 rounded-lg p-4 border border-[#5C4449]/60 mb-6">
+              <div className="bg-hv-widget/40 rounded-lg p-4 border border-hv-line-strong/60 mb-6">
                 <div className="flex items-start gap-3">
                   <AlertCircle className="text-slate-400 flex-shrink-0 mt-1" size={20} />
                   <div className="text-sm text-slate-300">
@@ -724,7 +724,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                     className={`px-4 py-3 rounded-lg font-semibold text-sm transition-all ${
                       editingEventIndex === index
                         ? 'bg-emerald-800/50 text-emerald-100 border border-emerald-700/40 shadow-lg'
-                        : 'bg-[#2A1F22]/60 text-slate-300 hover:bg-[#3D2F33]'
+                        : 'bg-hv-widget/60 text-slate-300 hover:bg-hv-line'
                     }`}
                   >
                     <div className="flex items-center justify-center gap-2">
@@ -738,10 +738,10 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                 ))}
               </div>
 
-              <div className="bg-[#231A1D]/60 rounded-lg p-6 border-2 border-[#4A3538]">
+              <div className="bg-hv-widget/60 rounded-lg p-6 border-2 border-hv-line-strong">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="text-xl font-bold text-white">Configure Event {editingEventIndex + 1}</h3>
+                    <h3 className="text-xl font-bold text-hv-text">Configure Event {editingEventIndex + 1}</h3>
                     <p className="text-sm text-slate-400 mt-1">Build a sequence of actions for this event</p>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -749,7 +749,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       type="checkbox"
                       checked={editedDoor.customEvents[editingEventIndex].enabled}
                       onChange={() => toggleCustomEventEnabled(editingEventIndex)}
-                      className="w-5 h-5 rounded accent-[#7a5560]"
+                      className="w-5 h-5 rounded accent-hv-text-3"
                     />
                     <span className="text-sm font-semibold">Enabled</span>
                   </label>
@@ -763,7 +763,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                     type="text"
                     value={editedDoor.customEvents[editingEventIndex].name}
                     onChange={(e) => updateCustomEventName(editingEventIndex, e.target.value)}
-                    className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded-lg px-4 py-2 text-white font-semibold"
+                    className="w-full bg-hv-widget border border-hv-line-strong/60 rounded-lg px-4 py-2 text-hv-text font-semibold"
                     placeholder={`Custom Event ${editingEventIndex + 1}`}
                   />
                 </div>
@@ -788,7 +788,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                             onSave(editedDoor);
                             onApplyEventToAllDoors(editingEventIndex, JSON.parse(JSON.stringify(ev)));
                           }}
-                          className="px-3 py-1 bg-[#3D2F33] hover:bg-[#4A3538] rounded-lg text-sm font-semibold flex items-center gap-2 border border-[#5C4449]"
+                          className="px-3 py-1 bg-hv-line hover:bg-hv-line-strong rounded-lg text-sm font-semibold flex items-center gap-2 border border-hv-line-strong"
                           title="Copy this event sequence to the same event slot on all doors"
                         >
                           <Copy size={16} />
@@ -799,7 +799,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                         <button
                           onClick={runTestNow}
                           disabled={testRunning || (editedDoor.customEvents?.[editingEventIndex]?.steps?.length || 0) === 0}
-                          className="px-3 py-1 bg-[#3D2F33] hover:bg-[#4A3538] rounded-lg text-sm font-semibold flex items-center gap-2 border border-[#5C4449] disabled:opacity-40"
+                          className="px-3 py-1 bg-hv-line hover:bg-hv-line-strong rounded-lg text-sm font-semibold flex items-center gap-2 border border-hv-line-strong disabled:opacity-40"
                           title="Run these steps now against this door (uses the current editor steps — no save needed)"
                         >
                           {testRunning ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
@@ -808,7 +808,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                       )}
                       <button
                         onClick={() => addEventStep(editingEventIndex)}
-                        className="px-3 py-1 bg-[#3D2F33] hover:bg-[#4A3538] rounded-lg text-sm font-semibold flex items-center gap-2 border border-[#5C4449]/60"
+                        className="px-3 py-1 bg-hv-line hover:bg-hv-line-strong rounded-lg text-sm font-semibold flex items-center gap-2 border border-hv-line-strong/60"
                       >
                         <Plus size={16} />
                         Add Step
@@ -818,13 +818,13 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
 
                   {/* #feat 6: Test Run result + inline log */}
                   {(testRunning || testSummary || testLog.length > 0) && (
-                    <div className="bg-[#1C1416]/70 rounded-lg border border-[#5C4449]/60 p-3 space-y-2">
+                    <div className="bg-hv-widget-panel/70 rounded-lg border border-hv-line-strong/60 p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="text-xs font-bold text-slate-300 uppercase tracking-wide">Test Run</div>
                         {testSummary && (
                           <div className="flex items-center gap-2 text-xs">
-                            <span className="px-2 py-0.5 rounded bg-[#3D2F33] text-slate-200 border border-[#5C4449]/60">{testSummary.ran}/{testSummary.total} ran</span>
-                            <span className={`px-2 py-0.5 rounded border ${testSummary.failed > 0 ? 'bg-red-950/60 text-red-300 border-red-800' : 'bg-slate-700 text-slate-300 border-[#5C4449]/60'}`}>{testSummary.failed} failed</span>
+                            <span className="px-2 py-0.5 rounded bg-hv-line text-slate-200 border border-hv-line-strong/60">{testSummary.ran}/{testSummary.total} ran</span>
+                            <span className={`px-2 py-0.5 rounded border ${testSummary.failed > 0 ? 'bg-red-950/60 text-red-300 border-red-800' : 'bg-slate-700 text-slate-300 border-hv-line-strong/60'}`}>{testSummary.failed} failed</span>
                             <button onClick={() => { setTestLog([]); setTestSummary(null); }} className="text-slate-500 hover:text-slate-300 text-[11px] underline">clear</button>
                           </div>
                         )}
@@ -838,13 +838,13 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                   )}
 
                   {editedDoor.customEvents[editingEventIndex].steps.length === 0 ? (
-                    <div className="text-center py-8 bg-[#2A1F22]/30 rounded-lg border border-dashed border-[#4A3538]">
+                    <div className="text-center py-8 bg-hv-widget/30 rounded-lg border border-dashed border-hv-line-strong">
                       <p className="text-slate-500 mb-2">No steps configured</p>
                       <p className="text-xs text-slate-600">Click "Add Step" to create an action sequence</p>
                     </div>
                   ) : (
                     editedDoor.customEvents[editingEventIndex].steps.map((step, stepIndex) => (
-                      <div key={step.id} className={`rounded-lg p-4 border transition-all ${testStepIdx === stepIndex ? 'bg-slate-700/70 border-slate-300 ring-2 ring-slate-300/60' : 'bg-[#2A1F22]/50 border-[#5C4449]/60'}`}>
+                      <div key={step.id} className={`rounded-lg p-4 border transition-all ${testStepIdx === stepIndex ? 'bg-slate-700/70 border-slate-300 ring-2 ring-slate-300/60' : 'bg-hv-widget/50 border-hv-line-strong/60'}`}>
                         <div className="flex items-center justify-between mb-3">
                           <div className="text-sm font-bold text-slate-300 flex items-center gap-2">
                             Step {stepIndex + 1}
@@ -866,7 +866,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                             <select
                               value={step.action}
                               onChange={(e) => updateEventStep(editingEventIndex, step.id, 'action', e.target.value)}
-                              className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                              className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                             >
                               <option value="lock"> Lock Door</option>
                               <option value="unlock"> Unlock Door</option>
@@ -889,7 +889,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                               type="number"
                               value={step.delay}
                               onChange={(e) => updateEventStep(editingEventIndex, step.id, 'delay', parseInt(e.target.value) || 0)}
-                              className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                              className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                               placeholder="1000"
                             />
                           </div>
@@ -903,7 +903,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                             <select
                               value={step.ioId || ''}
                               onChange={(e) => updateEventStep(editingEventIndex, step.id, 'ioId', e.target.value)}
-                              className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                              className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                             >
                               <option value="">-- Select I/O --</option>
                               {editedDoor.ios.map(io => (
@@ -914,7 +914,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                         )}
 
                         {step.action === 'pulse' && (
-                          <div className="mt-3 space-y-3 p-3 bg-[#2A1F22]/40 rounded-lg border border-[#5C4449]/60">
+                          <div className="mt-3 space-y-3 p-3 bg-hv-widget/40 rounded-lg border border-hv-line-strong/60">
                             <div className="text-xs font-bold text-slate-400 uppercase">Pulse Configuration</div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>
@@ -922,7 +922,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                 <select
                                   value={step.pulseTarget || 'lock'}
                                   onChange={(e) => updateEventStep(editingEventIndex, step.id, 'pulseTarget', e.target.value)}
-                                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                 >
                                   <option value="lock"> Lock (unlock→relock)</option>
                                   <option value="dps"> DPS (open→close)</option>
@@ -935,7 +935,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                   type="number"
                                   value={step.pulseDuration ?? 1000}
                                   onChange={(e) => updateEventStep(editingEventIndex, step.id, 'pulseDuration', parseInt(e.target.value) || 0)}
-                                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                   placeholder="1000"
                                 />
                               </div>
@@ -945,14 +945,14 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                         )}
 
                         {step.action === 'wait' && (
-                          <div className="mt-3 space-y-3 p-3 bg-[#2A1F22]/40 rounded-lg border border-[#5C4449]/60">
+                          <div className="mt-3 space-y-3 p-3 bg-hv-widget/40 rounded-lg border border-hv-line-strong/60">
                             <div className="text-xs font-bold text-slate-400 uppercase">Wait Configuration</div>
                             <div>
                               <label className="block text-xs font-semibold text-slate-400 mb-1">Wait Type</label>
                               <select
                                 value={step.waitType || 'seconds'}
                                 onChange={(e) => updateEventStep(editingEventIndex, step.id, 'waitType', e.target.value)}
-                                className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                               >
                                 <option value="seconds">Seconds</option>
                                 <option value="minutes">Minutes</option>
@@ -967,7 +967,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                     type="number"
                                     value={step.waitMin ?? 1}
                                     onChange={(e) => updateEventStep(editingEventIndex, step.id, 'waitMin', parseInt(e.target.value) || 0)}
-                                    className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                    className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                   />
                                 </div>
                                 <div>
@@ -976,7 +976,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                     type="number"
                                     value={step.waitMax ?? 5}
                                     onChange={(e) => updateEventStep(editingEventIndex, step.id, 'waitMax', parseInt(e.target.value) || 0)}
-                                    className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                    className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                   />
                                 </div>
                               </div>
@@ -987,7 +987,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                   type="number"
                                   value={step.waitValue ?? (step.waitType === 'minutes' ? 1 : 5)}
                                   onChange={(e) => updateEventStep(editingEventIndex, step.id, 'waitValue', parseInt(e.target.value) || 0)}
-                                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                 />
                               </div>
                             )}
@@ -996,7 +996,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                         )}
 
                         {step.action === 'send-card' && (
-                          <div className="mt-3 space-y-3 p-3 bg-[#2A1F22]/40 rounded-lg border border-[#5C4449]/60">
+                          <div className="mt-3 space-y-3 p-3 bg-hv-widget/40 rounded-lg border border-hv-line-strong/60">
                             <div className="text-xs font-bold text-slate-400 uppercase">Card Credential Configuration</div>
 
                             <div>
@@ -1006,7 +1006,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                               <select
                                 value={step.readerId || ''}
                                 onChange={(e) => updateEventStep(editingEventIndex, step.id, 'readerId', e.target.value)}
-                                className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                               >
                                 <option value="">
                                   {editedDoor.reader ? '— Use this door\'s assigned reader —' : '-- Select Reader --'}
@@ -1058,7 +1058,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                               <select
                                 value={step.cardFormat || '26'}
                                 onChange={(e) => updateEventStep(editingEventIndex, step.id, 'cardFormat', e.target.value)}
-                                className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                               >
                                 <option value="26">26-bit (Standard)</option>
                                 <option value="34">34-bit (Corporate)</option>
@@ -1077,7 +1077,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                   type="text"
                                   value={step.facilityCode || ''}
                                   onChange={(e) => updateEventStep(editingEventIndex, step.id, 'facilityCode', e.target.value)}
-                                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                   placeholder="123"
                                 />
                               </div>
@@ -1089,7 +1089,7 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                                   type="text"
                                   value={step.cardNumber || ''}
                                   onChange={(e) => updateEventStep(editingEventIndex, step.id, 'cardNumber', e.target.value)}
-                                  className="w-full bg-[#231A1D] border border-[#5C4449]/60 rounded px-3 py-2 text-sm text-white"
+                                  className="w-full bg-hv-widget border border-hv-line-strong/60 rounded px-3 py-2 text-sm text-hv-text"
                                   placeholder="12345"
                                 />
                               </div>
@@ -1110,16 +1110,16 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
         </div>
 
         {/* Footer */}
-        <div className="bg-[#231A1D]/60 p-6 border-t border-[#4A3538] flex gap-3">
+        <div className="bg-hv-widget/60 p-6 border-t border-hv-line-strong flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 px-6 py-3 bg-[#3D2F33] hover:bg-[#4A3538] rounded-lg font-semibold transition-colors"
+            className="flex-1 px-6 py-3 bg-hv-line hover:bg-hv-line-strong rounded-lg font-semibold transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="flex-1 px-6 py-3 bg-[#3D2F33] hover:bg-[#4A3538] border border-[#5C4449] rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+            className="flex-1 px-6 py-3 bg-hv-line hover:bg-hv-line-strong border border-hv-line-strong rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
           >
             <Save size={20} />
             Save Settings

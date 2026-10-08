@@ -110,7 +110,7 @@ export default function OSDPSnifferPanel() {
           <button onClick={refreshPorts} className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded text-sm">↻ Refresh ports</button>
           {!active ? (
             <button onClick={start} disabled={!selectedPort}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded text-sm font-medium">
+              className="px-4 py-1.5 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong disabled:opacity-50 rounded text-sm font-medium">
               ▶ Start sniff
             </button>
           ) : (

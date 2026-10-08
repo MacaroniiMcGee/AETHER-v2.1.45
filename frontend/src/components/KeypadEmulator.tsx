@@ -137,29 +137,29 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
 
   const styles = {
     card: {
-      border: '1px solid #3a3a5a',
+      border: '1px solid rgb(var(--hv-line-strong))',
       borderRadius: '8px',
       padding: '20px',
-      backgroundColor: '#16213e',
-      color: '#eee',
+      backgroundColor: 'rgb(var(--hv-widget))',
+      color: 'rgb(var(--hv-text))',
       marginBottom: '20px'
     } as React.CSSProperties,
     input: {
       width: '100%',
       padding: '8px',
-      border: '1px solid #4a4a6a',
+      border: '1px solid rgb(var(--hv-line-strong))',
       borderRadius: '4px',
-      backgroundColor: '#0f3460',
-      color: '#eee',
+      backgroundColor: 'rgb(var(--hv-info-tint))',
+      color: 'rgb(var(--hv-text))',
       fontSize: '14px'
     } as React.CSSProperties,
     select: {
       width: '100%',
       padding: '8px',
-      border: '1px solid #4a4a6a',
+      border: '1px solid rgb(var(--hv-line-strong))',
       borderRadius: '4px',
-      backgroundColor: '#0f3460',
-      color: '#eee',
+      backgroundColor: 'rgb(var(--hv-info-tint))',
+      color: 'rgb(var(--hv-text))',
       fontSize: '14px',
       cursor: 'pointer'
     } as React.CSSProperties,
@@ -167,10 +167,10 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
       padding: '20px',
       fontSize: '24px',
       fontWeight: 'bold',
-      border: '2px solid #4a4a6a',
+      border: '2px solid rgb(var(--hv-line-strong))',
       borderRadius: '8px',
-      backgroundColor: '#2d2d44',
-      color: '#00d9ff',
+      backgroundColor: 'rgb(var(--hv-box))',
+      color: 'rgb(var(--hv-info-fg))',
       cursor: 'pointer',
       transition: 'all 0.2s',
       userSelect: 'none'
@@ -179,22 +179,22 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
       padding: '20px',
       fontSize: '16px',
       fontWeight: 'bold',
-      border: '2px solid #4a4a6a',
+      border: '2px solid rgb(var(--hv-line-strong))',
       borderRadius: '8px',
-      backgroundColor: '#1a4d5e',
-      color: '#00d9ff',
+      backgroundColor: 'rgb(var(--hv-info-tint-strong))',
+      color: 'rgb(var(--hv-info-fg))',
       cursor: 'pointer',
       transition: 'all 0.2s'
     } as React.CSSProperties,
     display: {
       padding: '20px',
-      backgroundColor: '#0f3460',
-      border: '2px solid #00d9ff',
+      backgroundColor: 'rgb(var(--hv-info-tint))',
+      border: '2px solid rgb(var(--hv-info))',
       borderRadius: '8px',
       fontSize: '32px',
       fontWeight: 'bold',
       textAlign: 'center',
-      color: '#00d9ff',
+      color: 'rgb(var(--hv-info-fg))',
       minHeight: '60px',
       display: 'flex',
       alignItems: 'center',
@@ -461,10 +461,10 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
   return (
     <div style={{ padding: '10px', fontFamily: 'Arial, sans-serif' }}>
       <div style={styles.card}>
-        <h3 style={{ marginTop: 0, color: '#00d9ff' }}>⌨️ Keypad Emulator</h3>
+        <h3 style={{ marginTop: 0, color: 'rgb(var(--hv-info-fg))' }}>⌨️ Keypad Emulator</h3>
         
         <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>
             Select Reader
           </label>
           <select
@@ -491,7 +491,7 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
         </div>
 
         <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>
             Keypad Format
           </label>
           <select
@@ -510,7 +510,7 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
 
         {selectedFormat.facilityCodeRequired && (
           <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>
               Facility Code
             </label>
             <input
@@ -527,22 +527,22 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
 
         <div style={{
           padding: '10px',
-          backgroundColor: '#2d2d44',
+          backgroundColor: 'rgb(var(--hv-box))',
           borderRadius: '4px',
           marginBottom: '15px',
           fontSize: '12px',
-          color: '#00d9ff'
+          color: 'rgb(var(--hv-info-fg))'
         }}>
           <strong>ℹ️ {selectedFormat.name}</strong><br/>
           {selectedFormat.description}
           <br/>
-          <span style={{ color: selectedFormat.transmission === 'burst' ? '#ffa500' : '#4ade80' }}>
+          <span style={{ color: selectedFormat.transmission === 'burst' ? 'rgb(var(--hv-brand))' : 'rgb(var(--hv-success-text))' }}>
             Mode: {selectedFormat.transmission === 'burst' 
               ? '🔥 Burst (one packet per key)' 
               : '📦 Single packet'}
           </span>
           {selectedFormat.bitsPerKey && (
-            <span style={{ marginLeft: '10px', color: '#aaa' }}>
+            <span style={{ marginLeft: '10px', color: 'rgb(var(--hv-text-2))' }}>
               | {selectedFormat.bitsPerKey} bits/key
             </span>
           )}
@@ -552,11 +552,11 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
         {selectedReader && readerType === 'wiegand' && (
           <div style={{
             padding: '8px',
-            backgroundColor: '#1a3a2a',
+            backgroundColor: 'rgb(var(--hv-success-tint-strong))',
             borderRadius: '4px',
             marginBottom: '15px',
             fontSize: '11px',
-            color: '#4ade80',
+            color: 'rgb(var(--hv-success-text))',
             fontFamily: 'monospace'
           }}>
             TX Pins: D0=GPIO{selectedReader.d0Pin} D1=GPIO{selectedReader.d1Pin} | 
@@ -571,8 +571,8 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
             padding: '10px',
             marginBottom: '15px',
             borderRadius: '4px',
-            backgroundColor: status === 'success' ? '#1a4d2e' : status === 'error' ? '#4d1a1a' : '#2d2d44',
-            color: status === 'success' ? '#4ade80' : status === 'error' ? '#ff6b6b' : '#00d9ff',
+            backgroundColor: status === 'success' ? 'rgb(var(--hv-success-tint-strong))' : status === 'error' ? 'rgb(var(--hv-error-tint))' : 'rgb(var(--hv-box))',
+            color: status === 'success' ? 'rgb(var(--hv-success-text))' : status === 'error' ? 'rgb(var(--hv-error-text))' : 'rgb(var(--hv-info))',
             fontSize: '13px',
             textAlign: 'center'
           }}>
@@ -587,11 +587,11 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
         <div style={{
           marginTop: '10px',
           padding: '8px',
-          backgroundColor: '#2d2d44',
+          backgroundColor: 'rgb(var(--hv-box))',
           borderRadius: '4px',
           fontSize: '11px',
           textAlign: 'center',
-          color: '#00d9ff'
+          color: 'rgb(var(--hv-info-fg))'
         }}>
           <strong>Enter PIN → Press # to SEND</strong> | <strong>* to CLEAR</strong>
         </div>
@@ -609,14 +609,14 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
               disabled={isTransmitting || !readerAvailable}
               onMouseEnter={(e) => {
                 if (!e.currentTarget.disabled) {
-                  e.currentTarget.style.backgroundColor = '#00d9ff';
+                  e.currentTarget.style.backgroundColor = 'rgb(var(--hv-info))';
                   e.currentTarget.style.color = '#000';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!e.currentTarget.disabled) {
-                  e.currentTarget.style.backgroundColor = '#2d2d44';
-                  e.currentTarget.style.color = '#00d9ff';
+                  e.currentTarget.style.backgroundColor = 'rgb(var(--hv-box))';
+                  e.currentTarget.style.color = 'rgb(var(--hv-info-fg))';
                 }
               }}
               style={{
@@ -634,14 +634,14 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
             disabled={isTransmitting || !readerAvailable}
             onMouseEnter={(e) => {
               if (!e.currentTarget.disabled) {
-                e.currentTarget.style.backgroundColor = '#ffa500';
+                e.currentTarget.style.backgroundColor = 'rgb(var(--hv-brand))';
                 e.currentTarget.style.color = '#000';
               }
             }}
             onMouseLeave={(e) => {
               if (!e.currentTarget.disabled) {
-                e.currentTarget.style.backgroundColor = '#1a4d5e';
-                e.currentTarget.style.color = '#00d9ff';
+                e.currentTarget.style.backgroundColor = 'rgb(var(--hv-info-tint-strong))';
+                e.currentTarget.style.color = 'rgb(var(--hv-info-fg))';
               }
             }}
             style={{
@@ -658,14 +658,14 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
             disabled={isTransmitting || !readerAvailable}
             onMouseEnter={(e) => {
               if (!e.currentTarget.disabled) {
-                e.currentTarget.style.backgroundColor = '#00d9ff';
+                e.currentTarget.style.backgroundColor = 'rgb(var(--hv-info))';
                 e.currentTarget.style.color = '#000';
               }
             }}
             onMouseLeave={(e) => {
               if (!e.currentTarget.disabled) {
-                e.currentTarget.style.backgroundColor = '#2d2d44';
-                e.currentTarget.style.color = '#00d9ff';
+                e.currentTarget.style.backgroundColor = 'rgb(var(--hv-box))';
+                e.currentTarget.style.color = 'rgb(var(--hv-info-fg))';
               }
             }}
             style={{
@@ -682,14 +682,14 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
             disabled={isTransmitting || !readerAvailable || input.length === 0}
             onMouseEnter={(e) => {
               if (!e.currentTarget.disabled) {
-                e.currentTarget.style.backgroundColor = '#4ade80';
+                e.currentTarget.style.backgroundColor = 'rgb(var(--hv-success-text))';
                 e.currentTarget.style.color = '#000';
               }
             }}
             onMouseLeave={(e) => {
               if (!e.currentTarget.disabled) {
-                e.currentTarget.style.backgroundColor = '#1a4d5e';
-                e.currentTarget.style.color = '#00d9ff';
+                e.currentTarget.style.backgroundColor = 'rgb(var(--hv-info-tint-strong))';
+                e.currentTarget.style.color = 'rgb(var(--hv-info-fg))';
               }
             }}
             style={{
@@ -709,10 +709,10 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
             width: '100%',
             marginTop: '10px',
             padding: '10px',
-            border: '2px solid #4a4a6a',
+            border: '2px solid rgb(var(--hv-line-strong))',
             borderRadius: '4px',
-            backgroundColor: '#4d1a1a',
-            color: '#ff6b6b',
+            backgroundColor: 'rgb(var(--hv-error-tint))',
+            color: 'rgb(var(--hv-error-text))',
             cursor: isTransmitting ? 'not-allowed' : 'pointer',
             fontSize: '14px',
             fontWeight: 'bold',
@@ -726,16 +726,16 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
       {/* History Section */}
       <div style={styles.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-          <h4 style={{ margin: 0, color: '#00d9ff' }}>Transmission History</h4>
+          <h4 style={{ margin: 0, color: 'rgb(var(--hv-info-fg))' }}>Transmission History</h4>
           <button
             onClick={clearHistory}
             disabled={history.length === 0}
             style={{
               padding: '5px 10px',
-              border: '1px solid #4a4a6a',
+              border: '1px solid rgb(var(--hv-line-strong))',
               borderRadius: '4px',
-              backgroundColor: '#2d2d44',
-              color: '#ff6b6b',
+              backgroundColor: 'rgb(var(--hv-box))',
+              color: 'rgb(var(--hv-error-text))',
               cursor: history.length === 0 ? 'not-allowed' : 'pointer',
               fontSize: '12px',
               opacity: history.length === 0 ? 0.5 : 1
@@ -745,58 +745,58 @@ export const KeypadEmulator: React.FC<KeypadEmulatorProps> = ({
           </button>
         </div>
 
-        <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #3a3a5a', borderRadius: '4px' }}>
+        <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid rgb(var(--hv-line-strong))', borderRadius: '4px' }}>
           {history.length === 0 ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: '#888' }}>
+            <div style={{ padding: '20px', textAlign: 'center', color: 'rgb(var(--hv-text-3))' }}>
               No transmissions yet
             </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-              <thead style={{ backgroundColor: '#16213e', position: 'sticky', top: 0 }}>
+              <thead style={{ backgroundColor: 'rgb(var(--hv-widget))', position: 'sticky', top: 0 }}>
                 <tr>
-                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #3a3a5a', color: '#00d9ff' }}>Time</th>
-                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #3a3a5a', color: '#00d9ff' }}>Format</th>
-                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #3a3a5a', color: '#00d9ff' }}>PIN</th>
-                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #3a3a5a', color: '#00d9ff' }}>FC</th>
-                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #3a3a5a', color: '#00d9ff' }}>Protocol</th>
-                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #3a3a5a', color: '#00d9ff' }}>Reader</th>
+                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong))', color: 'rgb(var(--hv-info-fg))' }}>Time</th>
+                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong))', color: 'rgb(var(--hv-info-fg))' }}>Format</th>
+                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong))', color: 'rgb(var(--hv-info-fg))' }}>PIN</th>
+                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong))', color: 'rgb(var(--hv-info-fg))' }}>FC</th>
+                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong))', color: 'rgb(var(--hv-info-fg))' }}>Protocol</th>
+                  <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong))', color: 'rgb(var(--hv-info-fg))' }}>Reader</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map((item, index) => (
-                  <tr key={index} style={{ borderBottom: '1px solid #3a3a5a' }}>
-                    <td style={{ padding: '8px', color: '#eee' }}>
+                  <tr key={index} style={{ borderBottom: '1px solid rgb(var(--hv-line-strong))' }}>
+                    <td style={{ padding: '8px', color: 'rgb(var(--hv-text))' }}>
                       {new Date(item.timestamp).toLocaleTimeString()}
                     </td>
                     <td style={{ padding: '8px' }}>
                       <span style={{
                         padding: '2px 8px',
                         borderRadius: '12px',
-                        backgroundColor: '#1a4d5e',
-                        color: '#00d9ff',
+                        backgroundColor: 'rgb(var(--hv-info-tint-strong))',
+                        color: 'rgb(var(--hv-info-fg))',
                         fontSize: '11px'
                       }}>
                         {item.format}
                       </span>
                     </td>
-                    <td style={{ padding: '8px', color: '#00d9ff', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                    <td style={{ padding: '8px', color: 'rgb(var(--hv-info-fg))', fontWeight: 'bold', fontFamily: 'monospace' }}>
                       {item.pin}
                     </td>
-                    <td style={{ padding: '8px', color: '#aaa' }}>
+                    <td style={{ padding: '8px', color: 'rgb(var(--hv-text-2))' }}>
                       {item.facilityCode !== undefined ? item.facilityCode : '-'}
                     </td>
                     <td style={{ padding: '8px' }}>
                       <span style={{
                         padding: '2px 8px',
                         borderRadius: '12px',
-                        backgroundColor: item.readerType === 'osdp' ? '#2d4d1a' : '#4d2d1a',
-                        color: item.readerType === 'osdp' ? '#90ee90' : '#ffa500',
+                        backgroundColor: item.readerType === 'osdp' ? 'rgb(var(--hv-success-tint-strong))' : 'rgb(var(--hv-brand-tint))',
+                        color: item.readerType === 'osdp' ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-brand))',
                         fontSize: '10px'
                       }}>
                         {item.readerType.toUpperCase()}
                       </span>
                     </td>
-                    <td style={{ padding: '8px', color: '#aaa' }}>
+                    <td style={{ padding: '8px', color: 'rgb(var(--hv-text-2))' }}>
                       {item.readerName}
                     </td>
                   </tr>

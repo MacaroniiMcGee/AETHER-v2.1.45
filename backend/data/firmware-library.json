@@ -37,5 +37,31 @@
     "approvedAt": null,
     "approvedBy": null,
     "notes": null
+  },
+  {
+    "id": "fw_1790838233575_f2058403",
+    "filename": "CHAN2_5_4_10_FIRMWARE.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1790838233575_f2058403__CHAN2_5_4_10_FIRMWARE.bin",
+    "sizeBytes": 633328,
+    "sha256": "f2058403bf28340b6078b011bd00e7a67b2317de24f312e0228c3ef4c4c2cc4f",
+    "addedAt": "2026-10-01T07:03:53.575Z",
+    "model": "Hanwha CHAN2",
+    "version": "5.4.10",
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": null
+  },
+  {
+    "id": "fw_1790841745265_a8481d46",
+    "filename": "CHAN1_5_4_10_FIRMWARE.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1790841745265_a8481d46__CHAN1_5_4_10_FIRMWARE.bin",
+    "sizeBytes": 633248,
+    "sha256": "a8481d465f7f0fae8ea3a06a6cc6ad9d6903e1ee89bc5001a7dcf6b6f554324f",
+    "addedAt": "2026-10-01T08:02:25.265Z",
+    "model": "CHAN1",
+    "version": "5.4.10",
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": null
   }
 ]

@@ -410,14 +410,14 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-br from-[#2E2410]/20 to-[#2E2410]/20 backdrop-blur rounded-xl p-6 border border-[#C9862E]/50">
+      <div className="bg-gradient-to-br from-hv-brand-tint/20 to-hv-brand-tint/20 backdrop-blur rounded-xl p-6 border border-hv-brand-hover/50">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-bold mb-2 flex items-center gap-3">
-              <Activity className="w-8 h-8 text-[#F0A73C]" />
+              <Activity className="w-8 h-8 text-hv-brand-fg" />
               Automation Rules
             </h2>
-            <p className="text-[#C4B9AB]">
+            <p className="text-hv-text-2">
               Create conditional automation rules for doors, readers, I/O and switch ports
             </p>
           </div>
@@ -426,7 +426,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
               resetRuleBuilder();
               setShowRuleBuilder(!showRuleBuilder);
             }}
-            className="px-6 py-3 bg-[#F0A73C] hover:bg-[#C9862E] rounded-lg font-semibold flex items-center gap-2"
+            className="px-6 py-3 bg-hv-brand hover:bg-hv-brand-hover rounded-lg font-semibold flex items-center gap-2"
           >
             <Plus className="w-5 h-5" />
             New Rule
@@ -435,25 +435,25 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
         
         {/* Stats */}
         <div className="mt-4 grid grid-cols-4 gap-4">
-          <div className="bg-[#241E19]/50 rounded-lg p-3 border border-[#4A3F36]">
-            <div className="text-xs text-[#ADA294]">Total Rules</div>
-            <div className="text-2xl font-bold text-[#F0A73C]">{automationRules.length}</div>
+          <div className="bg-hv-widget/50 rounded-lg p-3 border border-hv-line-strong">
+            <div className="text-xs text-hv-text-2">Total Rules</div>
+            <div className="text-2xl font-bold text-hv-brand-fg">{automationRules.length}</div>
           </div>
-          <div className="bg-[#241E19]/50 rounded-lg p-3 border border-[#4A3F36]">
-            <div className="text-xs text-[#ADA294]">Active Rules</div>
-            <div className="text-2xl font-bold text-[#7BD497]">
+          <div className="bg-hv-widget/50 rounded-lg p-3 border border-hv-line-strong">
+            <div className="text-xs text-hv-text-2">Active Rules</div>
+            <div className="text-2xl font-bold text-hv-success-text">
               {automationRules.filter(r => r.enabled).length}
             </div>
           </div>
-          <div className="bg-[#241E19]/50 rounded-lg p-3 border border-[#4A3F36]">
-            <div className="text-xs text-[#ADA294]">Total Executions</div>
-            <div className="text-2xl font-bold text-[#5FB7B0]">
+          <div className="bg-hv-widget/50 rounded-lg p-3 border border-hv-line-strong">
+            <div className="text-xs text-hv-text-2">Total Executions</div>
+            <div className="text-2xl font-bold text-hv-info-fg">
               {automationRules.reduce((sum, r) => sum + (r.stats?.executions || 0), 0)}
             </div>
           </div>
-          <div className="bg-[#241E19]/50 rounded-lg p-3 border border-[#4A3F36]">
-            <div className="text-xs text-[#ADA294]">Errors</div>
-            <div className="text-2xl font-bold text-[#E0705F]">
+          <div className="bg-hv-widget/50 rounded-lg p-3 border border-hv-line-strong">
+            <div className="text-xs text-hv-text-2">Errors</div>
+            <div className="text-2xl font-bold text-hv-error-fg">
               {automationRules.reduce((sum, r) => sum + (r.stats?.errors || 0), 0)}
             </div>
           </div>
@@ -461,27 +461,27 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
       </div>
       {/* Rule Builder */}
       {showRuleBuilder && (
-        <div className="bg-[#241E19]/50 backdrop-blur rounded-xl p-6 border border-[#38302A]">
+        <div className="bg-hv-widget/50 backdrop-blur rounded-xl p-6 border border-hv-line">
           <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <Edit className="w-6 h-6 text-[#F0A73C]" />
+            <Edit className="w-6 h-6 text-hv-brand-fg" />
             {editingRule ? 'Edit Rule' : 'Create New Rule'}
           </h3>
           <div className="space-y-4 mb-6">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm text-[#ADA294] block mb-2">Rule Name *</label>
+                <label className="text-sm text-hv-text-2 block mb-2">Rule Name *</label>
                 <input
                   type="text"
                   value={ruleName}
                   onChange={(e) => setRuleName(e.target.value)}
-                  className="w-full bg-[#15110B] border border-[#4A3F36] rounded-lg px-4 py-2"
+                  className="w-full bg-hv-surface border border-hv-line-strong rounded-lg px-4 py-2"
                   placeholder="CLC-004 medium disconnect"
                 />
               </div>
               <div>
-                <label className="text-sm text-[#ADA294] block mb-2">
+                <label className="text-sm text-hv-text-2 block mb-2">
                   Rule ID *
-                  <span className="text-xs text-[#786D60] ml-2">
+                  <span className="text-xs text-hv-text-3 ml-2">
                     {editingRule ? 'cannot be changed' : 'auto-filled from the name'}
                   </span>
                 </label>
@@ -490,28 +490,28 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                   value={ruleId || (editingRule ? '' : slugify(ruleName))}
                   disabled={!!editingRule}
                   onChange={(e) => setRuleId(e.target.value)}
-                  className="w-full bg-[#15110B] border border-[#4A3F36] rounded-lg px-4 py-2 disabled:opacity-60"
+                  className="w-full bg-hv-surface border border-hv-line-strong rounded-lg px-4 py-2 disabled:opacity-60"
                   placeholder="clc-004-medium-disconnect"
                 />
               </div>
               <div>
-                <label className="text-sm text-[#ADA294] block mb-2">Priority (1-10)</label>
+                <label className="text-sm text-hv-text-2 block mb-2">Priority (1-10)</label>
                 <input
                   type="number"
                   value={rulePriority}
                   onChange={(e) => setRulePriority(parseInt(e.target.value) || 5)}
-                  className="w-full bg-[#15110B] border border-[#4A3F36] rounded-lg px-4 py-2"
+                  className="w-full bg-hv-surface border border-hv-line-strong rounded-lg px-4 py-2"
                   min={1}
                   max={10}
                 />
               </div>
             </div>
             <div>
-              <label className="text-sm text-[#ADA294] block mb-2">Description</label>
+              <label className="text-sm text-hv-text-2 block mb-2">Description</label>
               <textarea
                 value={ruleDescription}
                 onChange={(e) => setRuleDescription(e.target.value)}
-                className="w-full bg-[#15110B] border border-[#4A3F36] rounded-lg px-4 py-2 h-20"
+                className="w-full bg-hv-surface border border-hv-line-strong rounded-lg px-4 py-2 h-20"
                 placeholder="What does this rule do?"
               />
             </div>
@@ -522,17 +522,17 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                 onChange={(e) => setRuleEnabled(e.target.checked)}
                 className="w-4 h-4"
               />
-              <span className="text-sm text-[#C4B9AB]">Enable immediately</span>
+              <span className="text-sm text-hv-text-2">Enable immediately</span>
             </label>
           </div>
           {/* Trigger */}
-          <div className="bg-[#15110B]/50 rounded-lg p-4 border border-[#F0A73C]/30 mb-4">
-            <h4 className="text-lg font-semibold mb-3 text-[#F0A73C]">Trigger (WHEN)</h4>
+          <div className="bg-hv-surface/50 rounded-lg p-4 border border-hv-brand/30 mb-4">
+            <h4 className="text-lg font-semibold mb-3 text-hv-brand-fg">Trigger (WHEN)</h4>
             <div className="space-y-3">
               <select
                 value={triggerType}
                 onChange={(e) => setTriggerType(e.target.value)}
-                className="w-full bg-[#241E19] border border-[#4A3F36] rounded-lg px-4 py-2"
+                className="w-full bg-hv-widget border border-hv-line-strong rounded-lg px-4 py-2"
               >
                 <option value="gpio_change">I/O Change</option>
                 {doors.length > 0 && <option value="door_event">Door Event</option>}
@@ -545,7 +545,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                   <select
                     value={triggerPin}
                     onChange={(e) => setTriggerPin(parseInt(e.target.value))}
-                    className="w-full bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                    className="w-full bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                   >
                     {inputs.map(i => (
                       <option key={i.id} value={pinOf(i)}>Channel {pinOf(i)} — {i.name}</option>
@@ -554,7 +554,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                   <select
                     value={triggerValue}
                     onChange={(e) => setTriggerValue(parseInt(e.target.value) as 0 | 1)}
-                    className="w-full bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                    className="w-full bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                   >
                     <option value={1}>HIGH (1)</option>
                     <option value={0}>LOW (0)</option>
@@ -566,7 +566,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                   <select
                     value={triggerDoorId}
                     onChange={(e) => setTriggerDoorId(parseInt(e.target.value))}
-                    className="w-full bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                    className="w-full bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                   >
                     {doors.map((d: any) => (
                       <option key={d.id} value={d.id}>{d.name}</option>
@@ -575,7 +575,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                   <select
                     value={triggerDoorEvent}
                     onChange={(e) => setTriggerDoorEvent(e.target.value)}
-                    className="w-full bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                    className="w-full bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                   >
                     <option value="lock">Lock</option>
                     <option value="dps">DPS</option>
@@ -584,7 +584,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                   <select
                     value={triggerValue}
                     onChange={(e) => setTriggerValue(parseInt(e.target.value) as 0 | 1)}
-                    className="w-full bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                    className="w-full bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                   >
                     <option value={1}>ACTIVE</option>
                     <option value={0}>INACTIVE</option>
@@ -595,7 +595,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                 <select
                   value={triggerReaderId}
                   onChange={(e) => setTriggerReaderId(e.target.value)}
-                  className="w-full bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                  className="w-full bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                 >
                   {readers.filter((r: any) => r.enabled).map((r: any) => (
                     <option key={r.id} value={r.id}>{r.name}</option>
@@ -608,45 +608,45 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                     type="time"
                     value={triggerTime}
                     onChange={(e) => setTriggerTime(e.target.value)}
-                    className="bg-[#241E19] border border-[#4A3F36] rounded px-3 py-2"
+                    className="bg-hv-widget border border-hv-line-strong rounded px-3 py-2"
                   />
-                  <span className="text-xs text-[#786D60]">
+                  <span className="text-xs text-hv-text-3">
                     Runs every day at this time. Long disconnects should use the action's own
                     hold duration rather than a second rule to bring the port back.
                   </span>
                 </div>
               )}
               {triggerType === 'manual' && (
-                <p className="text-xs text-[#786D60]">
+                <p className="text-xs text-hv-text-3">
                   Nothing fires this automatically — useful for a scenario you start by hand.
                 </p>
               )}
             </div>
           </div>
           {/* Actions */}
-          <div className="bg-[#15110B]/50 rounded-lg p-4 border border-[#4F8B5C]/30 mb-4">
+          <div className="bg-hv-surface/50 rounded-lg p-4 border border-hv-success-strong/30 mb-4">
             <div className="flex justify-between mb-3">
-              <h4 className="text-lg font-semibold text-[#7BD497]">Actions (THEN) *</h4>
+              <h4 className="text-lg font-semibold text-hv-success-text">Actions (THEN) *</h4>
               <button
                 onClick={addAction}
-                className="px-3 py-1 bg-[#4F8B5C] hover:bg-[#3E6E48] rounded text-sm font-semibold"
+                className="px-3 py-1 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong rounded text-sm font-semibold"
               >
                 + Add
               </button>
             </div>
             {actions.length === 0 ? (
-              <div className="text-sm text-[#E0705F] text-center py-3">
+              <div className="text-sm text-hv-error-fg text-center py-3">
                 At least one action required
               </div>
             ) : (
               <div className="space-y-2">
                 {actions.map((action) => (
-                  <div key={action.id} className="bg-[#241E19]/50 rounded-lg p-3">
+                  <div key={action.id} className="bg-hv-widget/50 rounded-lg p-3">
                     <div className="flex items-center gap-3 mb-2 flex-wrap">
                       <select
                         value={action.type}
                         onChange={(e) => changeActionType(action.id, e.target.value)}
-                        className="bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                        className="bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                       >
                         <option value="gpio">I/O Set</option>
                         <option value="gpio_pulse">I/O Pulse</option>
@@ -658,7 +658,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                         <select
                           value={action.pin}
                           onChange={(e) => updateAction(action.id, 'pin', parseInt(e.target.value))}
-                          className="flex-1 bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                          className="flex-1 bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                         >
                           {allOutputs.map(o => (
                             <option key={o.id} value={pinOf(o)}>Channel {pinOf(o)} — {o.name}</option>
@@ -669,7 +669,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                         <select
                           value={action.value}
                           onChange={(e) => updateAction(action.id, 'value', parseInt(e.target.value))}
-                          className="bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                          className="bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                         >
                           <option value={1}>HIGH</option>
                           <option value={0}>LOW</option>
@@ -681,7 +681,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                             type="number"
                             value={action.duration || 500}
                             onChange={(e) => updateAction(action.id, 'duration', parseInt(e.target.value) || 500)}
-                            className="w-20 bg-[#38302A] border border-[#4A3F36] rounded px-2 py-2"
+                            className="w-20 bg-hv-line border border-hv-line-strong rounded px-2 py-2"
                           />
                           <span className="text-xs">ms</span>
                         </>
@@ -693,7 +693,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                           <select
                             value={action.profileId}
                             onChange={(e) => updateAction(action.id, 'profileId', e.target.value)}
-                            className="bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                            className="bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                           >
                             {switchProfiles.map(p => (
                               <option key={p.id} value={p.id}>{p.name}</option>
@@ -702,7 +702,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                           <select
                             value={action.port}
                             onChange={(e) => updateAction(action.id, 'port', parseInt(e.target.value))}
-                            className="bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                            className="bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                           >
                             {(() => {
                               const prof = switchProfiles.find(p => p.id === action.profileId);
@@ -725,7 +725,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                           <select
                             value={action.action}
                             onChange={(e) => updateAction(action.id, 'action', e.target.value)}
-                            className="bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                            className="bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                           >
                             <option value="disable">Disable</option>
                             <option value="enable">Enable</option>
@@ -734,7 +734,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                             <select
                               value={action.holdMs}
                               onChange={(e) => updateAction(action.id, 'holdMs', parseInt(e.target.value))}
-                              className="bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                              className="bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                             >
                               {SWITCH_HOLDS.map(h => (
                                 <option key={h.ms} value={h.ms}>{h.label}</option>
@@ -746,7 +746,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                             value={action.reason || ''}
                             onChange={(e) => updateAction(action.id, 'reason', e.target.value)}
                             placeholder="Reason (CLC-004)"
-                            className="flex-1 min-w-[140px] bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                            className="flex-1 min-w-[140px] bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                           />
                         </>
                       )}
@@ -757,7 +757,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                             type="number"
                             value={action.ms || 1000}
                             onChange={(e) => updateAction(action.id, 'ms', parseInt(e.target.value) || 0)}
-                            className="w-28 bg-[#38302A] border border-[#4A3F36] rounded px-2 py-2"
+                            className="w-28 bg-hv-line border border-hv-line-strong rounded px-2 py-2"
                           />
                           <span className="text-xs">ms</span>
                         </>
@@ -768,40 +768,40 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                           value={action.message || ''}
                           onChange={(e) => updateAction(action.id, 'message', e.target.value)}
                           placeholder="Message to write to the log"
-                          className="flex-1 bg-[#38302A] border border-[#4A3F36] rounded px-3 py-2"
+                          className="flex-1 bg-hv-line border border-hv-line-strong rounded px-3 py-2"
                         />
                       )}
                       <button
                         onClick={() => removeAction(action.id)}
-                        className="px-2 py-1 bg-[#C6604F] hover:bg-[#A84E3F] rounded"
+                        className="px-2 py-1 bg-hv-error-strong hover:bg-hv-error-hover rounded"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 
                     {action.type === 'switch_port' && action.action === 'disable' && action.holdMs === 0 && (
-                      <p className="text-xs text-[#E6C766] flex items-start gap-2 mb-2">
+                      <p className="text-xs text-hv-warning-fg flex items-start gap-2 mb-2">
                         <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                         Nothing will bring this port back. A scheduled run that crashes leaves it down
                         permanently — pick a duration unless you mean to decommission the port.
                       </p>
                     )}
                     {action.type === 'switch_port' && action.action === 'disable' && action.holdMs > 0 && (
-                      <p className="text-xs text-[#786D60] mb-2">
+                      <p className="text-xs text-hv-text-3 mb-2">
                         The port restores itself after the hold, even if Aether restarts. Do not add a second
                         rule to bring it back.
                       </p>
                     )}
 
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="text-[#ADA294]">Delay before this action:</span>
+                      <span className="text-hv-text-2">Delay before this action:</span>
                       <input
                         type="number"
                         value={action.delay || 0}
                         onChange={(e) => updateAction(action.id, 'delay', parseInt(e.target.value) || 0)}
-                        className="w-20 bg-[#38302A] border border-[#4A3F36] rounded px-2 py-1"
+                        className="w-20 bg-hv-line border border-hv-line-strong rounded px-2 py-1"
                       />
-                      <span className="text-[#ADA294]">ms</span>
+                      <span className="text-hv-text-2">ms</span>
                     </div>
                   </div>
                 ))}
@@ -811,13 +811,13 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
           <div className="flex gap-3">
             <button
               onClick={saveRule}
-              className="flex-1 px-6 py-3 bg-[#4F8B5C] hover:bg-[#3E6E48] rounded-lg font-semibold"
+              className="flex-1 px-6 py-3 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong rounded-lg font-semibold"
             >
               {editingRule ? 'Update' : 'Create'}
             </button>
             <button
               onClick={resetRuleBuilder}
-              className="px-6 py-3 bg-[#4A3F36] hover:bg-[#38302A] rounded-lg font-semibold"
+              className="px-6 py-3 bg-hv-line-strong hover:bg-hv-line rounded-lg font-semibold"
             >
               Cancel
             </button>
@@ -825,10 +825,10 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
         </div>
       )}
       {/* Rules List */}
-      <div className="bg-[#241E19]/50 backdrop-blur rounded-xl p-6 border border-[#38302A]">
+      <div className="bg-hv-widget/50 backdrop-blur rounded-xl p-6 border border-hv-line">
         <h3 className="text-xl font-bold mb-4">Active Rules</h3>
         {automationRules.length === 0 ? (
-          <div className="bg-[#15110B]/50 rounded-lg p-8 text-center text-[#ADA294] border-2 border-dashed border-[#4A3F36]">
+          <div className="bg-hv-surface/50 rounded-lg p-8 text-center text-hv-text-2 border-2 border-dashed border-hv-line-strong">
             <p>No rules yet. Click "New Rule" to create one.</p>
           </div>
         ) : (
@@ -839,8 +839,8 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
               return (
                 <div
                   key={rule.id}
-                  className={`bg-[#15110B]/50 rounded-lg border ${
-                    rule.enabled ? 'border-[#4F8B5C]/30' : 'border-[#4A3F36]'
+                  className={`bg-hv-surface/50 rounded-lg border ${
+                    rule.enabled ? 'border-hv-success-strong/30' : 'border-hv-line-strong'
                   }`}
                 >
                   <div className="p-4 flex items-center justify-between">
@@ -848,7 +848,7 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                       <button
                         onClick={() => toggleRule(rule.id, !rule.enabled)}
                         className={`p-2 rounded ${
-                          rule.enabled ? 'bg-[#4F8B5C] hover:bg-[#3E6E48]' : 'bg-[#4A3F36] hover:bg-[#38302A]'
+                          rule.enabled ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong' : 'bg-hv-line-strong hover:bg-hv-line'
                         }`}
                       >
                         {rule.enabled ? <Power className="w-5 h-5" /> : <PowerOff className="w-5 h-5" />}
@@ -857,54 +857,54 @@ const AutomationSection: React.FC<AutomationSectionProps> = ({
                       <div className="flex-1">
                         <div className="flex items-center gap-3">
                           <h4 className="font-semibold text-lg">{rule.name}</h4>
-                          <span className="px-2 py-1 bg-[#F0A73C]/20 text-[#F0A73C] rounded text-xs font-semibold">
+                          <span className="px-2 py-1 bg-hv-brand/20 text-hv-brand-fg rounded text-xs font-semibold">
                             P{rule.priority}
                           </span>
                           {touchesSwitch && (
-                            <span className="px-2 py-1 bg-[#5FB7B0]/20 text-[#8FD3CD] rounded text-xs flex items-center gap-1">
+                            <span className="px-2 py-1 bg-hv-info/20 text-hv-info-text rounded text-xs flex items-center gap-1">
                               <Network size={12} /> switch
                             </span>
                           )}
                           {rule.stats?.executions && rule.stats.executions > 0 && (
-                            <span className="px-2 py-1 bg-[#5FB7B0]/20 text-[#5FB7B0] rounded text-xs">
+                            <span className="px-2 py-1 bg-hv-info/20 text-hv-info-fg rounded text-xs">
                               {rule.stats.executions}x
                             </span>
                           )}
                         </div>
                         {rule.description && (
-                          <p className="text-sm text-[#ADA294] mt-1">{rule.description}</p>
+                          <p className="text-sm text-hv-text-2 mt-1">{rule.description}</p>
                         )}
-                        <div className="text-xs text-[#786D60] mt-2">
+                        <div className="text-xs text-hv-text-3 mt-2">
                           <span className="font-semibold">Trigger:</span> {renderTriggerDescription(rule.trigger)}
                         </div>
                       </div>
-                      <button onClick={() => toggleExpanded(rule.id)} className="p-2 hover:bg-[#38302A] rounded">
+                      <button onClick={() => toggleExpanded(rule.id)} className="p-2 hover:bg-hv-line rounded">
                         {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                       </button>
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => editRule(rule)}
-                        className="px-3 py-2 bg-[#F0A73C] hover:bg-[#C9862E] rounded text-sm"
+                        className="px-3 py-2 bg-hv-brand hover:bg-hv-brand-hover rounded text-sm"
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => deleteRule(rule.id)}
-                        className="px-3 py-2 bg-[#C6604F] hover:bg-[#A84E3F] rounded text-sm"
+                        className="px-3 py-2 bg-hv-error-strong hover:bg-hv-error-hover rounded text-sm"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
                   {isExpanded && (
-                    <div className="px-4 pb-4 border-t border-[#38302A] pt-3">
-                      <div className="text-sm font-semibold text-[#7BD497] mb-2">Actions:</div>
+                    <div className="px-4 pb-4 border-t border-hv-line pt-3">
+                      <div className="text-sm font-semibold text-hv-success-text mb-2">Actions:</div>
                       <div className="space-y-1">
                         {rule.actions?.map((action: any, idx: number) => (
-                          <div key={idx} className="text-sm text-[#C4B9AB] pl-4">
+                          <div key={idx} className="text-sm text-hv-text-2 pl-4">
                             {idx + 1}. {renderActionDescription(action)}
-                            {action.delay > 0 && <span className="text-[#ADA294] ml-2">(+{action.delay}ms)</span>}
+                            {action.delay > 0 && <span className="text-hv-text-2 ml-2">(+{action.delay}ms)</span>}
                           </div>
                         ))}
                       </div>

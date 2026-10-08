@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "card_then_led",
+      "name": "LED responds within 2 s of a card read",
+      "whenName": "osdp_RAW",
+      "expectName": "osdp_LED",
+      "withinMs": 2000,
+      "address": null,
+      "color": null
+    },
+    {
+      "id": "poll_answered",
+      "name": "Poll answered within deadline",
+      "whenName": "osdp_POLL",
+      "expectName": "osdp_ACK",
+      "withinMs": 200,
+      "address": null,
+      "color": null
+    }
+  ]
+}

@@ -138,7 +138,7 @@ const LIVE_POLL_MS = 15000;
 
 /** One colour per line, drawn from the existing palette so a chart with eight
  *  series still looks like the rest of the app. */
-const SERIES_COLORS = ['#5FB7B0', '#F0A73C', '#8FB488', '#E0705F', '#8FD3CD', '#FFC66E', '#7BD497', '#C08578'];
+const SERIES_COLORS = ['rgb(var(--hv-info))', 'rgb(var(--hv-brand))', 'rgb(var(--hv-success-text))', 'rgb(var(--hv-error))', 'rgb(var(--hv-info-text))', 'rgb(var(--hv-brand-text))', 'rgb(var(--hv-success-text))', 'rgb(var(--hv-error))'];
 
 const HOLDS = [
   // 0 means no auto-revert. Deliberately last and clearly worded: everything
@@ -801,36 +801,36 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
   /** ---------- Not connected / not initialized ---------- */
   if (!connected) {
     return (
-      <div className="rounded-xl p-6 border" style={{ background: 'linear-gradient(160deg, #241E19, #1B1613)', borderColor: '#38302A' }}>
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-          <Network className="w-8 h-8 text-[#F0A73C]" />
+      <div className="rounded-xl p-6 border" style={{ background: 'linear-gradient(160deg, rgb(var(--hv-widget)), rgb(var(--hv-widget-panel)))', borderColor: 'rgb(var(--hv-line))' }}>
+        <h1 className="text-3xl font-bold text-hv-text flex items-center gap-3">
+          <Network className="w-8 h-8 text-hv-brand-fg" />
           Switch Ports
         </h1>
-        <p className="text-[#786D60] mt-3">Connect to the backend to control switch ports.</p>
+        <p className="text-hv-text-3 mt-3">Connect to the backend to control switch ports.</p>
       </div>
     );
   }
 
   if (!status) {
     return (
-      <div className="rounded-xl p-6 border" style={{ background: 'linear-gradient(160deg, #241E19, #1B1613)', borderColor: '#38302A' }}>
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3 mb-3">
-          <Network className="w-8 h-8 text-[#F0A73C]" />
+      <div className="rounded-xl p-6 border" style={{ background: 'linear-gradient(160deg, rgb(var(--hv-widget)), rgb(var(--hv-widget-panel)))', borderColor: 'rgb(var(--hv-line))' }}>
+        <h1 className="text-3xl font-bold text-hv-text flex items-center gap-3 mb-3">
+          <Network className="w-8 h-8 text-hv-brand-fg" />
           Switch Ports
         </h1>
         {error ? (
           <>
-            <p className="text-[#F5D4CD]">{error}</p>
-            <p className="text-sm text-[#786D60] mt-2">
+            <p className="text-hv-error-text">{error}</p>
+            <p className="text-sm text-hv-text-3 mt-2">
               Check that the backend started with SWITCH_PASS_LAB set and that switch/switch-config.json
               points at the right host.
             </p>
-            <button onClick={loadStatus} className="mt-4 px-4 py-2 rounded-lg font-semibold bg-[#F0A73C] text-[#241503]">
+            <button onClick={loadStatus} className="mt-4 px-4 py-2 rounded-lg font-semibold bg-hv-brand text-[#101011]">
               Try again
             </button>
           </>
         ) : (
-          <p className="text-[#ADA294]">Loading switch status…</p>
+          <p className="text-hv-text-2">Loading switch status…</p>
         )}
       </div>
     );
@@ -839,14 +839,14 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="rounded-xl p-6 border shadow-2xl" style={{ background: 'linear-gradient(160deg, #241E19, #1B1613)', borderColor: '#38302A' }}>
+      <div className="rounded-xl p-6 border shadow-2xl" style={{ background: 'linear-gradient(160deg, rgb(var(--hv-widget)), rgb(var(--hv-widget-panel)))', borderColor: 'rgb(var(--hv-line))' }}>
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-              <Network className="w-8 h-8 text-[#F0A73C]" />
+            <h1 className="text-3xl font-bold text-hv-text flex items-center gap-3">
+              <Network className="w-8 h-8 text-hv-brand-fg" />
               Switch Ports
             </h1>
-            <p className="text-[#ADA294] mt-2">
+            <p className="text-hv-text-2 mt-2">
               Take a controller's link down to test offline and recovery behaviour
             </p>
           </div>
@@ -854,16 +854,16 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             <select
               value={profileId}
               onChange={e => { setProfileId(e.target.value); setSelected(null); }}
-              className="border rounded-lg px-3 py-2 text-white"
-              style={{ background: '#241E19', borderColor: '#38302A' }}
+              className="border rounded-lg px-3 py-2 text-hv-text"
+              style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}
             >
               {status.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <button
               onClick={beginNew}
               disabled={busy}
-              className="px-3 py-2 rounded-lg font-semibold flex items-center gap-1 text-[#ADA294] disabled:opacity-30"
-              style={{ background: '#2A241E' }}
+              className="px-3 py-2 rounded-lg font-semibold flex items-center gap-1 text-hv-text-2 disabled:opacity-30"
+              style={{ background: 'rgb(var(--hv-popup-panel))' }}
               title="Add a switch"
             >
               <Plus size={16} /> New
@@ -871,15 +871,15 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             <button
               onClick={beginEdit}
               disabled={busy || !profile}
-              className="px-3 py-2 rounded-lg font-semibold text-[#ADA294] disabled:opacity-30"
-              style={{ background: '#2A241E' }}
+              className="px-3 py-2 rounded-lg font-semibold text-hv-text-2 disabled:opacity-30"
+              style={{ background: 'rgb(var(--hv-popup-panel))' }}
             >
               Edit
             </button>
             <button
               onClick={scan}
               disabled={busy || scanning}
-              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 bg-[#F0A73C] text-[#241503] disabled:opacity-30"
+              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 bg-hv-brand text-[#101011] disabled:opacity-30"
             >
               <Radar size={16} /> {scanning ? 'Scanning…' : 'Scan switch'}
             </button>
@@ -888,17 +888,17 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
               title={livePolling
                 ? 'Board refreshes itself every 15s while this tab is open'
                 : 'Board only updates when you scan or refresh'}
-              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-[#ADA294]"
-              style={{ background: '#2A241E' }}
+              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-hv-text-2"
+              style={{ background: 'rgb(var(--hv-popup-panel))' }}
             >
-              <span className={`w-2 h-2 rounded-full ${livePolling ? 'bg-[#6FBF7E] animate-pulse' : 'bg-[#4A3F36]'}`} />
+              <span className={`w-2 h-2 rounded-full ${livePolling ? 'bg-hv-success animate-pulse' : 'bg-hv-line-strong'}`} />
               {livePolling ? 'Live' : 'Paused'}
             </button>
             <button
               onClick={() => { loadStatus(); loadPorts(profileId); loadLive(); }}
               disabled={busy}
-              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-[#ADA294] disabled:opacity-30"
-              style={{ background: '#2A241E' }}
+              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-hv-text-2 disabled:opacity-30"
+              style={{ background: 'rgb(var(--hv-popup-panel))' }}
             >
               <RefreshCw size={16} /> Refresh
             </button>
@@ -907,23 +907,23 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
         {profile && (
           <div className="flex items-center gap-3 text-sm">
-            <span className="px-2 py-1 rounded-full border text-[#8FD3CD]" style={{ background: 'rgba(95,183,176,.15)', borderColor: 'rgba(95,183,176,.3)' }}>
+            <span className="px-2 py-1 rounded-full border text-hv-info-text" style={{ background: 'rgb(var(--hv-info) / .15)', borderColor: 'rgb(var(--hv-info) / .3)' }}>
               {profile.host}
             </span>
-            <span className="px-2 py-1 rounded-full border text-[#FFC66E]" style={{ background: 'rgba(240,167,60,.15)', borderColor: 'rgba(240,167,60,.3)' }}>
+            <span className="px-2 py-1 rounded-full border text-hv-brand-text" style={{ background: 'rgb(var(--hv-brand) / .15)', borderColor: 'rgb(var(--hv-brand) / .3)' }}>
               {profile.portCount} ports
             </span>
             {snapshot && (
-              <span className="px-2 py-1 rounded-full border text-[#ADA294]" style={{ background: '#241E19', borderColor: '#38302A' }}>
+              <span className="px-2 py-1 rounded-full border text-hv-text-2" style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}>
                 Uptime {fmtUptime(snapshot.uptimeSeconds)} • {snapshot.lldpCount} named • {snapshot.arpCount} ARP
               </span>
             )}
             {profile.selfPort ? (
-              <span className="text-[#786D60] flex items-center gap-1">
+              <span className="text-hv-text-3 flex items-center gap-1">
                 <Lock size={13} /> Port {profile.selfPort} carries this host's own link - locked
               </span>
             ) : (
-              <span className="text-[#E6C766] flex items-center gap-1">
+              <span className="text-hv-warning-fg flex items-center gap-1">
                 <AlertTriangle size={13} /> This host's own port was not identified - set denyPorts before unattended runs
               </span>
             )}
@@ -932,11 +932,11 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
       </div>
 
       {status.profiles.length === 0 && !draft && (
-        <div className="rounded-xl p-8 border text-center" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
-          <Network className="w-10 h-10 text-[#4A3F36] mx-auto mb-3" />
-          <p className="text-[#ADA294]">No switches configured yet.</p>
+        <div className="rounded-xl p-8 border text-center" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
+          <Network className="w-10 h-10 text-hv-text-disabled mx-auto mb-3" />
+          <p className="text-hv-text-2">No switches configured yet.</p>
           <button onClick={beginNew}
-                  className="mt-4 px-5 py-2 rounded-lg font-semibold bg-[#F0A73C] text-[#241503]">
+                  className="mt-4 px-5 py-2 rounded-lg font-semibold bg-hv-brand text-[#101011]">
             Add your first switch
           </button>
         </div>
@@ -944,13 +944,13 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
       {/* Profile editor */}
       {draft && (
-        <div className="rounded-xl p-6 border" style={{ background: 'linear-gradient(160deg, #241E19, #1B1613)', borderColor: '#F0A73C' }}>
+        <div className="rounded-xl p-6 border" style={{ background: 'linear-gradient(160deg, rgb(var(--hv-widget)), rgb(var(--hv-widget-panel)))', borderColor: 'rgb(var(--hv-brand))' }}>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">
+            <h2 className="text-xl font-bold text-hv-text">
               {isNew ? 'Add a switch' : `Edit ${draft.name || draft.id}`}
             </h2>
             <button onClick={() => { setDraft(null); setTestResult(null); }}
-                    className="text-[#786D60] hover:text-[#F3ECE3]">
+                    className="text-hv-text-3 hover:text-hv-text">
               <X size={20} />
             </button>
           </div>
@@ -994,7 +994,7 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                      placeholder="10" className={inputCls} style={inputStyle} />
             </Field>
             <Field label="Protect this host's port" hint="find it via the MAC table">
-              <label className="flex items-center gap-2 mt-1 text-sm text-[#ADA294]">
+              <label className="flex items-center gap-2 mt-1 text-sm text-hv-text-2">
                 <input type="checkbox" checked={draft.autoDetectSelfPort}
                        onChange={e => setDraft({ ...draft, autoDetectSelfPort: e.target.checked })} />
                 Detect automatically
@@ -1002,7 +1002,7 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             </Field>
           </div>
 
-          <p className="text-xs text-[#E6C766] mb-4 flex items-start gap-2">
+          <p className="text-xs text-hv-warning-fg mb-4 flex items-start gap-2">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             The uplink port carries every other device on the network. Listing it above is what stops a
             scheduled test from cutting this switch off from everything, including Aether.
@@ -1010,51 +1010,51 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
           <div className="flex gap-3">
             <button onClick={saveProfile} disabled={busy}
-                    className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-[#4F8B5C] hover:bg-[#3E6E48] disabled:opacity-30">
+                    className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong disabled:opacity-30">
               <Save size={16} /> {isNew ? 'Add switch' : 'Save changes'}
             </button>
             {!isNew && (
               <button onClick={deleteProfile} disabled={busy}
-                      className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-[#C6604F] hover:bg-[#A84E3F] disabled:opacity-30">
+                      className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-hv-error-strong hover:bg-hv-error-hover disabled:opacity-30">
                 <Trash2 size={16} /> Delete
               </button>
             )}
           </div>
-          {error && <p className="text-[#F5D4CD] text-sm mt-3">{error}</p>}
+          {error && <p className="text-hv-error-text text-sm mt-3">{error}</p>}
         </div>
       )}
 
       {/* Credentials + connection test */}
       {!draft && profile && (
-        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
           <div className="flex items-center gap-3 flex-wrap">
-            <span className={`px-2 py-1 rounded-full border text-xs ${profile.hasCredential ? 'text-[#7BD497]' : 'text-[#E6C766]'}`}
-                  style={{ background: '#241E19', borderColor: '#38302A' }}>
+            <span className={`px-2 py-1 rounded-full border text-xs ${profile.hasCredential ? 'text-hv-success-text' : 'text-hv-warning-fg'}`}
+                  style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}>
               {profile.hasCredential ? 'Password stored' : 'No password stored'}
             </span>
             <input
               type="password" value={pwInput} onChange={e => setPwInput(e.target.value)}
               placeholder={`Password for ${profile.username}@${profile.host}`}
-              className="border rounded-lg px-3 py-2 text-white w-72"
-              style={{ background: '#241E19', borderColor: '#38302A' }}
+              className="border rounded-lg px-3 py-2 text-hv-text w-72"
+              style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}
             />
             <button onClick={savePassword} disabled={busy || !pwInput}
-                    className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-[#ADA294] disabled:opacity-30"
-                    style={{ background: '#2A241E' }}>
+                    className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-hv-text-2 disabled:opacity-30"
+                    style={{ background: 'rgb(var(--hv-popup-panel))' }}>
               <KeyRound size={16} /> Save password
             </button>
             <button onClick={testConnection} disabled={busy}
-                    className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-[#ADA294] disabled:opacity-30"
-                    style={{ background: '#2A241E' }}>
+                    className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 text-hv-text-2 disabled:opacity-30"
+                    style={{ background: 'rgb(var(--hv-popup-panel))' }}>
               <PlugZap size={16} /> Test connection
             </button>
           </div>
           {testResult && (
-            <p className={`text-sm mt-3 ${testResult.startsWith('Failed') ? 'text-[#F5D4CD]' : 'text-[#CDEBD3]'}`}>
+            <p className={`text-sm mt-3 ${testResult.startsWith('Failed') ? 'text-hv-error-text' : 'text-hv-success-text'}`}>
               {testResult}
             </p>
           )}
-          <p className="text-xs text-[#786D60] mt-3">
+          <p className="text-xs text-hv-text-3 mt-3">
             Stored on the Pi at switch/switch-credentials.json, permissions 0600. Kept out of the config file
             so that can be shared without leaking credentials.
           </p>
@@ -1063,11 +1063,11 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
       {snapshot?.rebootSuspected && (
         <div className="rounded-xl p-4 border flex items-start gap-3"
-             style={{ background: 'rgba(198,96,79,.12)', borderColor: 'rgba(198,96,79,.5)' }}>
-          <AlertTriangle className="text-[#E0705F] mt-0.5" size={20} />
+             style={{ background: 'rgb(var(--hv-error-strong) / .12)', borderColor: 'rgb(var(--hv-error-strong) / .5)' }}>
+          <AlertTriangle className="text-hv-error-fg mt-0.5" size={20} />
           <div>
-            <div className="font-semibold text-[#F5D4CD]">This switch rebooted</div>
-            <p className="text-sm text-[#ADA294] mt-1">
+            <div className="font-semibold text-hv-error-text">This switch rebooted</div>
+            <p className="text-sm text-hv-text-2 mt-1">
               Port changes are never written to startup-config, so every port came back up on its own.
               Any hold that spanned the reboot is void - and so is the scenario result that depended on it.
             </p>
@@ -1077,10 +1077,10 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
       {/* Held ports */}
       {held.length > 0 && (
-        <div className="rounded-xl p-6 border" style={{ background: 'rgba(199,154,52,.10)', borderColor: 'rgba(199,154,52,.45)' }}>
+        <div className="rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-brand-hover) / .10)', borderColor: 'rgb(var(--hv-brand-hover) / .45)' }}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-bold text-[#F3E4BE] flex items-center gap-2">
-              <div className="w-3 h-3 bg-[#E6C766] rounded-full animate-pulse" />
+            <h2 className="text-xl font-bold text-hv-brand-text flex items-center gap-2">
+              <div className="w-3 h-3 bg-hv-warning rounded-full animate-pulse" />
               {held.filter(h => (h as any).kind !== 'poe').length} down
               {held.some(h => (h as any).kind === 'poe') &&
                 `, ${held.filter(h => (h as any).kind === 'poe').length} unpowered`}
@@ -1088,7 +1088,7 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             <button
               onClick={revertAll}
               disabled={busy}
-              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 bg-[#C79A34] text-[#241503] disabled:opacity-30"
+              className="px-4 py-2 rounded-lg font-semibold flex items-center gap-2 bg-hv-brand-hover text-[#101011] disabled:opacity-30"
             >
               <RotateCcw size={16} /> Restore all
             </button>
@@ -1096,17 +1096,17 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
           <div className="space-y-2">
             {held.map(h => (
               <div key={h.port} className="rounded-lg p-3 border flex items-center justify-between"
-                   style={{ background: 'rgba(21, 17, 11, 0.5)', borderColor: '#2A241E' }}>
+                   style={{ background: 'rgb(var(--hv-surface) / 0.5)', borderColor: 'rgb(var(--hv-popup-panel))' }}>
                 <div>
-                  <div className="font-semibold text-white">
+                  <div className="font-semibold text-hv-text">
                     Port {h.port}{(h as any).kind === 'poe' ? ' - power off' : ''}
                   </div>
-                  <div className="text-xs text-[#786D60]">
+                  <div className="text-xs text-hv-text-3">
                     Down since {new Date(h.disabledAt).toLocaleTimeString()}
                     {h.reason ? ` • ${h.reason}` : ''}
                   </div>
                 </div>
-                <div className={`text-sm font-semibold ${h.revertAt ? 'text-[#F3E4BE]' : 'text-[#E0705F]'}`}>
+                <div className={`text-sm font-semibold ${h.revertAt ? 'text-hv-brand-text' : 'text-hv-error-fg'}`}>
                   {h.revertAt
                     ? `back in ${fmtRemaining(h.revertAt - Date.now())}`
                     : 'held indefinitely'}
@@ -1120,21 +1120,21 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
       {/* PoE power budget */}
       {snapshot?.poeCapable && snapshot.poeBudget && (
         <div className="backdrop-blur rounded-xl p-6 border"
-             style={{ background: 'rgba(36, 30, 25, 0.55)',
-                      borderColor: snapshot.poeBudget.overSubscribed ? 'rgba(198,96,79,.5)' : '#38302A' }}>
+             style={{ background: 'rgb(var(--hv-widget) / 0.55)',
+                      borderColor: snapshot.poeBudget.overSubscribed ? 'rgb(var(--hv-error-strong) / .5)' : 'rgb(var(--hv-line))' }}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold flex items-center gap-2">
-              <div className="w-3 h-3 bg-[#C79A34] rounded-full animate-pulse" />
+              <div className="w-3 h-3 bg-hv-brand-hover rounded-full animate-pulse" />
               Power Budget
             </h2>
             <div className="flex items-center gap-3">
-              <span className="text-sm text-[#786D60]">
+              <span className="text-sm text-hv-text-3">
                 {snapshot.poeBudget.operationalStatus || 'Unknown'} • {snapshot.poeBudget.managementMode || '-'} • {snapshot.poeBudget.powerSource || '-'}
               </span>
               <button onClick={writeConfig} disabled={busy}
                       title="Persist power caps to startup config. Test port states are never saved."
-                      className="px-3 py-1.5 rounded-lg font-semibold flex items-center gap-2 text-[#ADA294] disabled:opacity-30"
-                      style={{ background: '#2A241E' }}>
+                      className="px-3 py-1.5 rounded-lg font-semibold flex items-center gap-2 text-hv-text-2 disabled:opacity-30"
+                      style={{ background: 'rgb(var(--hv-popup-panel))' }}>
                 <HardDriveDownload size={15} /> Save config
               </button>
             </div>
@@ -1157,36 +1157,36 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
                 {/* Actual draw against capacity. The requested marker sits on the
                     same bar because that is the number that causes denials. */}
-                <div className="relative h-3 rounded-full overflow-hidden" style={{ background: '#241E19' }}>
+                <div className="relative h-3 rounded-full overflow-hidden" style={{ background: 'rgb(var(--hv-widget))' }}>
                   <div className="h-full" style={{
                     width: `${usedPct}%`,
-                    background: usedPct > (b.thresholdPct || 80) ? '#C79A34' : '#4F8B5C',
+                    background: usedPct > (b.thresholdPct || 80) ? 'rgb(var(--hv-brand-hover))' : 'rgb(var(--hv-success-strong))',
                   }} />
                   {reqPct > 0 && (
-                    <div className="absolute top-0 h-full w-0.5 bg-[#E0705F]"
+                    <div className="absolute top-0 h-full w-0.5 bg-hv-error"
                          style={{ left: `${Math.min(99.5, reqPct)}%` }}
                          title={`Requested ${b.requestedW} W`} />
                   )}
                 </div>
-                <div className="flex justify-between text-xs text-[#786D60] mt-1">
+                <div className="flex justify-between text-xs text-hv-text-3 mt-1">
                   <span>{b.consumptionW ?? 0} W drawing now</span>
                   <span>{cap} W available</span>
                 </div>
 
                 {b.overSubscribed && (
                   <div className="mt-4 rounded-lg p-3 border flex items-start gap-2"
-                       style={{ background: 'rgba(198,96,79,.12)', borderColor: 'rgba(198,96,79,.5)' }}>
-                    <AlertTriangle size={16} className="text-[#E0705F] mt-0.5 shrink-0" />
+                       style={{ background: 'rgb(var(--hv-error-strong) / .12)', borderColor: 'rgb(var(--hv-error-strong) / .5)' }}>
+                    <AlertTriangle size={16} className="text-hv-error-fg mt-0.5 shrink-0" />
                     <div className="text-sm">
-                      <div className="font-semibold text-[#F5D4CD]">
+                      <div className="font-semibold text-hv-error-text">
                         Devices are asking for {b.requestedW} W but only {b.allocatedW} W is allocated
                       </div>
-                      <p className="text-[#ADA294] mt-1">
+                      <p className="text-hv-text-2 mt-1">
                         {b.managementMode === 'Static'
                           ? `Nothing is actually drawing that much - only ${b.consumptionW ?? 0} W is in use. In static mode the switch reserves each device's advertised class maximum rather than its real draw, so a 6 W camera on a class 4 port still ties up 30 W. Cap the reservation per port below to free it.`
                           : 'The switch is refusing power to at least one port.'}
                       </p>
-                      <p className="text-[#ADA294] mt-2">
+                      <p className="text-hv-text-2 mt-2">
                         Until it is resolved, cutting power to one device frees budget another may immediately
                         claim - so a PoE test can change which ports are powered as a side effect, and the
                         result won't be repeatable.
@@ -1201,9 +1201,9 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
       )}
 
       {/* Port grid */}
-      {profile && <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+      {profile && <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
         <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-          <div className="w-3 h-3 bg-[#F0A73C] rounded-full animate-pulse" />
+          <div className="w-3 h-3 bg-hv-brand rounded-full animate-pulse" />
           Interfaces
         </h2>
 
@@ -1220,18 +1220,18 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             const h = heldFor(p.port);
             const ph = poeHeldFor(p.port);
             const isSel = selected === p.port;
-            let bg = '#2A231C', fg = '#786D60', ring = '#2A241E';
+            let bg = 'rgb(var(--hv-popup-panel))', fg = 'rgb(var(--hv-text-3))', ring = 'rgb(var(--hv-popup-panel))';
             if (p.denied) {
-              if (p.status === 'up') { bg = 'rgba(79,139,92,.18)'; fg = '#8FB488'; }
-              else if (p.status === 'down') { bg = 'rgba(198,96,79,.18)'; fg = '#C08578'; }
-              else if (p.status === 'disconnected') { bg = 'rgba(95,183,176,.15)'; fg = '#6E9C98'; }
-              else { bg = '#241E19'; fg = '#5C5348'; }
-              ring = '#38302A';
+              if (p.status === 'up') { bg = 'rgb(var(--hv-success-strong) / .18)'; fg = 'rgb(var(--hv-success-text))'; }
+              else if (p.status === 'down') { bg = 'rgb(var(--hv-error-strong) / .18)'; fg = 'rgb(var(--hv-error))'; }
+              else if (p.status === 'disconnected') { bg = 'rgb(var(--hv-info) / .15)'; fg = 'rgb(var(--hv-info))'; }
+              else { bg = 'rgb(var(--hv-widget))'; fg = 'rgb(var(--hv-text-3))'; }
+              ring = 'rgb(var(--hv-line))';
             }
-            else if (h)                           { bg = 'rgba(199,154,52,.35)'; fg = '#F3E4BE'; ring = '#C79A34'; }
-            else if (p.status === 'down')         { bg = 'rgba(198,96,79,.35)'; fg = '#F5D4CD'; ring = '#C6604F'; }
-            else if (p.status === 'up')           { bg = 'rgba(79,139,92,.35)'; fg = '#CDEBD3'; ring = '#4F8B5C'; }
-            else if (p.status === 'disconnected') { bg = 'rgba(95,183,176,.28)'; fg = '#8FD3CD'; ring = '#5FB7B0'; }
+            else if (h)                           { bg = 'rgb(var(--hv-brand-hover) / .35)'; fg = 'rgb(var(--hv-brand-text))'; ring = 'rgb(var(--hv-brand-hover))'; }
+            else if (p.status === 'down')         { bg = 'rgb(var(--hv-error-strong) / .35)'; fg = 'rgb(var(--hv-error-text))'; ring = 'rgb(var(--hv-error-strong))'; }
+            else if (p.status === 'up')           { bg = 'rgb(var(--hv-success-strong) / .35)'; fg = 'rgb(var(--hv-success-text))'; ring = 'rgb(var(--hv-success-strong))'; }
+            else if (p.status === 'disconnected') { bg = 'rgb(var(--hv-info) / .28)'; fg = 'rgb(var(--hv-info-text))'; ring = 'rgb(var(--hv-info))'; }
 
             const spark = sparks[p.port] || [];
 
@@ -1250,8 +1250,8 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                   // wattage and its neighbour does not.
                   minHeight: compact ? 88 : 210,
                   background: bg, color: fg,
-                  borderColor: (isSel || multi.includes(p.port)) ? '#F0A73C' : ring,
-                  boxShadow: multi.includes(p.port) ? '0 0 0 2px rgba(240,167,60,.35)' : undefined,
+                  borderColor: (isSel || multi.includes(p.port)) ? 'rgb(var(--hv-brand))' : ring,
+                  boxShadow: multi.includes(p.port) ? '0 0 0 2px rgb(var(--hv-brand) / .35)' : undefined,
                   fontVariantNumeric: 'tabular-nums',
                 }}
               >
@@ -1285,18 +1285,18 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                 <Sparkline points={spark} color={fg} />
 
                 {(p.poe === 'disabled' || ph) && (
-                  <div className={`mt-1.5 flex items-center justify-center gap-1.5 text-[#E6C766] ${compact ? 'text-[11px]' : 'text-base'}`}>
+                  <div className={`mt-1.5 flex items-center justify-center gap-1.5 text-hv-warning-fg ${compact ? 'text-[11px]' : 'text-base'}`}>
                     <ZapOff size={compact ? 11 : 18} />{compact ? '' : ' no power'}
                   </div>
                 )}
                 {p.poeDenied && (
-                  <div className={`mt-1.5 flex items-center justify-center gap-1.5 text-[#E0705F] ${compact ? 'text-[11px]' : 'text-base'}`}
+                  <div className={`mt-1.5 flex items-center justify-center gap-1.5 text-hv-error-fg ${compact ? 'text-[11px]' : 'text-base'}`}
                        title="The switch refused power - it is over budget">
                     <AlertTriangle size={compact ? 11 : 18} />{compact ? '' : ' denied'}
                   </div>
                 )}
                 {!compact && !p.poeDenied && p.poe !== 'disabled' && (p.poePowerMw || 0) > 0 && (
-                  <div className="text-lg mt-1.5 font-semibold" style={{ color: '#F0A73C', opacity: 0.95 }}>
+                  <div className="text-lg mt-1.5 font-semibold" style={{ color: 'rgb(var(--hv-brand-fg))', opacity: 0.95 }}>
                     {fmtWatts(p.poePowerMw || 0)}
                   </div>
                 )}
@@ -1315,16 +1315,16 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
               <div
                 className="rounded-lg p-3 min-w-full"
                 style={{
-                  background: 'linear-gradient(180deg, #221C17 0%, #191410 100%)',
-                  border: '1px solid #3A322B',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04), inset 0 -12px 20px rgba(0,0,0,.35)',
+                  background: 'linear-gradient(180deg, rgb(var(--hv-widget)) 0%, rgb(var(--hv-widget-panel)) 100%)',
+                  border: '1px solid rgb(var(--hv-line))',
+                  boxShadow: 'inset 0 1px 0 rgb(var(--hv-contrast) / .04), inset 0 -12px 20px rgba(0,0,0,.35)',
                 }}
               >
                 <div className="flex items-center justify-between mb-2 px-1">
-                  <span className="text-base tracking-widest text-[#786D60] font-medium">
+                  <span className="text-base tracking-widest text-hv-text-3 font-medium">
                     {profile?.name || 'SWITCH'}
                   </span>
-                  <span className="text-base tracking-widest text-[#786D60] font-medium">
+                  <span className="text-base tracking-widest text-hv-text-3 font-medium">
                     {ports.length} PORTS
                   </span>
                 </div>
@@ -1338,56 +1338,56 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
           );
         })()}
 
-        <div className="text-sm text-[#786D60]">
+        <div className="text-sm text-hv-text-3">
           {/* Two different kinds of thing, so they are grouped apart: the tile's
               colour is one state out of several, while the badges below it can
               appear on top of any of them. Run together, the PoE icon reads as
               if it belonged to whichever swatch precedes it. */}
           <div className="flex flex-wrap gap-4 items-center">
-            <span className="text-[#5C5348]">State</span>
-            <Legend color="#4F8B5C" label="Link up" />
-            <Legend color="#C6604F" label="Admin down" />
-            <Legend color="#5FB7B0" label="Disconnected" />
-            <Legend color="#C79A34" label="Held by a Test" />
-            <Legend color="#4A3F36" label="Not Scanned" />
+            <span className="text-hv-text-3">State</span>
+            <Legend color="rgb(var(--hv-success-strong))" label="Link up" />
+            <Legend color="rgb(var(--hv-error-strong))" label="Admin down" />
+            <Legend color="rgb(var(--hv-info-fg))" label="Disconnected" />
+            <Legend color="rgb(var(--hv-brand-hover))" label="Held by a Test" />
+            <Legend color="rgb(var(--hv-text-disabled))" label="Not Scanned" />
           </div>
-          <div className="flex flex-wrap gap-4 items-center mt-2 pt-2 border-t" style={{ borderColor: '#2A241E' }}>
-            <span className="text-[#5C5348]">LEDs</span>
+          <div className="flex flex-wrap gap-4 items-center mt-2 pt-2 border-t" style={{ borderColor: 'rgb(var(--hv-popup-panel))' }}>
+            <span className="text-hv-text-3">LEDs</span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-sm" style={{ background: '#2F6B3C' }} /> Link Up
+              <span className="w-3 h-1.5 rounded-sm" style={{ background: 'rgb(var(--hv-success-hover))' }} /> Link Up
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-sm" style={{ background: '#7BD497' }} /> Passing Traffic
+              <span className="w-3 h-1.5 rounded-sm" style={{ background: 'rgb(var(--hv-success-text))' }} /> Passing Traffic
             </span>
             {snapshot?.poeCapable && (
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-1.5 rounded-sm" style={{ background: '#F0A73C' }} /> Drawing Power
+                <span className="w-3 h-1.5 rounded-sm" style={{ background: 'rgb(var(--hv-brand))' }} /> Drawing Power
               </span>
             )}
             {snapshot?.poeCapable && (
               <span className="flex items-center gap-1.5">
-                <ZapOff size={11} className="text-[#E6C766]" /> PoE Disabled
+                <ZapOff size={11} className="text-hv-warning-fg" /> PoE Disabled
               </span>
             )}
           </div>
 
-          <div className="flex flex-wrap gap-4 items-center mt-2 pt-2 border-t" style={{ borderColor: '#2A241E' }}>
-            <span className="text-[#5C5348]">Badges</span>
+          <div className="flex flex-wrap gap-4 items-center mt-2 pt-2 border-t" style={{ borderColor: 'rgb(var(--hv-popup-panel))' }}>
+            <span className="text-hv-text-3">Badges</span>
             <span className="flex items-center gap-1.5">
-              <Lock size={11} className="text-[#786D60]" /> protected (view only)
+              <Lock size={11} className="text-hv-text-3" /> protected (view only)
             </span>
             {/* Only explain badges that are actually on screen. A legend entry
                 with nothing matching it is what made the PoE bolt look like it
                 belonged to the swatch beside it. */}
             {ports.some(p => p.poeDenied) && (
               <span className="flex items-center gap-1.5">
-                <AlertTriangle size={11} className="text-[#E0705F]" /> power denied (over budget)
+                <AlertTriangle size={11} className="text-hv-error-fg" /> power denied (over budget)
               </span>
             )}
           </div>
         </div>
         {!snapshot && (
-          <p className="text-xs text-[#786D60] mt-3">
+          <p className="text-xs text-hv-text-3 mt-3">
             Tiles stay grey until you scan. Scanning reads status, LLDP neighbours, MAC table and counters.
           </p>
         )}
@@ -1395,10 +1395,10 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
       {/* Selected port */}
       {selected != null && profile && (
-        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
           <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
             <h2 className="text-2xl font-bold flex items-center gap-2">
-              <div className="w-3 h-3 bg-[#5FB7B0] rounded-full" />
+              <div className="w-3 h-3 bg-hv-info rounded-full" />
               {multi.length > 1
                 ? `${multi.length} ports selected - ${multi.join(', ')}`
                 : `Port ${selected}${selectedPort?.alias ? ` - ${selectedPort.alias}` : ''}`}
@@ -1410,12 +1410,12 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                 onKeyDown={e => { if (e.key === 'Enter') saveAlias(); }}
                 placeholder="Name this port"
                 maxLength={40}
-                className="border rounded-lg px-3 py-1.5 text-white w-56"
-                style={{ background: '#241E19', borderColor: '#38302A' }}
+                className="border rounded-lg px-3 py-1.5 text-hv-text w-56"
+                style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}
               />
               <button onClick={saveAlias} disabled={busy}
-                      className="px-3 py-1.5 rounded-lg font-semibold text-[#ADA294] disabled:opacity-30"
-                      style={{ background: '#2A241E' }}>
+                      className="px-3 py-1.5 rounded-lg font-semibold text-hv-text-2 disabled:opacity-30"
+                      style={{ background: 'rgb(var(--hv-popup-panel))' }}>
                 Save name
               </button>
               {snapshot?.poeCapable && (
@@ -1426,19 +1426,19 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                     onKeyDown={e => { if (e.key === 'Enter') savePoeMax(); }}
                     placeholder="Max W"
                     title="Power reserved for this port. Class 4 devices reserve 30 W by default."
-                    className="border rounded-lg px-3 py-1.5 text-white w-24"
-                    style={{ background: '#241E19', borderColor: '#38302A' }}
+                    className="border rounded-lg px-3 py-1.5 text-hv-text w-24"
+                    style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}
                   />
                   <button onClick={() => savePoeMax()} disabled={busy || !!selectedPort?.denied}
-                          className="px-3 py-1.5 rounded-lg font-semibold text-[#ADA294] disabled:opacity-30"
-                          style={{ background: '#2A241E' }}>
+                          className="px-3 py-1.5 rounded-lg font-semibold text-hv-text-2 disabled:opacity-30"
+                          style={{ background: 'rgb(var(--hv-popup-panel))' }}>
                     Set Wattage Cap
                   </button>
                   {selectedPort?.poeMaxMw ? (
                     <button onClick={() => savePoeMax(true)} disabled={busy}
                             title="Remove the cap and go back to the class default"
-                            className="px-3 py-1.5 rounded-lg text-[#786D60] disabled:opacity-30"
-                            style={{ background: '#2A241E' }}>
+                            className="px-3 py-1.5 rounded-lg text-hv-text-3 disabled:opacity-30"
+                            style={{ background: 'rgb(var(--hv-popup-panel))' }}>
                       Clear
                     </button>
                   ) : null}
@@ -1449,11 +1449,11 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
           {selectedPort?.denied && (
             <div className="rounded-lg p-3 border mb-4 flex items-start gap-2"
-                 style={{ background: 'rgba(240,167,60,.08)', borderColor: 'rgba(240,167,60,.35)' }}>
-              <Lock size={15} className="text-[#F0A73C] mt-0.5 shrink-0" />
+                 style={{ background: 'rgb(var(--hv-brand) / .08)', borderColor: 'rgb(var(--hv-brand) / .35)' }}>
+              <Lock size={15} className="text-hv-brand-fg mt-0.5 shrink-0" />
               <div className="text-sm">
-                <span className="font-semibold text-[#FFC66E]">View only.</span>
-                <span className="text-[#ADA294]">
+                <span className="font-semibold text-hv-brand-text">View only.</span>
+                <span className="text-hv-text-2">
                   {' '}This port is on the protected list - it carries the uplink, management, or this host's own
                   connection. You can read it, name it and watch its traffic, but nothing here will change its
                   state. Remove it from denyPorts in the profile if that's really what you want.
@@ -1462,17 +1462,17 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             </div>
           )}
 
-          <p className="text-xs text-[#786D60] mb-3">
+          <p className="text-xs text-hv-text-3 mb-3">
             Ctrl-click to add ports, shift-click for a range.
             {multi.length > 1 && (
-              <button onClick={() => { setMulti([]); }} className="ml-2 underline text-[#ADA294]">
+              <button onClick={() => { setMulti([]); }} className="ml-2 underline text-hv-text-2">
                 clear selection
               </button>
             )}
           </p>
 
           {selectedPoeHeld && (
-            <p className="text-[#F3E4BE] mb-4 flex items-center gap-2">
+            <p className="text-hv-brand-text mb-4 flex items-center gap-2">
               <ZapOff size={15} />
               Power cut since {new Date(selectedPoeHeld.disabledAt).toLocaleTimeString()} -{' '}
               {selectedPoeHeld.revertAt
@@ -1483,38 +1483,38 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
           )}
 
           {selectedHeld ? (
-            <p className="text-[#F3E4BE] mb-4">
+            <p className="text-hv-brand-text mb-4">
               Held down since {new Date(selectedHeld.disabledAt).toLocaleTimeString()} - comes back in{' '}
               {fmtRemaining(selectedHeld.revertAt ? selectedHeld.revertAt - Date.now() : null)}.
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-4 mb-4 max-w-2xl">
-              <label className="text-sm text-[#ADA294]">
+              <label className="text-sm text-hv-text-2">
                 Bring back after
                 <select
                   value={holdMs}
                   onChange={e => setHoldMs(Number(e.target.value))}
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-white"
-                  style={{ background: '#241E19', borderColor: '#38302A' }}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-hv-text"
+                  style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}
                 >
                   {HOLDS.map(h => <option key={h.ms} value={h.ms}>{h.label}</option>)}
                 </select>
               </label>
               {holdMs === 0 && (
-                <p className="col-span-2 text-xs text-[#E6C766] flex items-start gap-2">
+                <p className="col-span-2 text-xs text-hv-warning-fg flex items-start gap-2">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0" />
                   Nothing will bring these back automatically. Use this to decommission a port, not to run a
                   test - a scheduled run that crashes would leave them down permanently.
                 </p>
               )}
-              <label className="text-sm text-[#ADA294]">
+              <label className="text-sm text-hv-text-2">
                 Reason
                 <input
                   value={reason}
                   onChange={e => setReason(e.target.value)}
                   placeholder="CLC-004"
-                  className="mt-1 w-full border rounded-lg px-3 py-2 text-white"
-                  style={{ background: '#241E19', borderColor: '#38302A' }}
+                  className="mt-1 w-full border rounded-lg px-3 py-2 text-hv-text"
+                  style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' }}
                 />
               </label>
             </div>
@@ -1524,14 +1524,14 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             <button
               onClick={() => bulkAct('port', 'disable')}
               disabled={busy || !!selectedHeld || !!selectedPort?.denied}
-              className="px-5 py-2 rounded-lg font-semibold bg-[#C6604F] hover:bg-[#A84E3F] disabled:opacity-30 disabled:cursor-not-allowed"
+              className="px-5 py-2 rounded-lg font-semibold bg-hv-error-strong hover:bg-hv-error-hover disabled:opacity-30 disabled:cursor-not-allowed"
             >
               Disable Port
             </button>
             <button
               onClick={() => bulkAct('port', 'enable')}
               disabled={busy || !!selectedPort?.denied}
-              className="px-5 py-2 rounded-lg font-semibold bg-[#4F8B5C] hover:bg-[#3E6E48] disabled:opacity-30"
+              className="px-5 py-2 rounded-lg font-semibold bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong disabled:opacity-30"
             >
               Enable Port
             </button>
@@ -1541,14 +1541,14 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                   onClick={() => bulkAct('poe', 'disable')}
                   disabled={busy || selectedPort?.poe === 'disabled' || !!selectedPoeHeld || !!selectedPort?.denied}
                   title="Cuts power - the device cold boots and loses volatile state"
-                  className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-[#C79A34] text-[#241503] disabled:opacity-30"
+                  className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-hv-brand-hover text-[#101011] disabled:opacity-30"
                 >
                   <ZapOff size={22} /> Disable PoE
                 </button>
                 <button
                   onClick={() => bulkAct('poe', 'enable')}
                   disabled={busy || !!selectedPort?.denied}
-                  className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-[#5FB7B0] text-[#241503] hover:bg-[#4E9C96] disabled:opacity-30"
+                  className="px-5 py-2 rounded-lg font-semibold flex items-center gap-2 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong disabled:opacity-30"
                 >
                   <Zap size={22} /> Enable PoE
                 </button>
@@ -1557,27 +1557,27 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             <button
               onClick={() => verify(selected)}
               disabled={busy}
-              className="px-5 py-2 rounded-lg font-semibold bg-[#F0A73C] text-[#241503] hover:bg-[#C9862E] disabled:opacity-30"
+              className="px-5 py-2 rounded-lg font-semibold bg-hv-brand text-[#101011] hover:bg-hv-brand-hover disabled:opacity-30"
             >
               Inspect Port
             </button>
           </div>
 
-          {error && <p className="text-[#F5D4CD] text-sm mt-3">{error}</p>}
+          {error && <p className="text-hv-error-text text-sm mt-3">{error}</p>}
 
           {snapshot?.poeCapable && selectedPort && maxWInput &&
             parseFloat(maxWInput) * 1000 < (selectedPort.poePowerMw || 0) && (
-            <p className="text-xs text-[#E6C766] mt-3 flex items-start gap-2">
+            <p className="text-xs text-hv-warning-fg mt-3 flex items-start gap-2">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               {parseFloat(maxWInput)} W is below the {fmtWatts(selectedPort.poePowerMw || 0)} this port is
               drawing right now - the switch would deny it power.
             </p>
           )}
           {snapshot?.poeCapable && (
-            <p className="text-xs text-[#786D60] mt-3">
+            <p className="text-xs text-hv-text-3 mt-3">
             </p>
           )}
-          <p className="text-xs text-[#786D60] mt-4">
+          <p className="text-xs text-hv-text-3 mt-4">
           </p>
         </div>
       )}
@@ -1585,19 +1585,19 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
       {/* Event log - collapsed by default; it is a record to check after a run,
           not something you watch. */}
       {profile && events.length > 0 && (
-        <div className="backdrop-blur rounded-xl border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+        <div className="backdrop-blur rounded-xl border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
           <button
             onClick={() => setShowEvents(v => !v)}
             className="w-full flex items-center justify-between p-5 text-left"
           >
             <h2 className="text-xl font-bold flex items-center gap-2">
-              {showEvents ? <ChevronDown size={20} className="text-[#786D60]" /> : <ChevronRight size={20} className="text-[#786D60]" />}
+              {showEvents ? <ChevronDown size={20} className="text-hv-text-3" /> : <ChevronRight size={20} className="text-hv-text-3" />}
               Event Log
-              <span className="text-sm font-normal text-[#786D60]">
+              <span className="text-sm font-normal text-hv-text-3">
                 {events.length} change{events.length === 1 ? '' : 's'} on this switch
               </span>
             </h2>
-            <span className="text-xs text-[#786D60]">
+            <span className="text-xs text-hv-text-3">
               {new Date(events[events.length - 1].at).toLocaleTimeString()} - most recent
             </span>
           </button>
@@ -1607,15 +1607,15 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
               <div className="max-h-72 overflow-y-auto text-sm">
                 {[...events].reverse().map((e, i) => {
                   const disable = e.action === 'disable';
-                  const color = e.kind === 'reboot' ? '#E0705F' : disable ? '#F5D4CD' : '#CDEBD3';
+                  const color = e.kind === 'reboot' ? 'rgb(var(--hv-error))' : disable ? 'rgb(var(--hv-error-text))' : 'rgb(var(--hv-success-text))';
                   return (
                     <div key={i} className="flex items-baseline gap-3 py-1.5 border-b"
-                         style={{ borderColor: '#2A241E' }}>
-                      <span className="text-[#786D60] tabular-nums whitespace-nowrap">
+                         style={{ borderColor: 'rgb(var(--hv-popup-panel))' }}>
+                      <span className="text-hv-text-3 tabular-nums whitespace-nowrap">
                         {new Date(e.at).toLocaleTimeString()}
                       </span>
                       <span className="px-2 py-0.5 rounded text-xs shrink-0"
-                            style={{ background: '#2A241E', color: '#ADA294' }}>
+                            style={{ background: 'rgb(var(--hv-popup-panel))', color: 'rgb(var(--hv-text-2))' }}>
                         {e.kind}
                       </span>
                       <span style={{ color }}>
@@ -1624,12 +1624,12 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                           : `Port ${e.port} ${e.kind === 'poe' ? 'power' : 'link'} ${e.action}d`}
                         {e.holdMs ? ` for ${fmtRemaining(e.holdMs)}` : ''}
                       </span>
-                      {e.reason && <span className="text-[#786D60] truncate">{e.reason}</span>}
+                      {e.reason && <span className="text-hv-text-3 truncate">{e.reason}</span>}
                     </div>
                   );
                 })}
               </div>
-              <p className="text-xs text-[#786D60] mt-3">
+              <p className="text-xs text-hv-text-3 mt-3">
                 Kept in memory since the backend started, and drawn as markers on the traffic chart above.
               </p>
             </div>
@@ -1639,9 +1639,9 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
       {/* Selected port monitor */}
       {selected != null && selectedPort && snapshot && (
-        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
           <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-            <div className="w-3 h-3 bg-[#8FB488] rounded-full" />
+            <div className="w-3 h-3 bg-hv-success-text rounded-full" />
             Port {selected} Monitor
           </h2>
           <div className="grid grid-cols-2 gap-x-10 gap-y-2 text-sm max-w-4xl">
@@ -1679,7 +1679,7 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
             <Row label="Drops" value={`IN ${selectedPort.inDiscards || 0} • OUT ${selectedPort.outDiscards || 0}`}
                  warn={!!((selectedPort.inDiscards || 0) + (selectedPort.outDiscards || 0))} />
           </div>
-          <p className="text-xs text-[#786D60] mt-4">
+          <p className="text-xs text-hv-text-3 mt-4">
             Throughput is derived from the counter change between the last two scans, not a live rate.
             Scanned {new Date(snapshot.at).toLocaleTimeString()}.
           </p>
@@ -1688,22 +1688,22 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
 
       {/* Traffic over time */}
       {targets.length > 0 && profile && (
-        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgba(36, 30, 25, 0.55)', borderColor: '#38302A' }}>
+        <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h2 className="text-2xl font-bold flex items-center gap-2">
-              <div className="w-3 h-3 bg-[#5FB7B0] rounded-full" />
+              <div className="w-3 h-3 bg-hv-info rounded-full" />
               {targets.length > 1 ? `Traffic - ${Math.min(targets.length, MAX_CHART_PORTS)} ports` : `Port ${targets[0]} Traffic`}
             </h2>
             <div className="flex items-center gap-4">
               {targets.length > MAX_CHART_PORTS && (
-                <span className="text-xs text-[#E6C766]">
+                <span className="text-xs text-hv-warning-fg">
                   showing the first {MAX_CHART_PORTS} of {targets.length}
                 </span>
               )}
               <button onClick={toggleMonitor} disabled={busy}
                       className={`px-4 py-2 rounded-lg font-semibold flex items-center gap-2 disabled:opacity-30 ${
-                        traffic?.monitoring ? 'bg-[#C6604F] hover:bg-[#A84E3F]' : 'text-[#ADA294]'}`}
-                      style={traffic?.monitoring ? {} : { background: '#2A241E' }}>
+                        traffic?.monitoring ? 'bg-hv-error-strong hover:bg-hv-error-hover' : 'text-hv-text-2'}`}
+                      style={traffic?.monitoring ? {} : { background: 'rgb(var(--hv-popup-panel))' }}>
                 <Activity size={16} /> {traffic?.monitoring ? 'Stop monitoring' : 'Start monitoring'}
               </button>
             </div>
@@ -1719,14 +1719,14 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
                 }}
               />
             : (
-              <p className="text-sm text-[#786D60] py-8 text-center">
+              <p className="text-sm text-hv-text-3 py-8 text-center">
                 Not monitoring. Sampling reads the switch every 30 seconds - worth running while a scenario
                 is going, not around the clock.
               </p>
             )}
 
           {traffic?.monitoring && (
-            <p className="text-xs text-[#786D60] mt-2">
+            <p className="text-xs text-hv-text-3 mt-2">
               Sampled every {Math.round((traffic.intervalMs || 30000) / 1000)}s. Rates are derived from the
               change in the switch's counters between samples, so a disconnect shows up as traffic falling to
               zero - and a switch reboot breaks the line rather than drawing a spike.
@@ -1738,8 +1738,8 @@ const SwitchSection: React.FC<SwitchSectionProps> = ({
   );
 };
 
-const inputCls = 'border rounded-lg px-3 py-2 text-white w-full disabled:opacity-50';
-const inputStyle: React.CSSProperties = { background: '#241E19', borderColor: '#38302A' };
+const inputCls = 'border rounded-lg px-3 py-2 text-hv-text w-full disabled:opacity-50';
+const inputStyle: React.CSSProperties = { background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line))' };
 
 /**
  * Traffic chart, drawn as plain SVG so it adds no dependency.
@@ -1778,7 +1778,7 @@ const RJ45: React.FC<{
 
   // Green LED, left, as on the hardware: dim when the link is merely up, bright
   // and pulsing when traffic is actually moving. Dark when there is no link.
-  const linkFill = !linkUp ? '#3A322B' : active ? '#7BD497' : '#2F6B3C';
+  const linkFill = !linkUp ? 'rgb(var(--hv-line))' : active ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-success-hover))';
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: size * (W / H), height: size, display: 'block', margin: '0 auto' }}>
@@ -1794,10 +1794,10 @@ const RJ45: React.FC<{
           is plugged in" are different facts and should not look the same. */}
       {poeDisabled ? (
         <path d="M33.6,0 l-3.2,4.2 h2.1 l-1.4,3.2 4,-4.6 h-2.2 z"
-              fill="#E6C766" />
+              fill="rgb(var(--hv-warning))" />
       ) : (
         <rect x="29" y="1" width="6" height="2.5" rx="1"
-              fill={poePowered ? '#F0A73C' : '#3A322B'} />
+              fill={poePowered ? 'rgb(var(--hv-brand))' : 'rgb(var(--hv-line))'} />
       )}
 
       {/* Jack body with the latch notch, centred in the 40-wide viewBox.
@@ -1844,7 +1844,7 @@ const Sparkline: React.FC<{ points: TrafficPoint[]; color: string }> = ({ points
     // Inset panel so the trace sits inside the tile instead of running edge to
     // edge across it.
     <div className="mx-2 mt-2 rounded"
-         style={{ background: 'rgba(0,0,0,.25)', padding: '2px 4px' }}>
+         style={{ background: 'rgb(var(--hv-surface) / .25)', padding: '2px 4px' }}>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
            style={{ width: '100%', height: 20, display: 'block' }}>
         <path d={d.trim()} fill="none" stroke={color} strokeWidth="1.5"
@@ -1864,7 +1864,7 @@ const TrafficChart: React.FC<{
   const all = series.flatMap(s => s.points).filter(p => p.rxBps != null && p.txBps != null);
   if (all.length < 2) {
     return (
-      <p className="text-sm text-[#786D60] py-8 text-center">
+      <p className="text-sm text-hv-text-3 py-8 text-center">
         Collecting samples - a rate needs at least two readings.
       </p>
     );
@@ -1902,11 +1902,11 @@ const TrafficChart: React.FC<{
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 260 }}>
         {ticks.map((v, i) => (
           <g key={i}>
-            <line x1={PAD_L} x2={W - PAD_R} y1={y(v)} y2={y(v)} stroke="#2A241E" strokeWidth="1" />
-            <text x={PAD_L - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="#786D60">{fmtAxis(v)}</text>
+            <line x1={PAD_L} x2={W - PAD_R} y1={y(v)} y2={y(v)} stroke="rgb(var(--hv-popup-panel))" strokeWidth="1" />
+            <text x={PAD_L - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="rgb(var(--hv-text-3))">{fmtAxis(v)}</text>
           </g>
         ))}
-        <text x={12} y={H / 2} fontSize="11" fill="#786D60"
+        <text x={12} y={H / 2} fontSize="11" fill="rgb(var(--hv-text-3))"
               transform={`rotate(-90 12 ${H / 2})`} textAnchor="middle">bits/sec</text>
 
         {series.map((s, i) => {
@@ -1929,7 +1929,7 @@ const TrafficChart: React.FC<{
           .map((e, i) => {
             const ex = x(e.at);
             const disable = e.action === 'disable';
-            const c = e.kind === 'reboot' ? '#E0705F' : disable ? '#C6604F' : '#4F8B5C';
+            const c = e.kind === 'reboot' ? 'rgb(var(--hv-error))' : disable ? 'rgb(var(--hv-error-strong))' : 'rgb(var(--hv-success-strong))';
             return (
               <g key={i}>
                 <line x1={ex} x2={ex} y1={PAD_T} y2={H - PAD_B}
@@ -1942,23 +1942,23 @@ const TrafficChart: React.FC<{
             );
           })}
 
-        <text x={PAD_L} y={H - 6} fontSize="11" fill="#786D60">{new Date(t0).toLocaleTimeString()}</text>
-        <text x={W - PAD_R} y={H - 6} fontSize="11" fill="#786D60" textAnchor="end">
+        <text x={PAD_L} y={H - 6} fontSize="11" fill="rgb(var(--hv-text-3))">{new Date(t0).toLocaleTimeString()}</text>
+        <text x={W - PAD_R} y={H - 6} fontSize="11" fill="rgb(var(--hv-text-3))" textAnchor="end">
           {new Date(t1).toLocaleTimeString()}
         </text>
       </svg>
 
       <div className="flex flex-wrap gap-x-5 gap-y-2 mt-3 text-xs">
         {series.map((s, i) => (
-          <span key={s.port} className="flex items-center gap-1.5 text-[#ADA294]">
+          <span key={s.port} className="flex items-center gap-1.5 text-hv-text-2">
             <span className="w-4 h-0.5" style={{ background: SERIES_COLORS[i % SERIES_COLORS.length] }} />
             {labelFor(s.port)}
           </span>
         ))}
-        <span className="flex items-center gap-1.5 text-[#786D60] ml-auto">
-          <span className="w-4 h-0.5 bg-[#786D60]" /> solid = receive
+        <span className="flex items-center gap-1.5 text-hv-text-3 ml-auto">
+          <span className="w-4 h-0.5 bg-hv-text-3" /> solid = receive
           <span className="w-4 h-0.5 ml-3"
-                style={{ background: 'repeating-linear-gradient(90deg,#786D60 0 4px,transparent 4px 7px)' }} />
+                style={{ background: 'repeating-linear-gradient(90deg,rgb(var(--hv-text-3)) 0 4px,transparent 4px 7px)' }} />
           dashed = transmit
         </span>
       </div>
@@ -1967,24 +1967,24 @@ const TrafficChart: React.FC<{
 };
 
 const Stat: React.FC<{ label: string; value: string; warn?: boolean }> = ({ label, value, warn }) => (
-  <div className="rounded-lg p-3 border" style={{ background: 'rgba(21, 17, 11, 0.5)', borderColor: '#2A241E' }}>
-    <div className="text-xs text-[#786D60]">{label}</div>
-    <div className={`text-xl font-bold ${warn ? 'text-[#E6C766]' : 'text-[#F3ECE3]'}`}>{value}</div>
+  <div className="rounded-lg p-3 border" style={{ background: 'rgb(var(--hv-surface) / 0.5)', borderColor: 'rgb(var(--hv-popup-panel))' }}>
+    <div className="text-xs text-hv-text-3">{label}</div>
+    <div className={`text-xl font-bold ${warn ? 'text-hv-warning-fg' : 'text-hv-text'}`}>{value}</div>
   </div>
 );
 
 const Field: React.FC<{ label: string; hint?: string; children: React.ReactNode }> = ({ label, hint, children }) => (
   <label className="block">
-    <span className="text-sm text-[#ADA294]">{label}</span>
-    {hint && <span className="text-xs text-[#786D60] ml-2">{hint}</span>}
+    <span className="text-sm text-hv-text-2">{label}</span>
+    {hint && <span className="text-xs text-hv-text-3 ml-2">{hint}</span>}
     <div className="mt-1">{children}</div>
   </label>
 );
 
 const Row: React.FC<{ label: string; value: string; warn?: boolean }> = ({ label, value, warn }) => (
-  <div className="flex justify-between gap-4 border-b py-1" style={{ borderColor: '#2A241E' }}>
-    <span className="text-[#786D60]">{label}</span>
-    <span className={warn ? 'text-[#E6C766]' : 'text-[#F3ECE3]'}>{value}</span>
+  <div className="flex justify-between gap-4 border-b py-1" style={{ borderColor: 'rgb(var(--hv-popup-panel))' }}>
+    <span className="text-hv-text-3">{label}</span>
+    <span className={warn ? 'text-hv-warning-fg' : 'text-hv-text'}>{value}</span>
   </div>
 );
 

@@ -1,0 +1,315 @@
+{
+  "version": 1,
+  "formats": [
+    {
+      "id": "user_wiegand_37_h10304_enrolled_37",
+      "name": "Wiegand 37 (H10304) (enrolled)",
+      "description": "",
+      "map": {
+        "bits": 37,
+        "fields": [
+          {
+            "key": "card",
+            "start": 2,
+            "len": 35
+          }
+        ],
+        "parity": [
+          {
+            "bit": 1,
+            "type": "even",
+            "covers": [
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19
+            ]
+          },
+          {
+            "bit": 37,
+            "type": "odd",
+            "covers": [
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36
+            ]
+          }
+        ]
+      },
+      "createdAt": "2026-10-06T03:57:27.065Z",
+      "updatedAt": "2026-10-06T03:57:27.065Z"
+    },
+    {
+      "id": "user_wiegand_40_stid_enrolled_40",
+      "name": "Wiegand 40 (STID) (enrolled)",
+      "description": "",
+      "map": {
+        "bits": 40,
+        "fields": [
+          {
+            "key": "facility",
+            "start": 2,
+            "len": 10
+          },
+          {
+            "key": "card",
+            "start": 12,
+            "len": 28
+          }
+        ],
+        "parity": [
+          {
+            "bit": 1,
+            "type": "even",
+            "covers": [
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ]
+          },
+          {
+            "bit": 40,
+            "type": "odd",
+            "covers": [
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ]
+          }
+        ]
+      },
+      "createdAt": "2026-10-06T04:25:43.678Z",
+      "updatedAt": "2026-10-06T04:25:43.678Z"
+    },
+    {
+      "id": "user_wiegand_36_enrolled_36",
+      "name": "Wiegand 36 (enrolled)",
+      "description": "",
+      "map": {
+        "bits": 36,
+        "fields": [
+          {
+            "key": "facility",
+            "start": 1,
+            "len": 5
+          },
+          {
+            "key": "card",
+            "start": 6,
+            "len": 31
+          }
+        ],
+        "parity": []
+      },
+      "createdAt": "2026-10-06T04:50:11.911Z",
+      "updatedAt": "2026-10-06T04:50:11.911Z"
+    },
+    {
+      "id": "user_wavelynx_w37_4_37_bit_37",
+      "name": "Wavelynx W37-4 (37-bit)",
+      "description": "",
+      "map": {
+        "bits": 37,
+        "fields": [
+          {
+            "key": "fixed",
+            "start": 2,
+            "len": 1,
+            "value": 0
+          },
+          {
+            "key": "facility",
+            "start": 3,
+            "len": 5
+          },
+          {
+            "key": "card",
+            "start": 8,
+            "len": 29
+          }
+        ],
+        "parity": [
+          {
+            "bit": 1,
+            "type": "even",
+            "covers": [
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18
+            ]
+          },
+          {
+            "bit": 37,
+            "type": "odd",
+            "covers": [
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36
+            ]
+          }
+        ]
+      },
+      "createdAt": "2026-10-06T04:51:49.202Z",
+      "updatedAt": "2026-10-06T04:51:49.202Z"
+    },
+    {
+      "id": "user_wiegand_40_stid_enrolled_40_2",
+      "name": "Wiegand 40 (STID) (enrolled)",
+      "description": "",
+      "map": {
+        "bits": 40,
+        "fields": [
+          {
+            "key": "card",
+            "start": 2,
+            "len": 38
+          }
+        ],
+        "parity": [
+          {
+            "bit": 1,
+            "type": "even",
+            "covers": [
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ]
+          },
+          {
+            "bit": 40,
+            "type": "odd",
+            "covers": [
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39
+            ]
+          }
+        ]
+      },
+      "createdAt": "2026-10-07T21:44:52.052Z",
+      "updatedAt": "2026-10-07T21:44:52.052Z"
+    }
+  ]
+}

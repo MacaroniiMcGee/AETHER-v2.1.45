@@ -98,18 +98,18 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
     try { window.localStorage.setItem(`emu-section:${storageKey}`, String(open)); } catch {}
   }, [open, storageKey]);
   return (
-    <div className={`mb-4 rounded border border-[#38302A]/50 bg-black/25 overflow-hidden ${className}`}>
+    <div className={`mb-4 rounded border border-hv-line/50 bg-hv-surface/25 overflow-hidden ${className}`}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full px-3 py-2 flex items-center justify-between hover:bg-[#38302A]/20 transition-colors"
+        className="w-full px-3 py-2 flex items-center justify-between hover:bg-hv-line/20 transition-colors"
       >
         <div className="flex items-center gap-2 min-w-0">
           {icon}
-          <span className="text-sm font-semibold text-[#C4B9AB]">{title}</span>
+          <span className="text-sm font-semibold text-hv-text-2">{title}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {headerRight}
-          <ChevronRight className={`w-4 h-4 text-[#ADA294] transition-transform ${open ? 'rotate-90' : ''}`} />
+          <ChevronRight className={`w-4 h-4 text-hv-text-2 transition-transform ${open ? 'rotate-90' : ''}`} />
         </div>
       </button>
       {open && <div className={`px-3 pb-3 pt-1 ${bodyClassName}`}>{children}</div>}
@@ -142,11 +142,11 @@ const SLOT_COUNT = 32;  // addresses 0-31
 // three PNGs (RI2MS / RI4S / IO168S) into that folder. I16S and O8S reuse the
 // IO168S image since they are physical subsets of the same board family.
 const MODEL_STYLE: Record<DeviceModel, { tint: string; label: string; image: string }> = {
-  'I16S':   { tint: '#6FC7C0', label: '16 In',     image: '/images/devices/IO168S.png' },
-  'O8S':    { tint: '#5FB7B0', label: '8 Out',     image: '/images/devices/IO168S.png' },
-  'IO168S': { tint: '#4E9E98', label: '16In/8Out', image: '/images/devices/IO168S.png' },
-  'RI2MS':  { tint: '#8FD3CD', label: '2-Port Rdr', image: '/images/devices/RI2MS.png' },
-  'RI4S':   { tint: '#9BE0DA', label: '4-Port Rdr', image: '/images/devices/RI4S.png' },
+  'I16S':   { tint: 'rgb(var(--hv-data-green))', label: '16 In',     image: '/images/devices/IO168S.png' },
+  'O8S':    { tint: 'rgb(var(--hv-data-emerald))', label: '8 Out',     image: '/images/devices/IO168S.png' },
+  'IO168S': { tint: 'rgb(var(--hv-data-blue))', label: '16In/8Out', image: '/images/devices/IO168S.png' },
+  'RI2MS':  { tint: 'rgb(var(--hv-data-sapphire))', label: '2-Port Rdr', image: '/images/devices/RI2MS.png' },
+  'RI4S':   { tint: 'rgb(var(--hv-data-indigo))', label: '4-Port Rdr', image: '/images/devices/RI4S.png' },
 };
 
 // OSDP command code → human label (for trace)
@@ -601,24 +601,24 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
   return (
     <div className="space-y-4">
       {/* ── HEADER ─────────────────────────────────────────────────── */}
-      <div className="rounded-xl p-6 border shadow-2xl bg-gradient-to-br from-[#241E19]/40 to-[#15110B]/40 border-[#4A3F36]/50">
+      <div className="rounded-xl p-6 border shadow-2xl bg-gradient-to-br from-hv-widget/40 to-hv-surface/40 border-hv-line-strong/50">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-              <Cpu className="w-8 h-8 text-[#6FC7C0]" />
+            <h1 className="text-3xl font-bold text-hv-text flex items-center gap-3">
+              <Cpu className="w-8 h-8 text-hv-info-text" />
               Controller Emulator
             </h1>
-            <p className="text-[#ADA294] text-sm mt-1">
+            <p className="text-hv-text-2 text-sm mt-1">
               Emulates Azure Access downstream OSDP boards (I16S / O8S / IO168S) on an RS-485 bus.
               Connect this Pi's USB-to-RS485 adapter to an IC2's downstream port to simulate up to 32 devices.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 ${running ? 'bg-[#6FC7C0]/20 text-[#6FC7C0] border border-[#6FC7C0]/40' : 'bg-[#38302A]/40 text-[#ADA294] border border-[#4A3F36]/50'}`}>
-              <div className={`w-2 h-2 rounded-full ${running ? 'bg-[#6FC7C0] animate-pulse' : 'bg-[#786D60]'}`} />
+            <div className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-2 ${running ? 'bg-hv-info-text/20 text-hv-info-text border border-hv-info-text/40' : 'bg-hv-line/40 text-hv-text-2 border border-hv-line-strong/50'}`}>
+              <div className={`w-2 h-2 rounded-full ${running ? 'bg-hv-info-text animate-pulse' : 'bg-hv-text-3'}`} />
               {running ? 'Running' : 'Stopped'}
             </div>
-            <div className="text-xs text-[#ADA294]">
+            <div className="text-xs text-hv-text-2">
               ↓ {framesIn}  ↑ {framesOut}
             </div>
           </div>
@@ -627,9 +627,9 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
         {/* Bus controls */}
         <div className="flex items-end gap-3 flex-wrap">
           <div className="flex-1 min-w-[220px]">
-            <label className="text-xs text-[#ADA294] block mb-1">Serial Port</label>
+            <label className="text-xs text-hv-text-2 block mb-1">Serial Port</label>
             <div className="flex gap-2">
-              <select disabled={running} value={port} onChange={e => setPort(e.target.value)} className="flex-1 bg-black/25 border border-[#38302A]/50 rounded px-3 py-2 text-sm disabled:opacity-50">
+              <select disabled={running} value={port} onChange={e => setPort(e.target.value)} className="flex-1 bg-hv-surface/25 border border-hv-line/50 rounded px-3 py-2 text-sm disabled:opacity-50">
                 <option value="">— Select port —</option>
                 {ports.map(p => (
                   <option key={p.path} value={p.path}>
@@ -637,39 +637,39 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                   </option>
                 ))}
               </select>
-              <button disabled={running} onClick={refreshPorts} className="px-3 py-2 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded text-sm disabled:opacity-50" title="Refresh port list">
+              <button disabled={running} onClick={refreshPorts} className="px-3 py-2 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded text-sm disabled:opacity-50" title="Refresh port list">
                 <RefreshCw className="w-4 h-4" />
               </button>
             </div>
           </div>
           <div>
-            <label className="text-xs text-[#ADA294] block mb-1">Baud</label>
-            <select disabled={running} value={baud} onChange={e => setBaud(parseInt(e.target.value))} className="bg-black/25 border border-[#38302A]/50 rounded px-3 py-2 text-sm disabled:opacity-50">
+            <label className="text-xs text-hv-text-2 block mb-1">Baud</label>
+            <select disabled={running} value={baud} onChange={e => setBaud(parseInt(e.target.value))} className="bg-hv-surface/25 border border-hv-line/50 rounded px-3 py-2 text-sm disabled:opacity-50">
               {BAUDS.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
           {running ? (
-            <button onClick={stopBus} className="px-6 py-2 bg-[#C6604F] hover:bg-[#A84E3F] rounded font-semibold flex items-center gap-2">
+            <button onClick={stopBus} className="px-6 py-2 bg-hv-error-strong hover:bg-hv-error-hover rounded font-semibold flex items-center gap-2">
               <PowerOff className="w-4 h-4" /> Stop Bus
             </button>
           ) : (
-            <button onClick={() => startBus(false)} disabled={!port} className="px-6 py-2 bg-[#6FC7C0] hover:bg-[#4E9E98] disabled:opacity-50 disabled:cursor-not-allowed rounded font-semibold flex items-center gap-2">
+            <button onClick={() => startBus(false)} disabled={!port} className="px-6 py-2 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong disabled:opacity-50 disabled:cursor-not-allowed rounded font-semibold flex items-center gap-2">
               <Power className="w-4 h-4" /> Start Bus
             </button>
           )}
         </div>
 
         {/* Config save / load / import / export */}
-        <div className="flex items-end gap-2 flex-wrap mt-3 pt-3 border-t border-[#38302A]/40">
+        <div className="flex items-end gap-2 flex-wrap mt-3 pt-3 border-t border-hv-line/40">
           <div className="flex-1 min-w-[200px]">
-            <label className="text-xs text-[#ADA294] block mb-1 flex items-center gap-1">
+            <label className="text-xs text-hv-text-2 block mb-1 flex items-center gap-1">
               <FolderOpen className="w-3 h-3" /> Saved Configurations
             </label>
             <div className="flex gap-2">
               <select
                 value={selectedConfig}
                 onChange={e => setSelectedConfig(e.target.value)}
-                className="flex-1 bg-black/25 border border-[#38302A]/50 rounded px-3 py-2 text-sm"
+                className="flex-1 bg-hv-surface/25 border border-hv-line/50 rounded px-3 py-2 text-sm"
               >
                 <option value="">— Select a saved config —</option>
                 {savedConfigs.map(c => (
@@ -680,7 +680,7 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
               </select>
               <button
                 onClick={refreshConfigs}
-                className="px-3 py-2 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded text-sm"
+                className="px-3 py-2 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded text-sm"
                 title="Refresh config list"
               >
                 <RefreshCw className="w-4 h-4" />
@@ -690,14 +690,14 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
           <button
             onClick={() => applyConfig(selectedConfig)}
             disabled={!selectedConfig}
-            className="px-4 py-2 bg-[#6FC7C0] hover:bg-[#4E9E98] disabled:opacity-40 disabled:cursor-not-allowed text-[#15110B] rounded font-semibold text-sm flex items-center gap-2"
+            className="px-4 py-2 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong disabled:opacity-40 disabled:cursor-not-allowed rounded font-semibold text-sm flex items-center gap-2"
             title="Load selected config (replaces current devices)"
           >
             <FolderOpen className="w-4 h-4" /> Load
           </button>
           <button
             onClick={() => { setSaveName(''); setShowSaveModal(true); }}
-            className="px-4 py-2 bg-[#38302A]/50 hover:bg-[#4A3F36]/60 rounded font-semibold text-sm flex items-center gap-2"
+            className="px-4 py-2 bg-hv-line/50 hover:bg-hv-line-strong/60 rounded font-semibold text-sm flex items-center gap-2"
             title="Save current devices as a config"
           >
             <Save className="w-4 h-4" /> Save
@@ -705,14 +705,14 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
           <button
             onClick={() => exportConfig(selectedConfig)}
             disabled={!selectedConfig}
-            className="px-4 py-2 bg-[#38302A]/50 hover:bg-[#4A3F36]/60 disabled:opacity-40 disabled:cursor-not-allowed rounded font-semibold text-sm flex items-center gap-2"
+            className="px-4 py-2 bg-hv-line/50 hover:bg-hv-line-strong/60 disabled:opacity-40 disabled:cursor-not-allowed rounded font-semibold text-sm flex items-center gap-2"
             title="Download selected config as JSON"
           >
             <Download className="w-4 h-4" /> Export
           </button>
           <button
             onClick={importConfig}
-            className="px-4 py-2 bg-[#38302A]/50 hover:bg-[#4A3F36]/60 rounded font-semibold text-sm flex items-center gap-2"
+            className="px-4 py-2 bg-hv-line/50 hover:bg-hv-line-strong/60 rounded font-semibold text-sm flex items-center gap-2"
             title="Import a config JSON file"
           >
             <Upload className="w-4 h-4" /> Import
@@ -721,13 +721,13 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
       </div>
 
       {/* ── DEVICE GRID ─────────────────────────────────────────────── */}
-      <div className="rounded-xl p-6 border shadow-2xl bg-gradient-to-br from-[#241E19]/40 to-[#15110B]/40 border-[#4A3F36]/50">
+      <div className="rounded-xl p-6 border shadow-2xl bg-gradient-to-br from-hv-widget/40 to-hv-surface/40 border-hv-line-strong/50">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <Radio className="w-5 h-5 text-[#6FC7C0]" />
+          <h2 className="text-lg font-bold text-hv-text flex items-center gap-2">
+            <Radio className="w-5 h-5 text-hv-info-text" />
             Devices ({devices.length}/{SLOT_COUNT})
           </h2>
-          <div className="text-xs text-[#ADA294]">Click an empty slot to add · click a device to inspect</div>
+          <div className="text-xs text-hv-text-2">Click an empty slot to add · click a device to inspect</div>
         </div>
 
         <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
@@ -740,26 +740,26 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
               const pollAge = dev.lastPollAt > 0 ? Date.now() - dev.lastPollAt : Infinity;
               let pollStatus: { color: string; pulse: boolean; label: string };
               if (!isFinite(pollAge)) {
-                pollStatus = { color: 'bg-[#4A3F36]', pulse: false, label: 'never polled' };
+                pollStatus = { color: 'bg-hv-line-strong', pulse: false, label: 'never polled' };
               } else if (pollAge < 3000) {
-                pollStatus = { color: 'bg-[#6FC7C0]', pulse: true, label: `polled ${Math.round(pollAge)} ms ago` };
+                pollStatus = { color: 'bg-hv-info-text', pulse: true, label: `polled ${Math.round(pollAge)} ms ago` };
               } else if (pollAge < 8000) {
-                pollStatus = { color: 'bg-[#E6C766]', pulse: false, label: `polled ${(pollAge / 1000).toFixed(1)}s ago — slower than usual` };
+                pollStatus = { color: 'bg-hv-warning', pulse: false, label: `polled ${(pollAge / 1000).toFixed(1)}s ago — slower than usual` };
               } else if (pollAge < 20000) {
-                pollStatus = { color: 'bg-[#D98A3D]', pulse: true, label: `polled ${(pollAge / 1000).toFixed(1)}s ago — suspect` };
+                pollStatus = { color: 'bg-hv-brand', pulse: true, label: `polled ${(pollAge / 1000).toFixed(1)}s ago — suspect` };
               } else {
-                pollStatus = { color: 'bg-[#C6604F]', pulse: false, label: `last poll ${(pollAge / 1000).toFixed(0)}s ago — likely lost` };
+                pollStatus = { color: 'bg-hv-error-strong', pulse: false, label: `last poll ${(pollAge / 1000).toFixed(0)}s ago — likely lost` };
               }
               return (
                 <button
                   key={addr}
                   onClick={() => setSelectedAddr(addr)}
                   className={`relative p-2 rounded border text-left transition-all overflow-hidden min-h-[90px] ${
-                    isSelected ? 'border-2 shadow-lg' : 'border-[#4A3F36]/50 hover:border-[#786D60]'
+                    isSelected ? 'border-2 shadow-lg' : 'border-hv-line-strong/50 hover:border-hv-text-3'
                   }`}
                   style={{
                     borderColor: isSelected ? style.tint : undefined,
-                    background: `linear-gradient(110deg, ${style.tint}20 0%, ${style.tint}10 50%, ${style.tint}35 100%)`,
+                    background: `linear-gradient(110deg, color-mix(in srgb, ${style.tint} 13%, transparent) 0%, color-mix(in srgb, ${style.tint} 6%, transparent) 50%, color-mix(in srgb, ${style.tint} 21%, transparent) 100%)`,
                   }}
                 >
                   {/* Tinted "well" behind the image — fills the void around the board */}
@@ -767,7 +767,7 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                     className="absolute right-0 top-0 bottom-0 pointer-events-none"
                     style={{
                       width: '62%',
-                      background: `linear-gradient(to right, transparent 0%, ${style.tint}25 30%, ${style.tint}40 100%)`,
+                      background: `linear-gradient(to right, transparent 0%, color-mix(in srgb, ${style.tint} 15%, transparent) 30%, color-mix(in srgb, ${style.tint} 25%, transparent) 100%)`,
                     }}
                   />
                   {/* Board image, sitting on top of the well */}
@@ -780,21 +780,21 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                   <div className="relative flex items-center justify-between pr-[62%]">
-                    <span className="text-xs font-bold text-white">#{addr}</span>
+                    <span className="text-xs font-bold text-hv-text">#{addr}</span>
                   </div>
                   <div className="relative text-xs font-semibold mt-1 pr-[62%] truncate" style={{ color: style.tint }}>{dev.model}</div>
-                  <div className="relative text-[10px] text-[#ADA294] pr-[62%] truncate">{style.label}</div>
-                  <div className="relative text-[10px] text-[#786D60] mt-1 pr-[62%] truncate">{dev.pollCount} polls</div>
+                  <div className="relative text-[10px] text-hv-text-2 pr-[62%] truncate">{style.label}</div>
+                  <div className="relative text-[10px] text-hv-text-3 mt-1 pr-[62%] truncate">{dev.pollCount} polls</div>
                   {/* Poll-status dot — 4-state, tiered by time since last POLL. Hover for details. */}
                   <div
-                    className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-[#15110B]/60 ${pollStatus.color} ${pollStatus.pulse ? 'animate-pulse' : ''}`}
+                    className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-hv-surface/60 ${pollStatus.color} ${pollStatus.pulse ? 'animate-pulse' : ''}`}
                     title={pollStatus.label}
                   />
                   {/* Alarm corner dots — quick visual cue if tamper or power-fail is set */}
                   {(dev.tamperActive || dev.powerFailActive) && (
                     <div className="absolute bottom-1.5 right-1.5 flex gap-1">
-                      {dev.tamperActive && <div className="w-1.5 h-1.5 rounded-full bg-[#C6604F] animate-pulse ring-2 ring-[#15110B]/60" title="Tamper active" />}
-                      {dev.powerFailActive && <div className="w-1.5 h-1.5 rounded-full bg-[#D98A3D] animate-pulse ring-2 ring-[#15110B]/60" title="Power-fail active" />}
+                      {dev.tamperActive && <div className="w-1.5 h-1.5 rounded-full bg-hv-error-strong animate-pulse ring-2 ring-hv-surface/60" title="Tamper active" />}
+                      {dev.powerFailActive && <div className="w-1.5 h-1.5 rounded-full bg-hv-brand animate-pulse ring-2 ring-hv-surface/60" title="Power-fail active" />}
                     </div>
                   )}
                 </button>
@@ -804,7 +804,7 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
               <button
                 key={addr}
                 onClick={() => { setShowAddModal({ open: true, address: addr }); setAddModel('IO168S'); }}
-                className="p-2 rounded border border-dashed border-[#38302A]/50 hover:border-[#786D60] hover:bg-[#38302A]/20 text-[#786D60] hover:text-[#C4B9AB] flex flex-col items-center justify-center min-h-[78px]"
+                className="p-2 rounded border border-dashed border-hv-line/50 hover:border-hv-text-3 hover:bg-hv-line/20 text-hv-text-3 hover:text-hv-text-2 flex flex-col items-center justify-center min-h-[78px]"
               >
                 <Plus className="w-4 h-4 opacity-50" />
                 <span className="text-[10px] mt-1">#{addr}</span>
@@ -816,10 +816,10 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
 
       {/* ── DEVICE DETAIL PANEL ─────────────────────────────────────── */}
       {selectedDevice && (
-        <div className="rounded-xl p-6 border shadow-2xl bg-gradient-to-br from-[#241E19]/40 to-[#15110B]/40 border-[#4A3F36]/50">
+        <div className="rounded-xl p-6 border shadow-2xl bg-gradient-to-br from-hv-widget/40 to-hv-surface/40 border-hv-line-strong/50">
           <div className="flex items-start gap-4 mb-4">
             {/* Board image */}
-            <div className="shrink-0 w-32 h-24 rounded border border-[#38302A]/50 bg-black/30 overflow-hidden flex items-center justify-center">
+            <div className="shrink-0 w-32 h-24 rounded border border-hv-line/50 bg-hv-surface/30 overflow-hidden flex items-center justify-center">
               <img
                 src={MODEL_STYLE[selectedDevice.model].image}
                 alt={`${selectedDevice.model} board`}
@@ -828,14 +828,14 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
               />
             </div>
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2 flex-wrap">
-                <span className="px-2 py-0.5 rounded text-xs font-mono" style={{ background: MODEL_STYLE[selectedDevice.model].tint + '30', color: MODEL_STYLE[selectedDevice.model].tint }}>
+              <h3 className="text-lg font-bold text-hv-text flex items-center gap-2 flex-wrap">
+                <span className="px-2 py-0.5 rounded text-xs font-mono" style={{ background: `color-mix(in srgb, ${MODEL_STYLE[selectedDevice.model].tint} 19%, transparent)`, color: MODEL_STYLE[selectedDevice.model].tint }}>
                   addr {selectedDevice.address}
                 </span>
                 {selectedDevice.model}
-                <span className="text-xs text-[#ADA294] font-normal">{MODEL_STYLE[selectedDevice.model].label}</span>
+                <span className="text-xs text-hv-text-2 font-normal">{MODEL_STYLE[selectedDevice.model].label}</span>
               </h3>
-              <div className="flex items-center gap-3 mt-2 text-xs text-[#ADA294]">
+              <div className="flex items-center gap-3 mt-2 text-xs text-hv-text-2">
                 <span>{selectedDevice.pollCount} polls</span>
                 {selectedDevice.lastCommand !== null && (
                   <span>last cmd: {CMD_NAMES[selectedDevice.lastCommand] || `0x${selectedDevice.lastCommand.toString(16)}`}</span>
@@ -846,11 +846,11 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <button onClick={() => removeDevice(selectedDevice.address)} className="px-2 py-1 bg-[#C6604F]/80 hover:bg-[#C6604F] rounded text-xs flex items-center gap-1">
+              <button onClick={() => removeDevice(selectedDevice.address)} className="px-2 py-1 bg-hv-error-strong/80 hover:bg-hv-error-strong rounded text-xs flex items-center gap-1">
                 <Trash2 className="w-3 h-3" /> Remove
               </button>
-              <button onClick={() => setSelectedAddr(null)} className="p-1 hover:bg-[#38302A]/40 rounded">
-                <X className="w-4 h-4 text-[#ADA294]" />
+              <button onClick={() => setSelectedAddr(null)} className="p-1 hover:bg-hv-line/40 rounded">
+                <X className="w-4 h-4 text-hv-text-2" />
               </button>
             </div>
           </div>
@@ -860,14 +860,14 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
             <CollapsibleSection
               storageKey="readers"
               title={`Readers (${selectedDevice.readerState.length})`}
-              icon={<Radio className="w-4 h-4 text-[#6FC7C0]" />}
-              headerRight={<span className="text-xs text-[#786D60] hidden md:inline">driven by upstream</span>}
+              icon={<Radio className="w-4 h-4 text-hv-info-text" />}
+              headerRight={<span className="text-xs text-hv-text-3 hidden md:inline">driven by upstream</span>}
             >
               <div className="grid grid-cols-2 gap-2">
                 {selectedDevice.readerState.map((r, i) => {
                   const colorMap: Record<string, string> = {
-                    off: '#4A3F36', red: '#ef4444', green: '#22c55e', amber: '#f59e0b',
-                    blue: '#3b82f6', magenta: '#ec4899', cyan: '#06b6d4', white: '#f8fafc',
+                    off: 'rgb(var(--hv-line-strong))', red: 'rgb(var(--hv-error))', green: 'rgb(var(--hv-success))', amber: 'rgb(var(--hv-warning))',
+                    blue: 'rgb(var(--hv-info))', magenta: 'rgb(var(--hv-pink))', cyan: 'rgb(var(--hv-info-strong))', white: 'rgb(var(--hv-text))',
                   };
                   const isTarget = targetReaderPort === i;
                   return (
@@ -876,22 +876,22 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                       onClick={() => setTargetReaderPort(i)}
                       className={`text-left p-3 rounded border transition-all ${
                         isTarget
-                          ? 'border-[#6FC7C0] bg-[#6FC7C0]/10 shadow-[0_0_8px_rgba(111,199,192,0.2)]'
-                          : 'border-[#38302A]/50 bg-black/25 hover:border-[#4A3F36]'
+                          ? 'border-hv-info-text bg-hv-info-text/10 shadow-[0_0_8px_rgb(var(--hv-info-text) / 0.2)]'
+                          : 'border-hv-line/50 bg-hv-surface/25 hover:border-hv-line-strong'
                       }`}
                       title={isTarget ? 'Selected target for Send Credential' : 'Click to target this reader'}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className={`text-xs font-mono ${isTarget ? 'text-[#6FC7C0]' : 'text-[#ADA294]'}`}>
+                        <span className={`text-xs font-mono ${isTarget ? 'text-hv-info-text' : 'text-hv-text-2'}`}>
                           Reader {i}{isTarget ? ' • TARGET' : ''}
                         </span>
                         <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full transition-colors" style={{ backgroundColor: colorMap[r.ledColor] || '#4A3F36', boxShadow: r.ledColor !== 'off' ? `0 0 6px ${colorMap[r.ledColor]}` : undefined }} title={`LED: ${r.ledColor}`} />
-                          <Radio className={`w-3 h-3 ${r.buzzerOn ? 'text-[#E6C766] animate-pulse' : 'text-[#4A3F36]'}`} />
+                          <div className="w-3 h-3 rounded-full transition-colors" style={{ backgroundColor: colorMap[r.ledColor] || 'rgb(var(--hv-line-strong))', boxShadow: r.ledColor !== 'off' ? `0 0 6px ${colorMap[r.ledColor]}` : undefined }} title={`LED: ${r.ledColor}`} />
+                          <Radio className={`w-3 h-3 ${r.buzzerOn ? 'text-hv-warning-fg animate-pulse' : 'text-hv-text-disabled'}`} />
                         </div>
                       </div>
-                      <div className="text-[11px] font-mono bg-black/40 rounded px-2 py-1 min-h-[28px] text-[#E3D8C8] break-all">
-                        {r.text || <span className="text-[#4A3F36] italic">no text</span>}
+                      <div className="text-[11px] font-mono bg-hv-surface/40 rounded px-2 py-1 min-h-[28px] text-hv-text break-all">
+                        {r.text || <span className="text-hv-text-disabled italic">no text</span>}
                       </div>
                     </button>
                   );
@@ -905,13 +905,13 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
             <CollapsibleSection
               storageKey="composer"
               title="Send Credential"
-              icon={<CreditCard className="w-4 h-4 text-[#6FC7C0]" />}
-              headerRight={<span className="text-xs text-[#786D60]">→ R{targetReaderPort}</span>}
+              icon={<CreditCard className="w-4 h-4 text-hv-info-text" />}
+              headerRight={<span className="text-xs text-hv-text-3">→ R{targetReaderPort}</span>}
               bodyClassName="space-y-3"
             >
                   {/* Target port selector */}
                   <div>
-                    <label className="text-[11px] text-[#ADA294] block mb-1">Target reader port</label>
+                    <label className="text-[11px] text-hv-text-2 block mb-1">Target reader port</label>
                     <div className="flex flex-wrap gap-1">
                       {selectedDevice.readerState.map((_, i) => (
                         <button
@@ -919,8 +919,8 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                           onClick={() => setTargetReaderPort(i)}
                           className={`px-3 py-1 rounded text-xs font-mono border ${
                             targetReaderPort === i
-                              ? 'bg-[#6FC7C0]/30 border-[#6FC7C0] text-white'
-                              : 'bg-black/25 border-[#38302A]/50 text-[#ADA294] hover:border-[#4A3F36]'
+                              ? 'bg-hv-info-text/30 border-hv-info-text text-hv-text'
+                              : 'bg-hv-surface/25 border-hv-line/50 text-hv-text-2 hover:border-hv-line-strong'
                           }`}
                         >
                           R{i}
@@ -932,14 +932,14 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                   {/* Format selection — Category / Bits / Format */}
                   <div className="space-y-2">
                     <div>
-                      <label className="text-[11px] text-[#ADA294] block mb-1">
-                        Category {formatsLoading && <span className="text-[#786D60]">(loading…)</span>}
+                      <label className="text-[11px] text-hv-text-2 block mb-1">
+                        Category {formatsLoading && <span className="text-hv-text-3">(loading…)</span>}
                       </label>
                       <select
                         value={selectedCategory}
                         onChange={e => handleCategoryChange(e.target.value)}
                         disabled={formatsLoading}
-                        className="w-full bg-black/25 border border-[#38302A]/50 rounded px-2 py-1.5 text-xs"
+                        className="w-full bg-hv-surface/25 border border-hv-line/50 rounded px-2 py-1.5 text-xs"
                       >
                         {FORMAT_CATEGORIES.map(cat => (
                           <option key={cat.id} value={cat.id}>{cat.name}</option>
@@ -948,12 +948,12 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                     </div>
                     <div className="grid grid-cols-[80px_1fr] gap-2">
                       <div>
-                        <label className="text-[11px] text-[#ADA294] block mb-1">Bits</label>
+                        <label className="text-[11px] text-hv-text-2 block mb-1">Bits</label>
                         <select
                           value={selectedBitCount}
                           onChange={e => handleBitCountChange(parseInt(e.target.value))}
                           disabled={formatsLoading}
-                          className="w-full bg-black/25 border border-[#38302A]/50 rounded px-2 py-1.5 text-xs font-bold text-center"
+                          className="w-full bg-hv-surface/25 border border-hv-line/50 rounded px-2 py-1.5 text-xs font-bold text-center"
                         >
                           {availableBitCounts.map(b => (
                             <option key={b as number} value={b as number}>{b as number}</option>
@@ -961,14 +961,14 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                         </select>
                       </div>
                       <div>
-                        <label className="text-[11px] text-[#ADA294] block mb-1">
+                        <label className="text-[11px] text-hv-text-2 block mb-1">
                           Format ({formatsForSelectedBits.length})
                         </label>
                         <select
                           value={selectedFormatId}
                           onChange={e => handleFormatChange(e.target.value)}
                           disabled={formatsLoading || formatsForSelectedBits.length === 0}
-                          className="w-full bg-black/25 border border-[#38302A]/50 rounded px-2 py-1.5 text-xs"
+                          className="w-full bg-hv-surface/25 border border-hv-line/50 rounded px-2 py-1.5 text-xs"
                         >
                           {formatsForSelectedBits.length === 0 ? (
                             <option>No formats at {selectedBitCount}-bit</option>
@@ -983,7 +983,7 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                       </div>
                     </div>
                     {selectedFormat && (
-                      <div className="text-[10px] text-[#786D60] px-1">
+                      <div className="text-[10px] text-hv-text-3 px-1">
                         {(selectedFormat as any).description || selectedFormat.name}
                         {' • '}
                         {hasFacilityCode ? `FC: 0-${selectedFormat.maxFacility}` : 'No FC'}
@@ -996,44 +996,44 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                   <div className={`grid gap-2 ${hasIssueLevel ? 'grid-cols-3' : (hasFacilityCode ? 'grid-cols-2' : 'grid-cols-1')}`}>
                     {hasIssueLevel && (
                       <div>
-                        <label className="text-[11px] text-[#5FB7B0] block mb-1">IL (0-{maxIssueLevel})</label>
+                        <label className="text-[11px] text-hv-info-fg block mb-1">IL (0-{maxIssueLevel})</label>
                         <input
                           type="number"
                           value={issueLevel}
                           onChange={e => setIssueLevel(Math.max(0, Math.min(maxIssueLevel, parseInt(e.target.value) || 0)))}
                           min={0} max={maxIssueLevel}
-                          className="w-full bg-black/25 border border-[#5FB7B0]/50 rounded px-2 py-1.5 text-xs font-mono"
+                          className="w-full bg-hv-surface/25 border border-hv-info/50 rounded px-2 py-1.5 text-xs font-mono"
                         />
                       </div>
                     )}
                     {hasFacilityCode && (
                       <div>
-                        <label className="text-[11px] text-[#ADA294] block mb-1">Facility</label>
+                        <label className="text-[11px] text-hv-text-2 block mb-1">Facility</label>
                         <input
                           type="number"
                           value={facility}
                           onChange={e => setFacility(Math.max(0, Math.min(selectedFormat?.maxFacility ?? 255, parseInt(e.target.value) || 0)))}
                           min={0} max={selectedFormat?.maxFacility ?? 255}
                           disabled={isCardOnly}
-                          className={`w-full bg-black/25 border rounded px-2 py-1.5 text-xs font-mono ${
+                          className={`w-full bg-hv-surface/25 border rounded px-2 py-1.5 text-xs font-mono ${
                             selectedFormat && !isValidFacilityCode(selectedFormat, facility)
-                              ? 'border-[#C6604F]/60'
-                              : 'border-[#38302A]/50'
+                              ? 'border-hv-error-strong/60'
+                              : 'border-hv-line/50'
                           }`}
                         />
                       </div>
                     )}
                     <div>
-                      <label className="text-[11px] text-[#ADA294] block mb-1">Card #</label>
+                      <label className="text-[11px] text-hv-text-2 block mb-1">Card #</label>
                       <input
                         type="number"
                         value={cardNumber}
                         onChange={e => setCardNumber(Math.max(0, Math.min(selectedFormat?.maxCard ?? 65535, parseInt(e.target.value) || 0)))}
                         min={0} max={selectedFormat?.maxCard ?? 65535}
-                        className={`w-full bg-black/25 border rounded px-2 py-1.5 text-xs font-mono ${
+                        className={`w-full bg-hv-surface/25 border rounded px-2 py-1.5 text-xs font-mono ${
                           selectedFormat && !isValidCardNumber(selectedFormat, cardNumber)
-                            ? 'border-[#C6604F]/60'
-                            : 'border-[#38302A]/50'
+                            ? 'border-hv-error-strong/60'
+                            : 'border-hv-line/50'
                         }`}
                       />
                     </div>
@@ -1041,16 +1041,16 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
 
                   {/* Quick action buttons */}
                   <div className="flex gap-1.5">
-                    <button onClick={generateRandomCard} className="flex-1 px-2 py-1 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded text-[11px] flex items-center justify-center gap-1">
+                    <button onClick={generateRandomCard} className="flex-1 px-2 py-1 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded text-[11px] flex items-center justify-center gap-1">
                       <Shuffle className="w-3 h-3" /> Random
                     </button>
-                    <button onClick={() => loadPreset('test')} className="flex-1 px-2 py-1 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded text-[11px]">
+                    <button onClick={() => loadPreset('test')} className="flex-1 px-2 py-1 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded text-[11px]">
                       Test
                     </button>
-                    <button onClick={() => loadPreset('admin')} className="flex-1 px-2 py-1 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded text-[11px]">
+                    <button onClick={() => loadPreset('admin')} className="flex-1 px-2 py-1 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded text-[11px]">
                       Admin
                     </button>
-                    <button onClick={() => loadPreset('visitor')} className="flex-1 px-2 py-1 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded text-[11px]">
+                    <button onClick={() => loadPreset('visitor')} className="flex-1 px-2 py-1 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded text-[11px]">
                       Visitor
                     </button>
                   </div>
@@ -1079,17 +1079,17 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                   <button
                     onClick={() => sendCardToReader(selectedDevice.address, targetReaderPort)}
                     disabled={sending || !selectedFormat}
-                    className="w-full px-3 py-2 bg-[#6FC7C0] hover:bg-[#4E9E98] disabled:opacity-50 disabled:cursor-not-allowed text-[#15110B] font-semibold rounded text-sm flex items-center justify-center gap-2"
+                    className="w-full px-3 py-2 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong disabled:opacity-50 disabled:cursor-not-allowed font-semibold rounded text-sm flex items-center justify-center gap-2"
                   >
                     <Send className="w-4 h-4" />
                     {sending ? 'Sending…' : `Send Card → Reader ${targetReaderPort}`}
                   </button>
 
                   {/* PIN entry */}
-                  <div className="pt-2 border-t border-[#38302A]/40">
+                  <div className="pt-2 border-t border-hv-line/40">
                     <div className="flex items-center gap-2 mb-1">
-                      <KeyRound className="w-3 h-3 text-[#ADA294]" />
-                      <span className="text-[11px] text-[#ADA294] uppercase tracking-wide">PIN / Keypad</span>
+                      <KeyRound className="w-3 h-3 text-hv-text-2" />
+                      <span className="text-[11px] text-hv-text-2 uppercase tracking-wide">PIN / Keypad</span>
                     </div>
                     <div className="flex gap-2">
                       <input
@@ -1098,12 +1098,12 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                         onChange={e => setPinValue(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') sendPinToReader(selectedDevice.address, targetReaderPort, pinValue); }}
                         placeholder='digits + #/* (e.g. "1234#")'
-                        className="flex-1 bg-black/25 border border-[#38302A]/50 rounded px-2 py-1.5 text-xs font-mono"
+                        className="flex-1 bg-hv-surface/25 border border-hv-line/50 rounded px-2 py-1.5 text-xs font-mono"
                       />
                       <button
                         onClick={() => sendPinToReader(selectedDevice.address, targetReaderPort, pinValue)}
                         disabled={sending || !pinValue.trim()}
-                        className="px-3 py-1.5 bg-[#38302A]/50 hover:bg-[#4A3F36]/60 disabled:opacity-50 rounded text-xs font-semibold flex items-center gap-1"
+                        className="px-3 py-1.5 bg-hv-line/50 hover:bg-hv-line-strong/60 disabled:opacity-50 rounded text-xs font-semibold flex items-center gap-1"
                       >
                         <Send className="w-3 h-3" /> Send PIN
                       </button>
@@ -1117,8 +1117,8 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
             <CollapsibleSection
               storageKey="inputs"
               title={`Inputs (${selectedDevice.numInputs})`}
-              icon={<Zap className="w-4 h-4 text-[#E6C766]" />}
-              headerRight={<span className="text-xs text-[#786D60] hidden md:inline">click to toggle</span>}
+              icon={<Zap className="w-4 h-4 text-hv-warning-fg" />}
+              headerRight={<span className="text-xs text-hv-text-3 hidden md:inline">click to toggle</span>}
             >
               <div className="grid grid-cols-8 gap-1.5">
                 {selectedDevice.inputs.map((v, i) => (
@@ -1126,7 +1126,7 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                     key={i}
                     onClick={() => toggleInput(selectedDevice.address, i, v)}
                     className={`p-2 rounded border text-xs font-mono flex flex-col items-center gap-1 transition-all ${
-                      v ? 'bg-[#6FC7C0]/30 border-[#6FC7C0] text-white' : 'bg-black/25 border-[#38302A]/50 text-[#ADA294] hover:border-[#786D60]'
+                      v ? 'bg-hv-info-text/30 border-hv-info-text text-hv-text' : 'bg-hv-surface/25 border-hv-line/50 text-hv-text-2 hover:border-hv-text-3'
                     }`}
                   >
                     <span>IN{i}</span>
@@ -1142,19 +1142,19 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
             <CollapsibleSection
               storageKey="outputs"
               title={`Outputs (${selectedDevice.numOutputs})`}
-              icon={<Power className="w-4 h-4 text-[#7BD497]" />}
-              headerRight={<span className="text-xs text-[#786D60] hidden md:inline">read-only</span>}
+              icon={<Power className="w-4 h-4 text-hv-success-text" />}
+              headerRight={<span className="text-xs text-hv-text-3 hidden md:inline">read-only</span>}
             >
               <div className="grid grid-cols-8 gap-1.5">
                 {selectedDevice.outputs.map((v, i) => (
                   <div
                     key={i}
                     className={`p-2 rounded border text-xs font-mono flex flex-col items-center gap-1 ${
-                      v ? 'bg-[#6FC7C0]/30 border-[#6FC7C0] text-white' : 'bg-black/25 border-[#38302A]/50 text-[#786D60]'
+                      v ? 'bg-hv-info-text/30 border-hv-info-text text-hv-text' : 'bg-hv-surface/25 border-hv-line/50 text-hv-text-3'
                     }`}
                   >
                     <span>OUT{i}</span>
-                    <div className={`w-2 h-2 rounded-full ${v ? 'bg-[#6FC7C0]' : 'bg-[#4A3F36]'}`} />
+                    <div className={`w-2 h-2 rounded-full ${v ? 'bg-hv-info-text' : 'bg-hv-line-strong'}`} />
                   </div>
                 ))}
               </div>
@@ -1166,69 +1166,69 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
           <CollapsibleSection
             storageKey="status"
             title="Status"
-            icon={<AlertCircle className="w-4 h-4 text-[#E6A24C]" />}
-            headerRight={<span className="text-xs text-[#786D60] hidden md:inline">latching — via LSTATR</span>}
+            icon={<AlertCircle className="w-4 h-4 text-hv-brand-fg" />}
+            headerRight={<span className="text-xs text-hv-text-3 hidden md:inline">latching — via LSTATR</span>}
           >
             <div className="flex gap-2">
               <button
                 onClick={() => toggleTamper(selectedDevice.address, !!selectedDevice.tamperActive)}
                 className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors flex items-center justify-center gap-2 ${
                   selectedDevice.tamperActive
-                    ? 'bg-[#C6604F]/30 border-[#C6604F] text-[#F0A79A] shadow-[0_0_10px_rgba(239,68,68,0.3)]'
-                    : 'bg-black/25 border-[#38302A]/50 text-[#ADA294] hover:border-[#4A3F36]'
+                    ? 'bg-hv-error-strong/30 border-hv-error-strong text-hv-error-text shadow-[0_0_10px_rgb(var(--hv-error) / 0.3)]'
+                    : 'bg-hv-surface/25 border-hv-line/50 text-hv-text-2 hover:border-hv-line-strong'
                 }`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${selectedDevice.tamperActive ? 'bg-[#E0705F] animate-pulse' : 'bg-[#4A3F36]'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${selectedDevice.tamperActive ? 'bg-hv-error animate-pulse' : 'bg-hv-line-strong'}`} />
                 TAMPER
               </button>
               <button
                 onClick={() => togglePowerFail(selectedDevice.address, !!selectedDevice.powerFailActive)}
                 className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors flex items-center justify-center gap-2 ${
                   selectedDevice.powerFailActive
-                    ? 'bg-[#C9862E]/30 border-[#D98A3D] text-[#F0C08A] shadow-[0_0_10px_rgba(249,115,22,0.3)]'
-                    : 'bg-black/25 border-[#38302A]/50 text-[#ADA294] hover:border-[#4A3F36]'
+                    ? 'bg-hv-brand-hover/30 border-hv-brand text-hv-brand-text shadow-[0_0_10px_rgb(var(--hv-brand) / 0.3)]'
+                    : 'bg-hv-surface/25 border-hv-line/50 text-hv-text-2 hover:border-hv-line-strong'
                 }`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${selectedDevice.powerFailActive ? 'bg-[#E6A24C] animate-pulse' : 'bg-[#4A3F36]'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${selectedDevice.powerFailActive ? 'bg-hv-brand animate-pulse' : 'bg-hv-line-strong'}`} />
                 POWER FAIL
               </button>
             </div>
           </CollapsibleSection>
 
           {selectedDevice.numInputs === 0 && selectedDevice.numOutputs === 0 && !selectedDevice.readerState && (
-            <div className="text-sm text-[#786D60] text-center py-4">No I/O on this device model.</div>
+            <div className="text-sm text-hv-text-3 text-center py-4">No I/O on this device model.</div>
           )}
         </div>
       )}
 
       {/* ── TRACE PANEL ─────────────────────────────────────────────── */}
-      <div className="rounded-xl border shadow-2xl bg-gradient-to-br from-[#241E19]/40 to-[#15110B]/40 border-[#4A3F36]/50 overflow-hidden">
-        <button onClick={() => setShowTrace(s => !s)} className="w-full p-3 flex items-center justify-between hover:bg-[#38302A]/20">
+      <div className="rounded-xl border shadow-2xl bg-gradient-to-br from-hv-widget/40 to-hv-surface/40 border-hv-line-strong/50 overflow-hidden">
+        <button onClick={() => setShowTrace(s => !s)} className="w-full p-3 flex items-center justify-between hover:bg-hv-line/20">
           <div className="flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[#6FC7C0]" />
-            <span className="text-sm font-semibold text-white">Bus Trace ({frames.length})</span>
+            <Activity className="w-4 h-4 text-hv-info-text" />
+            <span className="text-sm font-semibold text-hv-text">Bus Trace ({frames.length})</span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-[#ADA294]">
+          <div className="flex items-center gap-2 text-xs text-hv-text-2">
             {showTrace ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
             <ChevronRight className={`w-4 h-4 transition-transform ${showTrace ? 'rotate-90' : ''}`} />
           </div>
         </button>
         {showTrace && (
-          <div className="max-h-[280px] overflow-y-auto font-mono text-[11px] border-t border-[#38302A]/50">
+          <div className="max-h-[280px] overflow-y-auto font-mono text-[11px] border-t border-hv-line/50">
             {frames.length === 0 ? (
-              <div className="text-[#786D60] text-center py-6">No frames yet. Start the bus and an upstream controller polls.</div>
+              <div className="text-hv-text-3 text-center py-6">No frames yet. Start the bus and an upstream controller polls.</div>
             ) : (
               frames.map((f, i) => (
-                <div key={i} className={`flex items-start gap-2 px-3 py-1 border-b border-[#241E19]/50 ${f.direction === 'in' ? 'bg-black/10' : ''}`}>
-                  <span className="text-[#786D60] w-16 shrink-0">{new Date(f.ts).toLocaleTimeString('en-US', { hour12: false })}</span>
-                  <span className={`w-6 shrink-0 ${f.direction === 'in' ? 'text-[#5FB7B0]' : 'text-[#6FC7C0]'}`}>
+                <div key={i} className={`flex items-start gap-2 px-3 py-1 border-b border-hv-widget/50 ${f.direction === 'in' ? 'bg-hv-surface/10' : ''}`}>
+                  <span className="text-hv-text-3 w-16 shrink-0">{new Date(f.ts).toLocaleTimeString('en-US', { hour12: false })}</span>
+                  <span className={`w-6 shrink-0 ${f.direction === 'in' ? 'text-hv-info-fg' : 'text-hv-info-text'}`}>
                     {f.direction === 'in' ? '↓' : '↑'}
                   </span>
-                  <span className="text-[#C4B9AB] w-12 shrink-0">#{f.addr}</span>
-                  <span className="text-[#F0C674] w-16 shrink-0">{f.cmd ? (CMD_NAMES[f.cmd] || `0x${f.cmd.toString(16)}`) : ''}</span>
-                  <span className="text-[#786D60] truncate flex-1">{f.hex}</span>
-                  {f.error && <span className="text-[#E0705F] shrink-0">{f.error}</span>}
-                  {f.handled === false && f.direction === 'in' && <span className="text-[#4A3F36] shrink-0">(no device)</span>}
+                  <span className="text-hv-text-2 w-12 shrink-0">#{f.addr}</span>
+                  <span className="text-hv-brand-text w-16 shrink-0">{f.cmd ? (CMD_NAMES[f.cmd] || `0x${f.cmd.toString(16)}`) : ''}</span>
+                  <span className="text-hv-text-3 truncate flex-1">{f.hex}</span>
+                  {f.error && <span className="text-hv-error-fg shrink-0">{f.error}</span>}
+                  {f.handled === false && f.direction === 'in' && <span className="text-hv-text-disabled shrink-0">(no device)</span>}
                 </div>
               ))
             )}
@@ -1239,11 +1239,11 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
       {/* ── SAVE CONFIG MODAL ───────────────────────────────────────── */}
       {showSaveModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowSaveModal(false)}>
-          <div className="bg-[#15110B] border border-[#38302A] rounded-xl p-6 w-[420px]" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-1 text-white flex items-center gap-2">
-              <Save className="w-5 h-5 text-[#6FC7C0]" /> Save Configuration
+          <div className="bg-hv-surface border border-hv-line rounded-xl p-6 w-[420px]" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-1 text-hv-text flex items-center gap-2">
+              <Save className="w-5 h-5 text-hv-info-text" /> Save Configuration
             </h3>
-            <p className="text-xs text-[#ADA294] mb-4">
+            <p className="text-xs text-hv-text-2 mb-4">
               Saves the current {devices.length} device(s) to a named config file on this machine.
             </p>
             <input
@@ -1253,11 +1253,11 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
               onKeyDown={e => { if (e.key === 'Enter') saveConfig(); }}
               placeholder="Config name (e.g. azure-3board)"
               autoFocus
-              className="w-full bg-black/25 border border-[#38302A]/50 rounded px-3 py-2 text-sm mb-4"
+              className="w-full bg-hv-surface/25 border border-hv-line/50 rounded px-3 py-2 text-sm mb-4"
             />
             <div className="flex gap-3">
-              <button onClick={() => setShowSaveModal(false)} className="flex-1 px-4 py-2 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded">Cancel</button>
-              <button onClick={saveConfig} className="flex-1 px-4 py-2 bg-[#6FC7C0] hover:bg-[#4E9E98] text-[#15110B] font-semibold rounded">Save</button>
+              <button onClick={() => setShowSaveModal(false)} className="flex-1 px-4 py-2 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded">Cancel</button>
+              <button onClick={saveConfig} className="flex-1 px-4 py-2 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong font-semibold rounded">Save</button>
             </div>
           </div>
         </div>
@@ -1266,17 +1266,17 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
       {/* ── ADD DEVICE MODAL ────────────────────────────────────────── */}
       {showAddModal.open && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowAddModal({ open: false, address: 0 })}>
-          <div className="bg-[#15110B] border border-[#38302A] rounded-xl p-6 w-[420px]" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-1 text-white">Add Device at Address {showAddModal.address}</h3>
-            <p className="text-xs text-[#ADA294] mb-4">Choose which Azure Access board model to emulate at this address.</p>
+          <div className="bg-hv-surface border border-hv-line rounded-xl p-6 w-[420px]" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold mb-1 text-hv-text">Add Device at Address {showAddModal.address}</h3>
+            <p className="text-xs text-hv-text-2 mb-4">Choose which Azure Access board model to emulate at this address.</p>
             <div className="space-y-2 mb-4">
               {MODELS.map(m => (
                 <button
                   key={m}
                   onClick={() => setAddModel(m)}
-                  className={`w-full p-3 rounded border text-left flex items-center gap-3 ${addModel === m ? 'border-[#6FC7C0] bg-[#6FC7C0]/15' : 'border-[#38302A] hover:bg-[#38302A]/30'}`}
+                  className={`w-full p-3 rounded border text-left flex items-center gap-3 ${addModel === m ? 'border-hv-info-text bg-hv-info-text/15' : 'border-hv-line hover:bg-hv-line/30'}`}
                 >
-                  <div className="shrink-0 w-16 h-12 rounded bg-black/30 overflow-hidden flex items-center justify-center">
+                  <div className="shrink-0 w-16 h-12 rounded bg-hv-surface/30 overflow-hidden flex items-center justify-center">
                     <img
                       src={MODEL_STYLE[m].image}
                       alt=""
@@ -1285,15 +1285,15 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
                     />
                   </div>
                   <div className="flex-1 flex items-center justify-between">
-                    <span className="font-semibold text-white">{m}</span>
-                    <span className="text-xs text-[#ADA294]">{MODEL_STYLE[m].label}</span>
+                    <span className="font-semibold text-hv-text">{m}</span>
+                    <span className="text-xs text-hv-text-2">{MODEL_STYLE[m].label}</span>
                   </div>
                 </button>
               ))}
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setShowAddModal({ open: false, address: 0 })} className="flex-1 px-4 py-2 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded">Cancel</button>
-              <button onClick={() => { addDevice(showAddModal.address, addModel); setShowAddModal({ open: false, address: 0 }); }} className="flex-1 px-4 py-2 bg-[#6FC7C0] hover:bg-[#4E9E98] text-[#15110B] font-semibold rounded">Add</button>
+              <button onClick={() => setShowAddModal({ open: false, address: 0 })} className="flex-1 px-4 py-2 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded">Cancel</button>
+              <button onClick={() => { addDevice(showAddModal.address, addModel); setShowAddModal({ open: false, address: 0 }); }} className="flex-1 px-4 py-2 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong font-semibold rounded">Add</button>
             </div>
           </div>
         </div>
@@ -1301,50 +1301,50 @@ const ControllerEmulatorSection: React.FC<ControllerEmulatorSectionProps> = ({ i
       {/* ── PORT CONFLICT CONFIRMATION MODAL ─────────────────────────── */}
       {conflictModal.open && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setConflictModal({ open: false, portPath: '', readers: [] })}>
-          <div className="bg-[#15110B] border border-[#C9862E]/60 rounded-xl p-6 w-[500px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
+          <div className="bg-hv-surface border border-hv-brand-hover/60 rounded-xl p-6 w-[500px] max-w-[95vw]" onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3 mb-3">
-              <div className="shrink-0 w-10 h-10 rounded-full bg-[#C9862E]/20 border border-[#C9862E]/50 flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-[#E6C766]" />
+              <div className="shrink-0 w-10 h-10 rounded-full bg-hv-brand-hover/20 border border-hv-brand-hover/50 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-hv-warning-fg" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Port In Use by Reader Emulation</h3>
-                <p className="text-xs text-[#ADA294] mt-0.5">Confirm to release the port for downstream-controller emulation.</p>
+                <h3 className="text-lg font-bold text-hv-text">Port In Use by Reader Emulation</h3>
+                <p className="text-xs text-hv-text-2 mt-0.5">Confirm to release the port for downstream-controller emulation.</p>
               </div>
             </div>
 
-            <div className="bg-black/30 border border-[#38302A]/50 rounded p-3 mb-4">
-              <div className="text-xs text-[#786D60] mb-1">Port</div>
-              <div className="font-mono text-sm text-white mb-3">{conflictModal.portPath}</div>
+            <div className="bg-hv-surface/30 border border-hv-line/50 rounded p-3 mb-4">
+              <div className="text-xs text-hv-text-3 mb-1">Port</div>
+              <div className="font-mono text-sm text-hv-text mb-3">{conflictModal.portPath}</div>
 
-              <div className="text-xs text-[#786D60] mb-1">
+              <div className="text-xs text-hv-text-3 mb-1">
                 Affected readers ({conflictModal.readers.length})
               </div>
               {conflictModal.readers.length === 0 ? (
-                <div className="text-sm text-[#ADA294] italic">No readers configured — port is held but idle.</div>
+                <div className="text-sm text-hv-text-2 italic">No readers configured — port is held but idle.</div>
               ) : (
                 <div className="space-y-1 max-h-[200px] overflow-y-auto">
                   {conflictModal.readers.map(r => (
-                    <div key={r.id} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-[#241E19]/50">
+                    <div key={r.id} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-hv-widget/50">
                       <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-[#6FC7C0]' : 'bg-[#4A3F36]'}`} />
-                        <span className="text-[#E3D8C8]">{r.name}</span>
+                        <div className={`w-2 h-2 rounded-full ${r.enabled ? 'bg-hv-info-text' : 'bg-hv-line-strong'}`} />
+                        <span className="text-hv-text">{r.name}</span>
                       </div>
-                      <span className="font-mono text-xs text-[#786D60]">addr {r.address}</span>
+                      <span className="font-mono text-xs text-hv-text-3">addr {r.address}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <div className="text-xs text-[#ADA294] mb-4">
+            <div className="text-xs text-hv-text-2 mb-4">
               Starting the Controller Emulator on this port will close the reader polling. Stopping the bus later will automatically restore it.
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => setConflictModal({ open: false, portPath: '', readers: [] })} className="flex-1 px-4 py-2 bg-[#38302A]/40 hover:bg-[#4A3F36]/50 rounded">
+              <button onClick={() => setConflictModal({ open: false, portPath: '', readers: [] })} className="flex-1 px-4 py-2 bg-hv-line/40 hover:bg-hv-line-strong/50 rounded">
                 Cancel
               </button>
-              <button onClick={confirmConflictAndStart} className="flex-1 px-4 py-2 bg-[#C9862E] hover:bg-[#A96F22] text-white font-semibold rounded flex items-center justify-center gap-2">
+              <button onClick={confirmConflictAndStart} className="flex-1 px-4 py-2 bg-hv-brand-hover hover:bg-hv-brand-hover text-white font-semibold rounded flex items-center justify-center gap-2">
                 <Power className="w-4 h-4" /> Release & Start
               </button>
             </div>

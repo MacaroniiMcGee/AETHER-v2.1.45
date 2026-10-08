@@ -1008,7 +1008,7 @@ function FrameRow({ frame, expanded, bookmarked, note, alias, inCompare,
   return (
     <>
       <tr id={`fr-${frame.id}`}
-        className={`border-t border-gray-800 hover:bg-white/5 transition-colors ${rowBg} ${inCompare ? 'outline outline-1 outline-purple-500/60' : ''}`}>
+        className={`border-t border-gray-800 hover:bg-hv-contrast/5 transition-colors ${rowBg} ${inCompare ? 'outline outline-1 outline-purple-500/60' : ''}`}>
         <td className="px-2 py-1 text-center">
           <button onClick={onToggleExpand} className="text-gray-500 hover:text-gray-200">
             {expanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}

@@ -22,27 +22,27 @@ import type { Socket } from 'socket.io-client';
 type ColorName = 'off' | 'red' | 'green' | 'amber' | 'blue' | 'magenta' | 'cyan' | 'white';
 
 const COLOR_HEX: Record<ColorName, string> = {
-  off:     '#1e293b',
-  red:     '#ef4444',
-  green:   '#22c55e',
-  amber:   '#f59e0b',
-  blue:    '#3b82f6',
-  magenta: '#d946ef',
-  cyan:    '#06b6d4',
-  white:   '#f8fafc',
+  off:     'rgb(var(--hv-widget))',
+  red:     'rgb(var(--hv-error))',
+  green:   'rgb(var(--hv-success))',
+  amber:   'rgb(var(--hv-warning))',
+  blue:    'rgb(var(--hv-info))',
+  magenta: 'rgb(var(--hv-purple))',
+  cyan:    'rgb(var(--hv-info-strong))',
+  white:   'rgb(var(--hv-text))',
 };
 
 // Brick wall background (offset grey bricks) for "reader installed on wall" look
 const BRICK_WALL_SVG =
   "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100'>" +
-  "<rect width='200' height='100' fill='#3a3a3a'/>" +
-  "<rect x='2' y='2' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='102' y='2' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='-48' y='34' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='52' y='34' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='152' y='34' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='2' y='66' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
-  "<rect x='102' y='66' width='96' height='28' fill='#4f4f4f' rx='1'/>" +
+  "<rect width='200' height='100' fill='rgb(var(--hv-modal))'/>" +
+  "<rect x='2' y='2' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='102' y='2' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='-48' y='34' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='52' y='34' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='152' y='34' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='2' y='66' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
+  "<rect x='102' y='66' width='96' height='28' fill='rgb(var(--hv-line-strong))' rx='1'/>" +
   "</svg>";
 const BRICK_WALL_BG = 'url("data:image/svg+xml;utf8,' + encodeURIComponent(BRICK_WALL_SVG) + '")';
 
@@ -542,23 +542,23 @@ export default function InteractiveReader({
 
   // ===================== Card zone style helpers =====================
   const cardZoneBorder =
-    cardStatus.kind === 'ok'      ? '#22c55e'
-    : cardStatus.kind === 'err'   ? '#ef4444'
-    : cardLoaded && cardHover     ? '#67e8f9'
-    : cardLoaded                  ? '#1e7488'
-    : '#334155';
+    cardStatus.kind === 'ok'      ? 'rgb(var(--hv-success))'
+    : cardStatus.kind === 'err'   ? 'rgb(var(--hv-error))'
+    : cardLoaded && cardHover     ? 'rgb(var(--hv-info-text))'
+    : cardLoaded                  ? 'rgb(var(--hv-info-tint-strong))'
+    : 'rgb(var(--hv-line))';
 
   const cardZoneBg =
-    cardLoaded && cardHover ? '#051820' : '#020617';
+    cardLoaded && cardHover ? 'rgb(var(--hv-info-tint))' : 'rgb(var(--hv-surface))';
 
   // ===================== Render =====================
   return (
     <div style={{
-      backgroundColor: '#3a3a3a',
+      backgroundColor: 'rgb(var(--hv-modal))',
       backgroundImage: BRICK_WALL_BG,
       backgroundSize: '200px 100px',
       backgroundRepeat: 'repeat',
-      border: '1px solid #2a2a2a',
+      border: '1px solid rgb(var(--hv-popup-panel))',
       borderRadius: 12,
       padding: 30,
       display: 'flex',
@@ -583,31 +583,31 @@ export default function InteractiveReader({
           50%      { transform: scale(1.3); opacity: 0.5; }
         }
         @keyframes ${pressAnim} {
-          0%   { transform: scale(1);    background: #1e293b; }
-          50%  { transform: scale(0.92); background: #475569; }
-          100% { transform: scale(1);    background: #1e293b; }
+          0%   { transform: scale(1);    background: rgb(var(--hv-widget)); }
+          50%  { transform: scale(0.92); background: rgb(var(--hv-line-strong)); }
+          100% { transform: scale(1);    background: rgb(var(--hv-widget)); }
         }
         @keyframes ${tapAnim} {
-          0%   { box-shadow: inset 0 0 0  rgba(34, 211, 238, 0.0); transform: scale(1); }
-          30%  { box-shadow: inset 0 0 16px rgba(34, 211, 238, 0.5); transform: scale(0.97); }
-          100% { box-shadow: inset 0 0 0  rgba(34, 211, 238, 0.0); transform: scale(1); }
+          0%   { box-shadow: inset 0 0 0  rgb(var(--hv-info) / 0.0); transform: scale(1); }
+          30%  { box-shadow: inset 0 0 16px rgb(var(--hv-info) / 0.5); transform: scale(0.97); }
+          100% { box-shadow: inset 0 0 0  rgb(var(--hv-info) / 0.0); transform: scale(1); }
         }
       `}</style>
 
       {/* ====== Reader bezel ====== */}
       <div style={{
-        background: 'linear-gradient(145deg, #2a2a2e 0%, #1a1a1e 50%, #25252a 100%)',
-        border: '1px solid #1a1a1e',
+        background: 'linear-gradient(145deg, rgb(var(--hv-popup-panel)) 0%, rgb(var(--hv-widget-panel)) 50%, rgb(var(--hv-popup-panel)) 100%)',
+        border: '1px solid rgb(var(--hv-widget-panel))',
         borderRadius: 14,
         padding: 14,
         width: bezelWidth,
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.6), inset 0 1px 0 rgb(var(--hv-contrast) / 0.06)',
       }}>
         <div style={{
-          fontSize: 10, color: '#64748b',
+          fontSize: 10, color: 'rgb(var(--hv-text-3))',
           letterSpacing: '0.3em', textAlign: 'center',
         }}>
           AETHER · OSDP
@@ -665,17 +665,17 @@ export default function InteractiveReader({
             }}
           >
             {cardStatus.kind === 'sending' ? (
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>Sending…</span>
+              <span style={{ fontSize: 11, color: 'rgb(var(--hv-text-2))' }}>Sending…</span>
             ) : cardStatus.kind === 'ok' ? (
-              <span style={{ fontSize: 11, color: '#4ade80' }}>{cardStatus.msg}</span>
+              <span style={{ fontSize: 11, color: 'rgb(var(--hv-success-text))' }}>{cardStatus.msg}</span>
             ) : cardStatus.kind === 'err' ? (
-              <span style={{ fontSize: 11, color: '#fca5a5' }}>{cardStatus.msg}</span>
+              <span style={{ fontSize: 11, color: 'rgb(var(--hv-error-text))' }}>{cardStatus.msg}</span>
             ) : (
               <>
                 <i className="ti ti-credit-card"
                    style={{
                      fontSize: mode === 'both' ? 22 : 40,
-                     color: cardLoaded ? '#0e7490' : '#334155',
+                     color: cardLoaded ? 'rgb(var(--hv-info-tint-strong))' : 'rgb(var(--hv-line))',
                    }}
                    aria-hidden />
                 <div style={{
@@ -686,7 +686,7 @@ export default function InteractiveReader({
                 }}>
                   <span style={{
                     fontSize: 10,
-                    color: cardLoaded ? '#67e8f9' : '#475569',
+                    color: cardLoaded ? 'rgb(var(--hv-info-text))' : 'rgb(var(--hv-line-strong))',
                     letterSpacing: '0.05em',
                   }}>
                     {cardLoaded ? 'Tap card' : 'Load a card →'}
@@ -694,7 +694,7 @@ export default function InteractiveReader({
                   {cardLoaded && cardReadout && (
                     <span style={{
                       fontSize: 10,
-                      color: '#475569',
+                      color: 'rgb(var(--hv-text-disabled))',
                       fontFamily: 'ui-monospace, monospace',
                     }}>
                       {mode === 'both' ? '·' : ''} {cardReadout}
@@ -711,8 +711,8 @@ export default function InteractiveReader({
           <>
             {/* PIN display */}
             <div style={{
-              background: '#020617',
-              border: '1px solid #1e293b',
+              background: 'rgb(var(--hv-surface))',
+              border: '1px solid rgb(var(--hv-widget))',
               borderRadius: 6,
               padding: '8px 10px',
               minHeight: 28,
@@ -722,7 +722,7 @@ export default function InteractiveReader({
               fontFamily: 'ui-monospace, monospace',
               fontSize: 14,
               letterSpacing: '0.25em',
-              color: pin ? '#22d3ee' : '#334155',
+              color: pin ? 'rgb(var(--hv-info))' : 'rgb(var(--hv-line))',
             }}>
               {pin
                 ? (maskPin ? '•'.repeat(pin.length) : pin)
@@ -746,17 +746,17 @@ export default function InteractiveReader({
                     (e.currentTarget as HTMLButtonElement).style.animation = '';
                   }}
                   style={{
-                    background: 'linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 50%, transparent 100%)',
-                    color: '#f0f0f0',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'linear-gradient(180deg, rgb(var(--hv-contrast) / 0.07) 0%, rgb(var(--hv-contrast) / 0.02) 50%, transparent 100%)',
+                    color: 'rgb(var(--hv-text))',
+                    border: '1px solid rgb(var(--hv-contrast) / 0.1)',
                     borderRadius: 6,
                     padding: '8px 0',
                     fontSize: 14,
                     fontWeight: 500,
                     cursor: 'pointer',
                     fontFamily: 'inherit',
-                    textShadow: '0 0 6px rgba(255,255,255,0.25), 0 1px 0 rgba(0,0,0,0.6)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                    textShadow: '0 0 6px rgb(var(--hv-contrast) / 0.25), 0 1px 0 rgba(0,0,0,0.6)',
+                    boxShadow: 'inset 0 1px 0 rgb(var(--hv-contrast) / 0.06)',
                   }}
                 >
                   {k}
@@ -766,13 +766,13 @@ export default function InteractiveReader({
 
             {/* Clear / Back / Send row */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
-              <button onClick={handleClear} style={btnStyle('#7f1d1d', '#fca5a5')}>Clear</button>
-              <button onClick={handleBack}  style={btnStyle('#334155', '#cbd5e1')}>Back</button>
+              <button onClick={handleClear} style={btnStyle('rgb(var(--hv-error-tint-strong))', 'rgb(var(--hv-error-text))')}>Clear</button>
+              <button onClick={handleBack}  style={btnStyle('rgb(var(--hv-line))', 'rgb(var(--hv-text))')}>Back</button>
               <button
                 onClick={handleSend}
                 disabled={!pin || keypadStatus.kind === 'sending'}
                 style={{
-                  ...btnStyle('#0e7490', '#67e8f9'),
+                  ...btnStyle('rgb(var(--hv-info-tint-strong))', 'rgb(var(--hv-info-text))'),
                   opacity: (!pin || keypadStatus.kind === 'sending') ? 0.4 : 1,
                   cursor: (!pin || keypadStatus.kind === 'sending') ? 'not-allowed' : 'pointer',
                 }}
@@ -787,12 +787,12 @@ export default function InteractiveReader({
               minHeight: '1.2em',
               textAlign: 'center',
               color: keypadStatus.kind === 'ok'
-                ? '#4ade80'
+                ? 'rgb(var(--hv-success-text))'
                 : keypadStatus.kind === 'err'
-                  ? '#fca5a5'
+                  ? 'rgb(var(--hv-error-text))'
                   : keypadStatus.kind === 'sending'
-                    ? '#94a3b8'
-                    : '#475569',
+                    ? 'rgb(var(--hv-text-2))'
+                    : 'rgb(var(--hv-line-strong))',
             }}>
               {keypadStatus.msg || ' '}
             </div>
@@ -805,7 +805,7 @@ export default function InteractiveReader({
           justifyContent: 'space-between',
           alignItems: 'center',
         }}>
-          <div style={{ fontSize: 9, color: '#475569', fontFamily: 'monospace' }}>
+          <div style={{ fontSize: 9, color: 'rgb(var(--hv-text-disabled))', fontFamily: 'monospace' }}>
             0x{reader.address.toString(16).padStart(2, '0').toUpperCase()}
           </div>
           <button
@@ -813,12 +813,12 @@ export default function InteractiveReader({
             title={audioMuted ? 'Audio MUTED — click to unmute' : 'Audio ON — click to mute'}
             aria-label={audioMuted ? 'Unmute audio' : 'Mute audio'}
             style={{
-              background: audioMuted ? '#5a1a1a' : 'rgba(51, 65, 85, 0.6)',
-              border: audioMuted ? '1px solid #ef4444' : '1px solid rgba(100, 116, 139, 0.6)',
+              background: audioMuted ? 'rgb(var(--hv-error-tint-strong))' : 'rgb(var(--hv-line) / 0.6)',
+              border: audioMuted ? '1px solid rgb(var(--hv-error))' : '1px solid rgb(var(--hv-text-3) / 0.6)',
               borderRadius: 4,
               cursor: 'pointer',
               padding: '3px 8px',
-              color: audioMuted ? '#fca5a5' : (buzzing ? '#4ade80' : '#67e8f9'),
+              color: audioMuted ? 'rgb(var(--hv-error-text))' : (buzzing ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-info-text))'),
               animation: (buzzing && !audioMuted) ? `${buzzAnim} 200ms ease-in-out infinite` : 'none',
               fontSize: 11,
               lineHeight: 1,
@@ -837,16 +837,16 @@ export default function InteractiveReader({
       {/* ====== ACS caption ====== */}
       <div style={{
         fontSize: 11,
-        color: '#94a3b8',
+        color: 'rgb(var(--hv-text-2))',
         textAlign: 'center',
         minHeight: '1.5em',
       }}>
-        <span style={{ color: '#64748b' }}>ACS:</span> {lastCommand}
+        <span style={{ color: 'rgb(var(--hv-text-3))' }}>ACS:</span> {lastCommand}
       </div>
 
       {/* ====== Recent activity ====== */}
       {recent.length > 0 && (
-        <div style={{ width: '100%', background: '#000000', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, boxShadow: 'inset 0 0 14px rgba(0,255,128,0.04), 0 2px 6px rgba(0,0,0,0.5)', padding: '10px 12px', maxHeight: 280, overflowY: 'auto' /* TERMINAL_BG_v4 */ }}>
+        <div style={{ width: '100%', background: '#000000', border: '1px solid rgb(var(--hv-contrast) / 0.15)', borderRadius: 4, boxShadow: 'inset 0 0 14px rgb(var(--hv-success-text) / 0.04), 0 2px 6px rgba(0,0,0,0.5)', padding: '10px 12px', maxHeight: 280, overflowY: 'auto' /* TERMINAL_BG_v4 */ }}>
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -854,10 +854,10 @@ export default function InteractiveReader({
             marginBottom: 8,
           }}>
             <div style={{
-              fontSize: 10, color: '#64748b',
+              fontSize: 10, color: 'rgb(var(--hv-text-3))',
               textTransform: 'uppercase', letterSpacing: '0.05em',
             }}>
-              Recent activity{copyFlash && <span style={{color:'#4ade80', marginLeft:6}}>· copied</span>}
+              Recent activity{copyFlash && <span style={{color:'rgb(var(--hv-success-text))', marginLeft:6}}>· copied</span>}
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
               <button onClick={copyRecent} title="Copy to clipboard"
@@ -873,17 +873,17 @@ export default function InteractiveReader({
           <div style={{
             fontFamily: 'ui-monospace, monospace',
             fontSize: 12,
-            color: '#e2e8f0',
+            color: 'rgb(var(--hv-text))',
             lineHeight: 1.85,
           }}>
             {recent.map((r, i) => (
               <div key={i}>
-                <span style={{ color: '#94a3b8' }}>{r.time}</span>{' '}
+                <span style={{ color: 'rgb(var(--hv-text-2))' }}>{r.time}</span>{' '}
                 <span style={{
-                  color: r.type === 'LED'  ? '#60a5fa'
-                       : r.type === 'BUZ'  ? '#fbbf24'
-                       : r.type === 'CARD' ? '#4ade80'
-                       : '#22d3ee',
+                  color: r.type === 'LED'  ? 'rgb(var(--hv-info-text))'
+                       : r.type === 'BUZ'  ? 'rgb(var(--hv-warning))'
+                       : r.type === 'CARD' ? 'rgb(var(--hv-success-text))'
+                       : 'rgb(var(--hv-info))',
                 }}>{r.type}</span>{' '}
                 {r.description}
               </div>
@@ -897,9 +897,9 @@ export default function InteractiveReader({
 
 // ===================== Helpers =====================
 const miniBtn: React.CSSProperties = {
-  background: '#0f172a',
-  color: '#94a3b8',
-  border: '1px solid #1e293b',
+  background: 'rgb(var(--hv-widget-panel))',
+  color: 'rgb(var(--hv-text-2))',
+  border: '1px solid rgb(var(--hv-widget))',
   borderRadius: 4,
   padding: '2px 6px',
   fontSize: 11,

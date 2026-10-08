@@ -7,6 +7,37 @@
  * - GPIO Queue Manager prevents IOplus board lockups from command flooding
  */
 
+// ---- One backend at a time ----
+// Two backends both drive the IOplus HAT, OSDP serial ports and GPIO, and that
+// has locked the HAT up. If another server.js is already running, exit here,
+// before touching any hardware. (Set AETHER_ALLOW_SECOND=1 to override.)
+(() => {
+  const fs0 = require('fs');
+  const PIDFILE = process.env.AETHER_PIDFILE || '/tmp/aether-backend.pid';
+  const alive = (pid) => {
+    try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }  // EPERM = alive, other user
+  };
+  const isBackend = (pid) => {
+    try { return /server\.js/.test(fs0.readFileSync(`/proc/${pid}/cmdline`, 'utf8')); } catch (_) { return true; }
+  };
+  try {
+    const other = parseInt(fs0.readFileSync(PIDFILE, 'utf8'), 10);
+    if (other && other !== process.pid && alive(other) && isBackend(other) && !process.env.AETHER_ALLOW_SECOND) {
+      console.error(`[Startup] Another Aether backend is already running (PID ${other}). Not starting a second one.`);
+      console.error('[Startup] Stop it first:  sudo systemctl stop aether-backend   or   sudo kill ' + other);
+      process.exit(1);
+    }
+  } catch (_) { /* no pidfile */ }
+  try {
+    fs0.writeFileSync(PIDFILE, String(process.pid));
+    try { fs0.chmodSync(PIDFILE, 0o644); } catch (_) {}
+    const clear = () => { try { if (fs0.readFileSync(PIDFILE, 'utf8').trim() === String(process.pid)) fs0.unlinkSync(PIDFILE); } catch (_) {} };
+    process.on('exit', clear);   // the existing SIGINT/SIGTERM handlers end in process.exit(), which fires this
+  } catch (e) {
+    console.warn(`[Startup] Could not write ${PIDFILE}: ${e.message}`);
+  }
+})();
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -16,6 +47,7 @@ const { promisify } = require('util');
 const EventEmitter = require('events');
 const path = require('path');
 const fs = require('fs');
+const i2cBus = require('./lib/i2cBus');
 const fsp = require('fs/promises');
 
 const execAsync = promisify(exec);
@@ -23,6 +55,9 @@ const execAsync = promisify(exec);
 // ============================================
 // IOplusController Class (Integrated)
 // ============================================
+// Set once the bulk-read cache exists; every relay write invalidates it.
+let relayWriteHook = () => {};
+
 class IOplusController {
   constructor(maxBoards = 1) {
     this.maxBoards = maxBoards;
@@ -35,21 +70,19 @@ class IOplusController {
       board = 0;
     }
     
-    const cmd = `timeout 5 ioplus ${board} ${command}`;
     let lastError;
     
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        const { stdout, stderr } = await execAsync(cmd);
-        if (stderr && stderr.trim()) {
-          throw new Error(stderr.trim());
-        }
+        // Every ioplus call goes through the shared bus gate (never overlaps
+        // another I2C transaction, and lands in the flight recorder).
+        const out = await i2cBus.run([board, ...String(command).split(/\s+/)], { source: 'gpio-queue', timeoutMs: 5000 });
         
         if (attempt > 0) {
           console.log(`[IOplus] Command succeeded on attempt ${attempt + 1}`);
         }
         
-        return stdout.trim();
+        return out;
       } catch (error) {
         lastError = error;
         
@@ -96,6 +129,7 @@ class IOplusController {
     
     try {
       await this.executeCommand(board, `relwr ${relay} ${state ? 1 : 0}`);
+      relayWriteHook();
       
       console.log(`[IOplus] Relay ${pin} (Board ${board}, Relay ${relay}) -> ${state ? 'ON' : 'OFF'}`);
       
@@ -130,6 +164,22 @@ class IOplusController {
       console.error(`[IOplus] Failed to read relay:`, error.message);
       throw error;
     }
+  }
+
+  // All 8 opto inputs / relays in ONE I2C call. `ioplus 0 optrd` (no channel)
+  // prints a bitmask; bit N = channel N+1.
+  async readAllOpto() {
+    const out = await this.executeCommand(0, 'optrd');
+    const v = parseInt(out, 10);
+    if (!Number.isInteger(v) || v < 0 || v > 255) throw new Error(`Unexpected bulk optrd output: ${out}`);
+    return v;
+  }
+
+  async readAllRelays() {
+    const out = await this.executeCommand(0, 'relrd');
+    const v = parseInt(out, 10);
+    if (!Number.isInteger(v) || v < 0 || v > 255) throw new Error(`Unexpected bulk relrd output: ${out}`);
+    return v;
   }
 
   async readOptoInput(pin) {
@@ -334,6 +384,7 @@ class GPIOQueueManager extends EventEmitter {
     return new Promise((resolve, reject) => {
       const request = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        origin: i2cBus.currentOrigin(),
         operation,
         args,
         resolve,
@@ -384,7 +435,7 @@ class GPIOQueueManager extends EventEmitter {
           throw new Error('Board unhealthy - waiting for recovery');
         }
         
-        const result = await this.executeWithTimeout(request);
+        const result = await i2cBus.withOrigin(request.origin, () => this.executeWithTimeout(request));
         
         this.stats.successfulRequests++;
         this.stats.consecutiveFailures = 0;
@@ -648,7 +699,12 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET","POST","PUT","PATCH","DELETE"] } });
 
 app.use(cors());
+app.use(['/api/config/restore', '/api/config/app'], express.json({ limit: '25mb' }));   // backups can be large
 app.use(express.json());
+// Device firmware: send Aether updates and script files from the browser
+try { app.use('/api/device-firmware', require('./routes-device-firmware')()); } catch (e) { console.warn('[DeviceFirmware] not mounted:', e.message); }
+try { app.use('/api/analytics', require('./routes-analytics')()); } catch (e) { console.warn('[Analytics] not mounted:', e.message); }   // AETHER-ANALYTICS route
+app.use(i2cBus.middleware);   // tags I2C calls with the request that caused them
 app.use('/api/formats', formatRoutes);
 app.use('/api/credential-formats', formatRoutes); // alias — frontend calls this URL
 
@@ -668,6 +724,9 @@ const emulatorRoutes = require('./routes-emulator');
 app.use('/api/emulator', emulatorRoutes(io, (lvl, msg) => console.log(`[${lvl}] ${msg}`), () => osdpManager));
 app.use('/api/doors', require('./routes-doors')());
 app.use('/api/switch', require('./routes-switch')(io, () => switchManager, logSystemEvent));
+app.use('/api/vms', require('./routes-vms')(io));   // Stream View / RTSP support
+app.use('/api/i2c', require('./routes-i2c')(() => gpioQueue));   // I2C flight recorder + Pi health
+app.use('/api', require('./routes-system')({ i2cBus }));   // Config page: settings on the Pi, backup, system info, network
 
 // ============================================
 // Initialize IOplus + Queue Manager
@@ -719,6 +778,7 @@ gpioQueue.startWatchdog(15000, 30000);
 // Event listeners
 gpioQueue.on('board-lockup', async (data) => {
   console.error(`[Server] BOARD LOCKUP DETECTED - ${data.consecutiveFailures} consecutive failures`);
+  i2cBus.writeDump('board-lockup').catch(() => {});
   console.error('[Server] Attempting automatic recovery...');
 });
 
@@ -788,6 +848,13 @@ const gpioEvents = new GPIOEventEmitter();
 let automationManager = null;
 let wiegandManager = null;
 let osdpManager = null;
+// AETHER-ANALYTICS journal: records what Aether drives/sees for Product Test (backend/analytics/journal.js)
+try {
+  require('./analytics/journal').attach({
+    gpioQueue, gpioEvents, getWiegand: () => wiegandManager, getOsdp: () => osdpManager,
+    emulator: require('./osdp/OSDPDeviceEmulator'),
+  });
+} catch (e) { console.warn('[Analytics] journal not attached:', e.message); }
 let nfcManager = null;
 let nfcBridge = null;
 let switchManager = null;
@@ -1161,6 +1228,10 @@ app.get('/api/gpio/read/:pin', async (req, res) => {
   }
   
   try {
+    if (pin >= 0 && pin < 8 && bulk.enabled.relay) {
+      const v = await readChannel('relay', pin);
+      return res.json({ success: true, pin, board: 0, state: v, bulk: true });
+    }
     const result = await gpioQueue.enqueue('getRelay', pin);
     
     res.json({
@@ -1186,6 +1257,10 @@ app.get('/api/gpio/input/:pin', async (req, res) => {
   }
   
   try {
+    if (pin >= 0 && pin < 8 && bulk.enabled.opto) {
+      const v = await readChannel('opto', pin);
+      return res.json({ success: true, pin, board: 0, state: v, bulk: true });
+    }
     const result = await gpioQueue.enqueue('readOptoInput', pin);
     
     res.json({
@@ -1346,14 +1421,64 @@ app.get('/api/gpio/states', (_req, res) => {
 
 // Alias: /api/gpio/opto/:channel — read opto input by channel index (0-7)
 // Used by scenario testing to read panel outputs (lock relay, alarm, etc.)
+// ---- Bulk reads ----
+// The HAT hangs if it's hit with calls too quickly, so reads are batched: one
+// `optrd` returns all 8 inputs, one `relrd` all 8 relays. Results are shared by
+// every caller for a short time. The bit order is verified against a single-
+// channel read the first time a bit is set; if they ever disagree, bulk mode is
+// switched off and per-channel reads are used (set I2C_BULK=0 to force that).
+const bulk = {
+  enabled: { opto: process.env.I2C_BULK !== '0', relay: process.env.I2C_BULK !== '0' },
+  verified: { opto: false, relay: false },
+  cache: { opto: null, relay: null },          // { at, bits }
+  inflight: { opto: null, relay: null },
+};
+bulk.relayGen = 0;
+relayWriteHook = () => { bulk.relayGen++; bulk.cache.relay = null; _gpioStatusCache = null; };
+const BULK_TTL_MS = 400;
+async function readBits(kind) {
+  const c = bulk.cache[kind];
+  if (c && Date.now() - c.at < BULK_TTL_MS) return c.bits;
+  if (bulk.inflight[kind]) return bulk.inflight[kind];
+  const gen = bulk.relayGen;
+  bulk.inflight[kind] = (async () => {
+    const bits = await gpioQueue.enqueue(kind === 'opto' ? 'readAllOpto' : 'readAllRelays');
+    if (!bulk.verified[kind] && bits) {
+      const ch = Math.log2(bits & -bits);                       // lowest set bit
+      const single = await gpioQueue.enqueue(kind === 'opto' ? 'readOptoInput' : 'getRelay', ch);
+      if (single.state) { bulk.verified[kind] = true; console.log(`[I2C] Bulk ${kind} read verified (bit ${ch} = channel ${ch + 1})`); }
+      else { bulk.enabled[kind] = false; console.warn(`[I2C] Bulk ${kind} bit order didn't match a single read; using per-channel reads`); }
+    }
+    // A relay write that landed while this read was running makes it stale: don't cache it.
+    if (kind !== 'relay' || gen === bulk.relayGen) bulk.cache[kind] = { at: Date.now(), bits };
+    return bits;
+  })().finally(() => { bulk.inflight[kind] = null; });
+  return bulk.inflight[kind];
+}
+async function readChannel(kind, ch) {
+  if (bulk.enabled[kind]) {
+    try {
+      const bits = await readBits(kind);
+      if (bulk.enabled[kind]) return (bits >> ch) & 1;
+    } catch (e) {
+      if (/Unexpected bulk/.test(e.message)) { bulk.enabled[kind] = false; console.warn('[I2C]', e.message, '- using per-channel reads'); }
+      else throw e;
+    }
+  }
+  const r = await gpioQueue.enqueue(kind === 'opto' ? 'readOptoInput' : 'getRelay', ch);
+  return r.state ? 1 : 0;
+}
+
+app.get('/api/i2c/bulk', (req, res) => res.json({ enabled: bulk.enabled, verified: bulk.verified, cache: bulk.cache }));
+
 app.get('/api/gpio/opto/:channel', async (req, res) => {
   const channel = parseInt(req.params.channel);
   if (isNaN(channel) || channel < 0 || channel > 7) {
     return res.status(400).json({ error: 'Channel must be 0-7' });
   }
   try {
-    const result = await gpioQueue.enqueue('readOptoInput', channel);
-    res.json({ success: true, channel, state: result.state ? 1 : 0, value: result.state ? 1 : 0 });
+    const v = await readChannel('opto', channel);
+    res.json({ success: true, channel, state: v, value: v });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1361,8 +1486,29 @@ app.get('/api/gpio/opto/:channel', async (req, res) => {
 
 // /api/gpio/status — full board snapshot: all relays + all opto inputs
 // Used by scenario testing and dashboard live monitoring
+// A full scan is 16 I2C reads (~2.5 s through the queue). Share one scan
+// between concurrent callers and reuse it for 3 s.
+let _gpioStatusCache = null, _gpioStatusInFlight = null;
 app.get('/api/gpio/status', async (req, res) => {
   try {
+    if (_gpioStatusCache && Date.now() - _gpioStatusCache.at < 3000) return res.json(_gpioStatusCache.body);
+    if (_gpioStatusInFlight) return res.json(await _gpioStatusInFlight);
+    const statusGen = bulk.relayGen;
+    _gpioStatusInFlight = (async () => {
+    if (bulk.enabled.relay && bulk.enabled.opto) {
+      try {
+        const rb = await readBits('relay'); const ob = await readBits('opto');
+        if (bulk.enabled.relay && bulk.enabled.opto) {
+          const body = {
+            success: true, bulk: true, timestamp: Date.now(),
+            relays: [0,1,2,3,4,5,6,7].map(ch => ({ channel: ch, state: (rb >> ch) & 1, error: null })),
+            inputs: [0,1,2,3,4,5,6,7].map(ch => ({ channel: ch, state: (ob >> ch) & 1, error: null })),
+          };
+          if (statusGen === bulk.relayGen) _gpioStatusCache = { at: Date.now(), body };
+          return body;
+        }
+      } catch (e) { if (!/Unexpected bulk/.test(e.message)) throw e; }
+    }
     const [relayResults, optoResults] = await Promise.all([
       Promise.all([0,1,2,3,4,5,6,7].map(ch =>
         gpioQueue.enqueue('getRelay', ch).catch(e => ({ pin: ch, state: false, error: e.message }))
@@ -1379,7 +1525,11 @@ app.get('/api/gpio/status', async (req, res) => {
       channel: i, state: r.state ? 1 : 0, error: r.error || null
     }));
 
-    res.json({ success: true, relays, inputs, timestamp: Date.now() });
+    const body = { success: true, relays, inputs, timestamp: Date.now() };
+    if (statusGen === bulk.relayGen) _gpioStatusCache = { at: Date.now(), body };
+    return body;
+    })().finally(() => { _gpioStatusInFlight = null; });
+    res.json(await _gpioStatusInFlight);
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -1428,6 +1578,8 @@ app.post('/api/gpio/reset-i2c', async (req, res) => {
 app.get(['/api/health','/health'], (_req, res) => {
   res.json({ 
     success: true, 
+    nodeName: process.env.AETHER_NODE_NAME || require('os').hostname(),
+    uptime: Math.round(process.uptime()), 
     driver: 'libgpiod-tools', 
     chip: CHIP, 
     activePins: procs.size,
@@ -1670,24 +1822,57 @@ const WIEGAND_INLINE_CONFIG = {
   reserved: [2, 3, 4, 7, 8, 9, 10, 11, 14, 15]
 };
 
+// Doors/readers come from WiegandManager (wiegand/wiegand-config.json, 4 readers);
+// WIEGAND_INLINE_CONFIG above is only a fallback when the manager isn't up.
+function wiegandDoors() {
+  const rs = (wiegandManager && wiegandManager.getReaders && wiegandManager.getReaders()) || [];
+  if (rs.length) return rs.map(r => ({ door: r.door, name: r.name, d0: (r.txPins || r.pins || {}).d0, d1: (r.txPins || r.pins || {}).d1, readerId: r.id }));
+  return WIEGAND_INLINE_CONFIG.doors;
+}
 function getDoorConfig(doorNumber) {
   const n = Number(doorNumber);
-  return WIEGAND_INLINE_CONFIG.doors.find(d => d.door === n) || null;
+  return wiegandDoors().find(d => Number(d.door) === n) || null;
 }
 
 function resolveWiegandTarget({ door, readerId }) {
   if (door != null) {
     const dc = getDoorConfig(door);
-    if (!dc) throw new Error('Invalid door (must be 1 or 2)');
+    if (!dc) throw new Error(`No Wiegand reader for door ${door} (have ${wiegandDoors().map(d => d.door).join(', ')})`);
     return { readerId: dc.readerId, doorCfg: dc };
   }
   if (!readerId) throw new Error('readerId or door required');
-  const doorCfg = WIEGAND_INLINE_CONFIG.doors.find(d => d.readerId === readerId) || null;
+  const doorCfg = wiegandDoors().find(d => d.readerId === readerId) || null;
   return { readerId, doorCfg };
 }
 
+// Credential encoder shared with OSDP (lib/credentialMap via formatService)
+const formatService = require('./lib/formatService');
+function resolveFormatId(format) {
+  if (format == null || format === '') return 'w26';
+  if (formatService.getFormatById(String(format))) return String(format);
+  const n = Number(String(format).replace(/^W/i, ''));
+  const byBits = Number.isFinite(n) ? formatService.getFormatByBits(n) : null;
+  if (byBits) return byBits.id;
+  throw new Error(`Unknown credential format "${format}"`);
+}
+
+// Send a bit string with the native transmitter's raw mode
+function wiegandRaw(d0, d1, bits, pulseUs = 50) {
+  return new Promise((resolve) => {
+    const binPath = RESOLVED_WIEGAND_TX_PATH;
+    if (!fs.existsSync(binPath)) return resolve({ code: -1, stdout: '', stderr: `Wiegand transmitter not found at ${binPath}` });
+    const p = spawn(binPath, ['--raw', String(d0), String(d1), bits, String(pulseUs)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    p.stdout.on('data', d => { stdout += d.toString(); });
+    p.stderr.on('data', d => { stderr += d.toString(); });
+    p.on('error', err => resolve({ code: -1, stdout, stderr: err.message }));
+    p.on('exit', code => resolve({ code, stdout, stderr }));
+  });
+}
+const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+
 app.get('/api/wiegand/config', (_req, res) => {
-  res.json(WIEGAND_INLINE_CONFIG);
+  res.json({ ...WIEGAND_INLINE_CONFIG, doors: wiegandDoors() });
 });
 
 app.get('/api/wiegand/status', (req, res) => {
@@ -1739,20 +1924,15 @@ app.post('/api/wiegand/send', async (req, res) => {
     if (facility === undefined || card === undefined) {
       return res.status(400).json({ success: false, error: 'facility and card required' });
     }
-    const fmt = format != null ? Number(String(format).replace(/^W/i, '')) : null;
+    const formatId = resolveFormatId(format);
     const fac = Number(facility);
-    const crd = Number(card);
-    if (!Number.isFinite(fac) || !Number.isFinite(crd)) {
-      return res.status(400).json({ success: false, error: 'facility and card must be numbers' });
-    }
+    const crd = String(card);
+    const enc = formatService.encodeCredential(formatId, fac, crd, Number(req.body.issueLevel || 0));
 
     const label = doorCfg ? `${doorCfg.name}` : `Reader ${targetReaderId}`;
-    console.log(`[Wiegand] Sending credential -> ${label}`);
-    if (doorCfg) console.log(`  GPIO: D0=${doorCfg.d0}, D1=${doorCfg.d1}`);
-    console.log(`  Format: ${fmt ? `W${fmt}` : '(auto/default)'}`);
-    console.log(`  Facility: ${fac}  Card: ${crd}`);
-
-    const result = await wiegandManager.sendCard(targetReaderId, fac, crd, fmt);
+    console.log(`[Wiegand] Sending ${formatId} FC ${fac} card ${crd} -> ${label}: ${enc.binary}`);
+    const raw = await wiegandManager.sendRaw(targetReaderId, enc.binary);
+    const result = { ...raw, formatId, format: enc.bits, facility: fac, card: crd, binary: enc.binary };
 
     try {
       logAccessEvent && logAccessEvent(`Door ${doorCfg ? doorCfg.door : targetReaderId} unlocked by Wiegand card ${crd}`, {
@@ -1810,112 +1990,88 @@ app.post('/api/wiegand/test/:readerId', async (req, res) => {
 // ==================================================
 // Native Wiegand transmitter endpoints
 // ==================================================
-app.post('/api/wiegand/transmit', (req, res) => {
-  const { d0Pin, d1Pin, facility, card, bits = 26, pulseWidth = 50 } = req.body;
-
-  if (d0Pin === undefined || d1Pin === undefined || facility === undefined || card === undefined) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required parameters: d0Pin, d1Pin, facility, card'
-    });
+app.post('/api/wiegand/transmit', async (req, res) => {
+  const { d0Pin, d1Pin, facility = 0, card, bits, formatId, issueLevel = 0, pulseWidth = 50 } = req.body || {};
+  if (d0Pin === undefined || d1Pin === undefined || card === undefined) {
+    return res.status(400).json({ success: false, error: 'Missing required parameters: d0Pin, d1Pin, card' });
   }
-
   const d0 = Number(d0Pin), d1 = Number(d1Pin);
   if (!Number.isInteger(d0) || !Number.isInteger(d1) || d0 < 0 || d0 > 27 || d1 < 0 || d1 > 27 || d0 === d1) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid GPIO pins. Must be integers 0-27 and different from each other'
-    });
+    return res.status(400).json({ success: false, error: 'Invalid GPIO pins. Must be integers 0-27 and different from each other' });
   }
-
-  const bitsNum = Number(bits);
-  const supportedFormats = [26, 30, 32, 34, 35, 37, 38, 40, 46, 48, 56, 64];
-  if (!supportedFormats.includes(bitsNum)) {
-    return res.status(400).json({
-      success: false,
-      error: `Invalid Wiegand format. Supported: ${supportedFormats.join(', ')} bits`
-    });
-  }
-
-  if (bitsNum === 26) {
-    if (facility < 0 || facility > 255) {
-      return res.status(400).json({ success: false, error: '26-bit format: facility must be 0-255' });
+  let enc, fid;
+  try {
+    const nb = Number(bits);
+    if (!formatId && typeof req.body.rawBits === 'string' && /^[01]{1,256}$/.test(req.body.rawBits)) {
+      // raw frame (older keypad pages)
+      fid = 'raw'; enc = { formatName: 'Raw bits', status: 'raw', bits: req.body.rawBits.length, binary: req.body.rawBits, hex: '' };
+    } else if (!formatId && (nb === 4 || nb === 8)) {
+      // one keypad key (older pages send keys this way). Key values 0-11 are
+      // encoded (4-bit value, or HID 8-bit with the inverse in the high nibble);
+      // a larger 8-bit value is sent exactly as given (e.g. ASCII keypads).
+      const k = Number(card);
+      if (!Number.isInteger(k) || k < 0 || k > (nb === 4 ? 15 : 255)) throw new Error(`Key value must be 0-${nb === 4 ? 15 : 255}`);
+      const binary = nb === 4 ? k.toString(2).padStart(4, '0')
+        : (k <= 11 ? ((((~k) & 0xF) << 4) | k) : k).toString(2).padStart(8, '0');
+      fid = `key${nb}`; enc = { formatName: `${nb}-bit key`, status: 'key', bits: nb, binary, hex: parseInt(binary, 2).toString(16).toUpperCase() };
+    } else {
+      const named = formatId || (req.body.format && formatService.getFormatById(String(req.body.format)) ? String(req.body.format) : null);
+      fid = resolveFormatId(named || bits);
+      enc = formatService.encodeCredential(fid, Number(facility), String(card), Number(issueLevel) || 0);
     }
-    if (card < 0 || card > 65535) {
-      return res.status(400).json({ success: false, error: '26-bit format: card must be 0-65535' });
-    }
+  } catch (e) {
+    return res.status(400).json({ success: false, error: e.message });
   }
-
-  const binPath = RESOLVED_WIEGAND_TX_PATH;
-  if (!fs.existsSync(binPath)) {
-    return res.status(500).json({
-      success: false,
-      error: `Wiegand transmitter not found at ${binPath}. Please compile it first.`
-    });
-  }
-
-  const args = [String(d0), String(d1), String(facility), String(card), String(bitsNum), String(pulseWidth)];
-  console.log(`[WIEGAND-NATIVE] Command: ${binPath} ${args.join(' ')}`);
   const startTime = Date.now();
-
-  const p = spawn(binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = '', stderr = '';
-  p.stdout.on('data', d => {
-    const output = d.toString();
-    stdout += output;
-    const lines = output.split('\n');
-    lines.forEach(line => {
-      if (line.trim()) {
-        console.log(`[WIEGAND-NATIVE] ${line.trim()}`);
-      }
-    });
-    const binaryMatch = output.match(/Binary: ([01]+) \((\d+) bits\)/);
-    if (binaryMatch) {
-      const binary = binaryMatch[1];
-      const bits = binaryMatch[2];
-      console.log(`[WIEGAND-BINARY] ${bits}-bit: ${binary}`);
-    }
-  });
-  p.stderr.on('data', d => { stderr += d.toString(); });
-
-  p.on('error', (err) => {
-    const duration = Date.now() - startTime;
-    const result = {
-      timestamp: new Date().toISOString(), facility, card, bits: bitsNum, d0Pin: d0, d1Pin: d1, pulseWidth, duration,
-      success: false, output: stdout, error: err.message
-    };
-    wiegandHistory.unshift(result);
-    if (wiegandHistory.length > MAX_HISTORY) wiegandHistory.pop();
-    console.error('[WIEGAND-NATIVE] Spawn error:', err.message);
-    return res.status(500).json({ success: false, error: err.message, result });
-  });
-
-  p.on('exit', (code) => {
-    const duration = Date.now() - startTime;
-    const success = code === 0;
-    const result = {
-      timestamp: new Date().toISOString(), facility, card, bits: bitsNum, d0Pin: d0, d1Pin: d1, pulseWidth, duration,
-      success, output: stdout, error: success ? null : (stderr || `exit ${code}`)
-    };
-    wiegandHistory.unshift(result);
-    if (wiegandHistory.length > MAX_HISTORY) wiegandHistory.pop();
-
-    if (!success) {
-      console.error('[WIEGAND-NATIVE] Transmission failed:', result.error);
-      return res.status(500).json({ success: false, error: result.error, result });
-    }
-
-    console.log(`[WIEGAND-NATIVE] Transmission successful (${duration}ms)`);
-
-    try {
-      logAccessEvent && logAccessEvent(`Native Wiegand TX - d0:${d0} d1:${d1} card:${card} bits:${bitsNum}`, {
-        d0, d1, card, facility, bits: bitsNum, method: 'native'
-      });
-    } catch (e) {}
-
-    res.json({ success: true, message: 'Wiegand transmission completed', result });
-  });
+  console.log(`[WIEGAND-NATIVE] ${fid} FC ${facility} card ${card}${issueLevel ? ` IL ${issueLevel}` : ''} -> ${enc.bits} bits ${enc.binary} on D0=${d0} D1=${d1}`);
+  const r = await wiegandRaw(d0, d1, enc.binary, pulseWidth);
+  const success = r.code === 0;
+  const result = {
+    timestamp: new Date().toISOString(), formatId: fid, formatName: enc.formatName, status: enc.status,
+    facility: Number(facility), card: String(card), issueLevel: Number(issueLevel) || 0,
+    bits: enc.bits, binary: enc.binary, hex: enc.hex, d0Pin: d0, d1Pin: d1, pulseWidth,
+    duration: Date.now() - startTime, success, output: r.stdout,
+    error: success ? null : (/must be 1-(\d+)/.test(r.stderr) ? `This ${enc.bits}-bit frame is longer than the transmitter supports (${r.stderr.trim()}). Re-run the update to rebuild it.` : (r.stderr || `exit ${r.code}`)),
+  };
+  wiegandHistory.unshift(result);
+  if (wiegandHistory.length > MAX_HISTORY) wiegandHistory.pop();
+  if (!success) {
+    console.error('[WIEGAND-NATIVE] Transmission failed:', result.error);
+    return res.status(500).json({ success: false, error: result.error, result });
+  }
+  try {
+    logAccessEvent && logAccessEvent(`Native Wiegand TX - d0:${d0} d1:${d1} ${fid} card:${card}`, { d0, d1, card: String(card), facility, bits: enc.bits, formatId: fid, method: 'native' });
+  } catch (e) {}
+  io.emit('vms:event', { at: Date.now(), kind: 'card', d0Pin: d0, text: `Wiegand card FC ${facility} #${card}`, where: `D0 GPIO ${d0}` });
+  res.json({ success: true, message: 'Wiegand transmission completed', result });
 });
+
+// PIN over Wiegand. Digits are collected by the page and sent together.
+//   mode 'combined'  one frame, 8 bits per key (HID 8-bit codes: inverse in the high nibble)
+//   mode 'per-key-8' one 8-bit frame per key, back to back
+//   mode 'per-key-4' one 4-bit frame per key, back to back
+app.post('/api/wiegand/pin', async (req, res) => {
+  const { d0Pin, d1Pin, pin = '', mode = 'combined', terminator = '#', gapMs = 25, pulseWidth = 50 } = req.body || {};
+  const d0 = Number(d0Pin), d1 = Number(d1Pin);
+  if (!Number.isInteger(d0) || !Number.isInteger(d1) || d0 < 0 || d0 > 27 || d1 < 0 || d1 > 27 || d0 === d1) return res.status(400).json({ success: false, error: 'Invalid GPIO pins' });
+  if (String(pin).length > 16) return res.status(400).json({ success: false, error: 'PIN can be at most 16 keys' });
+  let frames;
+  try { frames = require('./lib/credentialMap').pinFrames(String(pin), { mode, terminator: terminator || '' }); }
+  catch (e) { return res.status(400).json({ success: false, error: e.message }); }
+  if (!frames.length || !String(pin).length) return res.status(400).json({ success: false, error: 'Enter a PIN first' });
+  const startTime = Date.now();
+  console.log(`[WIEGAND-PIN] ${mode} on D0=${d0} D1=${d1}: ${frames.join(' ')}`);
+  for (let i = 0; i < frames.length; i++) {
+    const r = await wiegandRaw(d0, d1, frames[i], pulseWidth);
+    if (r.code !== 0) return res.status(500).json({ success: false, error: r.stderr || `exit ${r.code}`, sent: i, frames });
+    if (i < frames.length - 1) await sleepMs(Math.max(5, Math.min(500, Number(gapMs) || 25)));
+  }
+  const result = { timestamp: new Date().toISOString(), kind: 'pin', mode, pinLength: String(pin).length, frames, bits: frames.reduce((s, f) => s + f.length, 0), d0Pin: d0, d1Pin: d1, duration: Date.now() - startTime, success: true };
+  wiegandHistory.unshift(result);
+  if (wiegandHistory.length > MAX_HISTORY) wiegandHistory.pop();
+  res.json({ success: true, result });
+});
+
 
 app.get('/api/wiegand/history', (req, res) => {
   const limit = Math.min(100, Number(req.query.limit) || 50);
@@ -1972,7 +2128,7 @@ app.post('/api/osdp/card-read', async (req, res) => {
     return res.status(503).json({ success: false, error: 'OSDP system not initialized' });
   }
   try {
-    const { readerId, facility, card, format } = req.body;
+    const { readerId, facility, card, format, issueLevel, issue } = req.body;
     if (!readerId || facility === undefined || card === undefined) {
       return res.status(400).json({ 
         success: false, 
@@ -1980,7 +2136,7 @@ app.post('/api/osdp/card-read', async (req, res) => {
       });
     }
     
-    const cardData = { facility: Number(facility), card: Number(card) };
+    const cardData = { facility: Number(facility), card: String(card), issueLevel: Number(issueLevel ?? issue ?? 0) || 0 };
     const cardFormat = format || 'wiegand26';
     
     const result = await osdpManager.sendCardRead(readerId, cardData, cardFormat);
@@ -2432,6 +2588,133 @@ app.post('/api/osdp/sniffer/stop', async (_req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ==================================================
+// OSDP TRACE — one decoder + analyzer for the live trace, saved captures,
+// exports, health, timeline and expectation rules (osdp/trace/*).
+// ==================================================
+const { OsdpTraceHub } = require('./osdp/trace/osdpTraceHub');
+const osdpTrace = new OsdpTraceHub({
+  // Name the card on a RAW read using the shared credential encoder/decoder.
+  identifyCard: (binary) => {
+    try {
+      const m = formatService.getFormatByBits(binary.length);
+      if (!m) return null;
+      const { decodeBits } = require('./lib/credentialMap');
+      return decodeBits ? decodeBits(m.map, binary) : null;
+    } catch { return null; }
+  },
+});
+// Feed the emulator's own bus traffic in.
+if (osdpManager && typeof osdpManager.on === 'function') {
+  osdpManager.on('wire-raw', ({ direction, portPath, bytes, ts }) => {
+    try { osdpTrace.ingestRaw(direction, portPath, bytes, ts, 'emulator'); } catch (e) { /* never break I/O */ }
+  });
+}
+// Feed passive sniffer traffic in (observed frames are treated as PD→CP unless a poll).
+osdpSniffer.on('raw', ({ bytes, ts }) => { try { osdpTrace.ingestRaw('rx', osdpSniffer.portPath || 'sniffer', bytes, ts || Date.now(), 'sniffer'); } catch (e) {} });
+// Relay to the browser.
+osdpTrace.on('frame', f => io.emit('osdp-trace-frame', f));
+osdpTrace.on('events', evs => io.emit('osdp-trace-events', evs));
+osdpTrace.on('rules', fired => io.emit('osdp-trace-rules', fired));
+osdpTrace.on('cleared', () => io.emit('osdp-trace-cleared', {}));
+
+app.get('/api/osdp/trace/snapshot', (req, res) => res.json({ success: true, ...osdpTrace.snapshot(Number(req.query.since) || 0) }));
+app.post('/api/osdp/trace/clear', (_req, res) => { osdpTrace.clear(); res.json({ success: true }); });
+app.get('/api/osdp/trace/export', (req, res) => {
+  const kind = ['csv', 'txt', 'json'].includes(req.query.format) ? req.query.format : 'json';
+  const body = osdpTrace.exportText(kind);
+  res.setHeader('Content-Type', kind === 'json' ? 'application/json' : 'text/plain');
+  res.setHeader('Content-Disposition', `attachment; filename="osdp-trace.${kind}"`);
+  res.send(body);
+});
+app.get('/api/osdp/trace/captures', (_req, res) => res.json({ success: true, captures: osdpTrace.listCaptures() }));
+app.post('/api/osdp/trace/captures', (req, res) => { try { res.json({ success: true, ...osdpTrace.saveCapture(req.body && req.body.name) }); } catch (e) { res.status(400).json({ success: false, error: e.message }); } });
+app.post('/api/osdp/trace/captures/:name/load', (req, res) => { try { res.json({ success: true, ...osdpTrace.loadCapture(req.params.name) }); } catch (e) { res.status(e.status || 400).json({ success: false, error: e.message }); } });
+app.delete('/api/osdp/trace/captures/:name', (req, res) => res.json({ success: osdpTrace.deleteCapture(req.params.name) }));
+app.get('/api/osdp/trace/rules', (_req, res) => res.json({ success: true, rules: osdpTrace.getRules() }));
+
+// ==================================================
+// OSDP READER ENROLLMENT — the Pi acts as a controller on a USB-RS485 adapter;
+// present a card to a real reader and capture/enroll its bit structure.
+// ==================================================
+const { OSDPEnroller } = require('./osdp/OSDPEnroller');
+const { analyzeReads, analyzeGuided } = require('./osdp/trace/enrollAnalyze');
+const { releaseEmulatorPort, reopenEmulatorPort } = require('./routes-osdp-firmware');
+const enroller = new OSDPEnroller({
+  identifyCard: (binary) => {
+    try { const m = formatService.getFormatByBits(binary.length); const { decodeBits } = require('./lib/credentialMap'); return m && decodeBits ? decodeBits(m.map, binary) : null; } catch { return null; }
+  },
+  // Borrow the serial port from the live OSDP emulator/controller before using
+  // it, and hand it back afterwards — otherwise the port is already locked by
+  // this same backend process and can't be opened for enrollment.
+  releasePort: (portPath) => releaseEmulatorPort(osdpManager, portPath),
+  reopenPort: (portPath, baud) => reopenEmulatorPort(osdpManager, portPath, baud),
+});
+enroller.on('status', s => io.emit('osdp-enroll-status', s));
+enroller.on('reader', r => io.emit('osdp-enroll-reader', r));
+enroller.on('card', c => io.emit('osdp-enroll-card', c));
+enroller.on('reads', r => io.emit('osdp-enroll-reads', r));
+enroller.on('note', n => io.emit('osdp-enroll-note', n));
+enroller.on('error', e => io.emit('osdp-enroll-error', e));
+
+app.get('/api/osdp/enroll/ports', async (_req, res) => { try { res.json({ success: true, ports: await enroller.listPorts() }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+app.get('/api/osdp/enroll/status', (_req, res) => res.json({ success: true, ...enroller.getStatus() }));
+app.post('/api/osdp/enroll/scan', async (req, res) => { try { const { port, baud, useRTS } = req.body || {}; if (!port) return res.status(400).json({ success: false, error: 'port required' }); res.json({ success: true, ...await enroller.scan({ port, baud, useRTS }) }); } catch (e) { res.status(400).json({ success: false, error: e.message }); } });
+// Deep diagnostic sweep (raw bytes / frames / decode per baud × RTS). port optional → every detected port.
+app.post('/api/osdp/enroll/diagnose', async (req, res) => { try { const { port, baud } = req.body || {}; res.json({ success: true, ...await enroller.diagnose({ port, baud }) }); } catch (e) { res.status(400).json({ success: false, error: e.message }); } });
+app.post('/api/osdp/enroll/start', async (req, res) => { try { const { port, baud, address, useRTS, pollMs } = req.body || {}; if (!port) return res.status(400).json({ success: false, error: 'port required' }); res.json(await enroller.start({ port, baud, address, useRTS, pollMs })); } catch (e) { res.status(400).json({ success: false, error: e.message }); } });
+app.post('/api/osdp/enroll/stop', async (_req, res) => { try { res.json(await enroller.stop()); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+app.post('/api/osdp/enroll/clear', (_req, res) => { enroller.clearReads(); res.json({ success: true }); });
+// Analyze the captured reads (optionally with the number printed on the first card).
+app.post('/api/osdp/enroll/analyze', (req, res) => {
+  try {
+    const binaries = (enroller.reads || []).map(r => r.binary);
+    if (!binaries.length) return res.status(400).json({ success: false, error: 'No cards captured yet' });
+    const { decodeBits } = require('./lib/credentialMap');
+    const expected = (req.body && (req.body.facility != null || req.body.card != null)) ? { facility: req.body.facility, card: req.body.card } : null;
+    res.json({ success: true, ...analyzeReads(binaries, formatService.getAllFormats(), decodeBits, expected) });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+// Hold a port free for an external tool (e.g. the osdp-probe CLI): release it
+// from the emulator and keep it released until reclaim. Lets the standalone
+// sustained-polling probe own the bus without fighting the emulator's lock.
+const _heldPorts = new Map();   // portPath -> baud to restore on reclaim
+app.post('/api/osdp/enroll/release', async (req, res) => {
+  try {
+    const { port } = req.body || {}; if (!port) return res.status(400).json({ success: false, error: 'port required' });
+    const info = await releaseEmulatorPort(osdpManager, port);
+    if (info.wasOwned) _heldPorts.set(port, info.baudRate || 9600);
+    res.json({ success: true, port, wasOwned: !!info.wasOwned });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+app.post('/api/osdp/enroll/reclaim', async (req, res) => {
+  try {
+    const { port } = req.body || {}; if (!port) return res.status(400).json({ success: false, error: 'port required' });
+    // Only give a port back to the emulator if WE released it from the emulator;
+    // never attach a port the emulator never owned.
+    if (!_heldPorts.has(port)) return res.json({ success: true, port, wasHeld: false });
+    const baud = _heldPorts.get(port); _heldPorts.delete(port);
+    await reopenEmulatorPort(osdpManager, port, baud);
+    res.json({ success: true, port, wasHeld: true });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+// Guided enrollment: the wizard sends grouped reads with the number(s) printed
+// on each credential. With several known values the field positions are exact.
+app.post('/api/osdp/enroll/analyze-guided', (req, res) => {
+  try {
+    const groups = (req.body && req.body.groups) || [];
+    if (!Array.isArray(groups) || !groups.length) return res.status(400).json({ success: false, error: 'No credential groups supplied' });
+    const { decodeBits } = require('./lib/credentialMap');
+    res.json({ success: true, ...analyzeGuided(groups, formatService.getAllFormats(), decodeBits) });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+// Save an enrolled format (a derived map, or a copy of a matched library format).
+app.post('/api/osdp/enroll/save', (req, res) => {
+  try { const entry = formatService.saveUserFormat(req.body || {}); res.json({ success: true, format: entry }); }
+  catch (e) { res.status(e.status || 400).json({ success: false, error: e.message }); }
+});
+app.post('/api/osdp/trace/rules', (req, res) => { try { res.json({ success: true, rules: osdpTrace.setRules(req.body && req.body.rules) }); } catch (e) { res.status(400).json({ success: false, error: e.message }); } });
+
 // ──────────────────────────────────────────────────
 // Maintain-tab interfaces — wraps sniffer port enumeration
 // so the Maintain tab sees every USB/onboard serial dongle,
@@ -2795,14 +3078,32 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// ---- Built frontend (for the VMS Stream View capture) ----
+// When frontend/dist exists (npm run build), serve it so the RTSP capture can
+// load http://127.0.0.1:3001/stream without the Vite dev server running.
+// Registered last so every /api route above takes precedence.
+const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(path.join(FRONTEND_DIST, 'index.html'))) {
+  // .html pages (index, tool pages such as the OnCafe console builder) are always
+  // revalidated, so a replaced page shows up on a normal refresh. Scripts and
+  // images keep the 1 h cache.
+  app.use(express.static(FRONTEND_DIST, {
+    index: false, maxAge: '1h',
+    setHeaders: (res, filePath) => { if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache'); },
+  }));
+  app.get(['/stream', '/standalone', '/'], (_req, res) => res.sendFile(path.join(FRONTEND_DIST, 'index.html')));
+  console.log(`[Frontend] Serving built UI from ${FRONTEND_DIST} (Stream View at /stream)`);
+}
+
 // ---- Start Server ----
 const PORT = process.env.PORT || 3001;
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[Server] Port ${PORT} in use — killing existing process and retrying...`);
-    require('child_process').exec(`fuser -k ${PORT}/tcp`, () => {
-      setTimeout(() => server.listen(PORT, '0.0.0.0'), 1500);
-    });
+    // Don't fight over the port: killing the other holder failed silently when
+    // it ran as root, leaving two backends driving the same hardware.
+    console.error(`[Server] Port ${PORT} is already in use by another process. Exiting so only one backend runs.`);
+    console.error(`[Server] See what holds it:  sudo ss -ltnp | grep :${PORT}`);
+    process.exit(1);
   } else { throw err; }
 });
 server.listen(PORT, '0.0.0.0', () => {

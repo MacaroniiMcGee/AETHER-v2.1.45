@@ -235,12 +235,12 @@ export interface ZoneDisplayInfo {
 
 // State color mapping
 export const ZONE_STATE_COLORS: Record<ZoneState, string> = {
-  NORMAL: '#10b981',   // green-500
-  ALARM: '#f59e0b',    // amber-500
-  TAMPER: '#ef4444',   // red-500
-  TROUBLE: '#a855f7',  // purple-500
-  UNKNOWN: '#6b7280',  // gray-500
-  ERROR: '#dc2626'     // red-600
+  NORMAL: 'rgb(var(--hv-success))',   // green-500
+  ALARM: 'rgb(var(--hv-warning))',    // amber-500
+  TAMPER: 'rgb(var(--hv-error))',   // red-500
+  TROUBLE: 'rgb(var(--hv-purple))',  // purple-500
+  UNKNOWN: 'rgb(var(--hv-text-3))',  // gray-500
+  ERROR: 'rgb(var(--hv-error-hover))'     // red-600
 };
 
 // State priority (higher = more urgent)

@@ -169,6 +169,15 @@ module.exports = function(io, logSystem = () => {}, osdpManagerArg = null) {
       Number(card) || 0,
       Number(issueLevel) || 0,
     );
+    // Tell the VMS Stream View a card was presented, so it can pair the swipe
+    // with the door on this board/port and mark it granted when the lock pulses.
+    if (result && result.success && io) {
+      io.emit('vms:event', {
+        at: Date.now(), kind: 'card', address: addr, port,
+        text: `Card FC ${Number(facility) || 0} #${Number(card) || 0}`,
+        where: `Board ${addr} · Reader ${port}`,
+      });
+    }
     res.json(result);
   });
 

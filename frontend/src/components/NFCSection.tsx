@@ -398,22 +398,22 @@ export const NFCSection: React.FC = () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   const styles: Record<string, React.CSSProperties> = {
-    container: { padding: '15px', fontFamily: 'Arial, sans-serif', color: '#eee' },
-    card: { border: '1px solid #3a3a5a', borderRadius: '8px', padding: '15px', backgroundColor: '#16213e', marginBottom: '15px' },
+    container: { padding: '15px', fontFamily: 'Arial, sans-serif', color: 'rgb(var(--hv-text))' },
+    card: { border: '1px solid rgb(var(--hv-line-strong))', borderRadius: '8px', padding: '15px', backgroundColor: 'rgb(var(--hv-widget))', marginBottom: '15px' },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
-    title: { margin: 0, color: '#00d9ff', fontSize: '18px' },
+    title: { margin: 0, color: 'rgb(var(--hv-info-fg))', fontSize: '18px' },
     statusBadge: { padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' },
-    select: { width: '100%', padding: '10px', border: '1px solid #4a4a6a', borderRadius: '4px', backgroundColor: '#0f3460', color: '#eee', fontSize: '14px', cursor: 'pointer', marginBottom: '10px' },
+    select: { width: '100%', padding: '10px', border: '1px solid rgb(var(--hv-line-strong))', borderRadius: '4px', backgroundColor: 'rgb(var(--hv-info-tint))', color: 'rgb(var(--hv-text))', fontSize: '14px', cursor: 'pointer', marginBottom: '10px' },
     button: { padding: '12px 20px', border: 'none', borderRadius: '6px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' },
-    cardDisplay: { padding: '20px', backgroundColor: '#0f3460', border: '2px solid #00d9ff', borderRadius: '8px', textAlign: 'center', marginBottom: '15px' },
-    uidDisplay: { fontSize: '28px', fontWeight: 'bold', fontFamily: 'monospace', color: '#00d9ff', letterSpacing: '2px' },
+    cardDisplay: { padding: '20px', backgroundColor: 'rgb(var(--hv-info-tint))', border: '2px solid rgb(var(--hv-info))', borderRadius: '8px', textAlign: 'center', marginBottom: '15px' },
+    uidDisplay: { fontSize: '28px', fontWeight: 'bold', fontFamily: 'monospace', color: 'rgb(var(--hv-info-fg))', letterSpacing: '2px' },
     conversionGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginTop: '15px' },
-    conversionItem: { padding: '10px', backgroundColor: '#2d2d44', borderRadius: '4px', textAlign: 'center' },
-    label: { fontSize: '11px', color: '#888', marginBottom: '4px' },
-    value: { fontSize: '16px', fontWeight: 'bold', color: '#4ade80', fontFamily: 'monospace' },
+    conversionItem: { padding: '10px', backgroundColor: 'rgb(var(--hv-box))', borderRadius: '4px', textAlign: 'center' },
+    label: { fontSize: '11px', color: 'rgb(var(--hv-text-3))', marginBottom: '4px' },
+    value: { fontSize: '16px', fontWeight: 'bold', color: 'rgb(var(--hv-success-text))', fontFamily: 'monospace' },
     filterRow: { display: 'flex', gap: '5px', marginBottom: '10px', flexWrap: 'wrap' },
-    filterBtn: { padding: '4px 8px', border: '1px solid #4a4a6a', borderRadius: '4px', backgroundColor: '#0f3460', color: '#aaa', fontSize: '11px', cursor: 'pointer' },
-    filterBtnActive: { backgroundColor: '#00d9ff', color: '#000', borderColor: '#00d9ff' }
+    filterBtn: { padding: '4px 8px', border: '1px solid rgb(var(--hv-line-strong))', borderRadius: '4px', backgroundColor: 'rgb(var(--hv-info-tint))', color: 'rgb(var(--hv-text-2))', fontSize: '11px', cursor: 'pointer' },
+    filterBtnActive: { backgroundColor: 'rgb(var(--hv-info))', color: '#000', borderColor: 'rgb(var(--hv-info))' }
   };
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -432,34 +432,34 @@ export const NFCSection: React.FC = () => {
                 ...styles.button, 
                 padding: '4px 10px', 
                 fontSize: '11px',
-                backgroundColor: nfcPollingEnabled ? '#4ade80' : '#4a4a6a',
-                color: nfcPollingEnabled ? '#000' : '#aaa'
+                backgroundColor: nfcPollingEnabled ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-line-strong))',
+                color: nfcPollingEnabled ? '#000' : 'rgb(var(--hv-text-2))'
               }}
             >
               {nfcPollingEnabled ? '⏸ Stop Poll' : '▶ Start Poll'}
             </button>
-            <div style={{ ...styles.statusBadge, backgroundColor: pn532Status.connected ? '#1a4d2e' : '#4d1a1a', color: pn532Status.connected ? '#4ade80' : '#ff6b6b', fontSize: '11px' }}>
+            <div style={{ ...styles.statusBadge, backgroundColor: pn532Status.connected ? 'rgb(var(--hv-success-tint-strong))' : 'rgb(var(--hv-error-tint))', color: pn532Status.connected ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-error-text))', fontSize: '11px' }}>
               PN532 {pn532Status.connected ? '●' : '○'}
             </div>
-            <div style={{ ...styles.statusBadge, backgroundColor: rc522Status.connected ? '#1a4d2e' : '#4d1a1a', color: rc522Status.connected ? '#4ade80' : '#ff6b6b', fontSize: '11px' }}>
+            <div style={{ ...styles.statusBadge, backgroundColor: rc522Status.connected ? 'rgb(var(--hv-success-tint-strong))' : 'rgb(var(--hv-error-tint))', color: rc522Status.connected ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-error-text))', fontSize: '11px' }}>
               RC522 {rc522Status.connected ? '●' : '○'}
             </div>
           </div>
         </div>
         
         {message && (
-          <div style={{ padding: '10px', borderRadius: '4px', marginBottom: '15px', backgroundColor: status === 'success' ? '#1a4d2e' : status === 'error' ? '#4d1a1a' : status === 'scanning' ? '#4d4d1a' : '#2d2d44', color: status === 'success' ? '#4ade80' : status === 'error' ? '#ff6b6b' : status === 'scanning' ? '#ffdd57' : '#00d9ff', textAlign: 'center', fontSize: '14px' }}>
+          <div style={{ padding: '10px', borderRadius: '4px', marginBottom: '15px', backgroundColor: status === 'success' ? 'rgb(var(--hv-success-tint-strong))' : status === 'error' ? 'rgb(var(--hv-error-tint))' : status === 'scanning' ? 'rgb(var(--hv-warning-tint-strong))' : 'rgb(var(--hv-box))', color: status === 'success' ? 'rgb(var(--hv-success-text))' : status === 'error' ? 'rgb(var(--hv-error-text))' : status === 'scanning' ? 'rgb(var(--hv-warning-text))' : 'rgb(var(--hv-info))', textAlign: 'center', fontSize: '14px' }}>
             {status === 'scanning' && '🔄 '}{message}
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', padding: '10px', backgroundColor: '#2d2d44', borderRadius: '6px' }}>
-          <button onClick={() => config.mode !== 'manual' && toggleAutoMode()} style={{ ...styles.button, flex: 1, backgroundColor: config.mode === 'manual' ? '#00d9ff' : '#0f3460', color: config.mode === 'manual' ? '#000' : '#888' }}>📋 Manual</button>
-          <button onClick={() => config.mode !== 'auto' && toggleAutoMode()} style={{ ...styles.button, flex: 1, backgroundColor: config.mode === 'auto' ? '#4ade80' : '#0f3460', color: config.mode === 'auto' ? '#000' : '#888' }}>🔄 Auto-Transmit</button>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', padding: '10px', backgroundColor: 'rgb(var(--hv-box))', borderRadius: '6px' }}>
+          <button onClick={() => config.mode !== 'manual' && toggleAutoMode()} style={{ ...styles.button, flex: 1, backgroundColor: config.mode === 'manual' ? 'rgb(var(--hv-info))' : 'rgb(var(--hv-info-tint))', color: config.mode === 'manual' ? '#000' : 'rgb(var(--hv-text-3))' }}>📋 Manual</button>
+          <button onClick={() => config.mode !== 'auto' && toggleAutoMode()} style={{ ...styles.button, flex: 1, backgroundColor: config.mode === 'auto' ? 'rgb(var(--hv-success-text))' : 'rgb(var(--hv-info-tint))', color: config.mode === 'auto' ? '#000' : 'rgb(var(--hv-text-3))' }}>🔄 Auto-Transmit</button>
         </div>
 
         <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>Target Reader</label>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>Target Reader</label>
           <select value={selectedReaderId} onChange={(e) => setSelectedReaderId(e.target.value)} style={styles.select}>
             {readers.length === 0 ? <option value="">No readers available</option> : (
               <>
@@ -479,7 +479,7 @@ export const NFCSection: React.FC = () => {
         </div>
 
         <div style={{ marginBottom: '10px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>Format Category</label>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>Format Category</label>
           <div style={styles.filterRow}>
             <button onClick={() => setFormatFilter('all')} style={{ ...styles.filterBtn, ...(formatFilter === 'all' ? styles.filterBtnActive : {}) }}>All ({formats.length})</button>
             {Array.from(formatCategories.keys()).map(cat => (
@@ -489,17 +489,17 @@ export const NFCSection: React.FC = () => {
         </div>
 
         <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: '#aaa' }}>Wiegand Format ({filteredFormats.length} formats)</label>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '13px', color: 'rgb(var(--hv-text-2))' }}>Wiegand Format ({filteredFormats.length} formats)</label>
           <select value={selectedFormatId} onChange={(e) => setSelectedFormatId(e.target.value)} style={styles.select}>
             {filteredFormats.map(fmt => (
               <option key={fmt.id} value={fmt.id}>{fmt.name} ({fmt.bits}-bit{fmt.facilityBits > 0 ? `, FC:${fmt.facilityBits}b` : ''}{fmt.cardBits > 0 ? `, Card:${fmt.cardBits}b` : ''})</option>
             ))}
           </select>
-          {selectedFormat && <div style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>{selectedFormat.description || `${selectedFormat.bits}-bit format`}</div>}
+          {selectedFormat && <div style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', marginTop: '5px' }}>{selectedFormat.description || `${selectedFormat.bits}-bit format`}</div>}
         </div>
 
         {config.mode === 'manual' && (
-          <button onClick={scanCard} disabled={polling} style={{ ...styles.button, width: '100%', fontSize: '16px', padding: '15px', backgroundColor: (pn532Status.connected || rc522Status.connected) ? '#00d9ff' : '#ff9f43', color: '#000', opacity: polling ? 0.5 : 1, cursor: polling ? 'not-allowed' : 'pointer' }}>
+          <button onClick={scanCard} disabled={polling} style={{ ...styles.button, width: '100%', fontSize: '16px', padding: '15px', backgroundColor: (pn532Status.connected || rc522Status.connected) ? 'rgb(var(--hv-info))' : 'rgb(var(--hv-brand-text))', color: '#000', opacity: polling ? 0.5 : 1, cursor: polling ? 'not-allowed' : 'pointer' }}>
             {polling ? '🔄 Scanning...' : (pn532Status.connected || rc522Status.connected) ? '📡 Scan Card' : '📡 Try Scan (No Reader)'}
           </button>
         )}
@@ -508,17 +508,17 @@ export const NFCSection: React.FC = () => {
       {lastCard && (
         <div style={styles.card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <h4 style={{ margin: 0, color: '#00d9ff' }}>Last Scanned Card</h4>
-            {lastCard.source && <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', backgroundColor: lastCard.source === 'pn532' ? '#1a3d5c' : '#3d1a5c', color: lastCard.source === 'pn532' ? '#00d9ff' : '#d966ff' }}>{lastCard.source === 'pn532' ? '📡 PN532' : '📻 RC522'}</span>}
+            <h4 style={{ margin: 0, color: 'rgb(var(--hv-info-fg))' }}>Last Scanned Card</h4>
+            {lastCard.source && <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', backgroundColor: lastCard.source === 'pn532' ? 'rgb(var(--hv-info-tint-strong))' : 'rgb(var(--hv-purple-tint))', color: lastCard.source === 'pn532' ? 'rgb(var(--hv-info))' : 'rgb(var(--hv-purple))' }}>{lastCard.source === 'pn532' ? '📡 PN532' : '📻 RC522'}</span>}
           </div>
           <div style={styles.cardDisplay}>
-            <div style={{ fontSize: '12px', color: '#888', marginBottom: '5px' }}>UID</div>
+            <div style={{ fontSize: '12px', color: 'rgb(var(--hv-text-3))', marginBottom: '5px' }}>UID</div>
             <div style={styles.uidDisplay}>{formatUid(lastCard.uid)}</div>
-            <div style={{ fontSize: '12px', color: '#aaa', marginTop: '8px' }}>{lastCard.type}</div>
+            <div style={{ fontSize: '12px', color: 'rgb(var(--hv-text-2))', marginTop: '8px' }}>{lastCard.type}</div>
           </div>
           {conversion && selectedFormat && (
             <>
-              <div style={{ fontSize: '13px', color: '#00d9ff', marginBottom: '10px', textAlign: 'center' }}>→ {selectedFormat.name}</div>
+              <div style={{ fontSize: '13px', color: 'rgb(var(--hv-info-fg))', marginBottom: '10px', textAlign: 'center' }}>→ {selectedFormat.name}</div>
               <div style={styles.conversionGrid}>
                 <div style={styles.conversionItem}><div style={styles.label}>Facility Code</div><div style={styles.value}>{selectedFormat.facilityBits > 0 ? conversion.facility : 'N/A'}</div></div>
                 <div style={styles.conversionItem}><div style={styles.label}>Card Number</div><div style={styles.value}>{conversion.card.toLocaleString()}</div></div>
@@ -528,7 +528,7 @@ export const NFCSection: React.FC = () => {
             </>
           )}
           {config.mode === 'manual' && (
-            <button onClick={() => transmitCard()} disabled={transmitting || !selectedReaderId} style={{ ...styles.button, width: '100%', marginTop: '15px', backgroundColor: '#4ade80', color: '#000', fontSize: '16px', padding: '12px', opacity: (transmitting || !selectedReaderId) ? 0.5 : 1, cursor: (transmitting || !selectedReaderId) ? 'not-allowed' : 'pointer' }}>
+            <button onClick={() => transmitCard()} disabled={transmitting || !selectedReaderId} style={{ ...styles.button, width: '100%', marginTop: '15px', backgroundColor: 'rgb(var(--hv-success-text))', color: '#000', fontSize: '16px', padding: '12px', opacity: (transmitting || !selectedReaderId) ? 0.5 : 1, cursor: (transmitting || !selectedReaderId) ? 'not-allowed' : 'pointer' }}>
               {transmitting ? '📤 Transmitting...' : '📤 Transmit to Reader'}
             </button>
           )}
@@ -537,24 +537,24 @@ export const NFCSection: React.FC = () => {
 
       <div style={styles.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <h4 style={{ margin: 0, color: '#00d9ff' }}>Scan History ({history.length})</h4>
+          <h4 style={{ margin: 0, color: 'rgb(var(--hv-info-fg))' }}>Scan History ({history.length})</h4>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={() => setShowHistory(!showHistory)} style={{ ...styles.button, padding: '5px 10px', fontSize: '12px', backgroundColor: '#2d2d44', color: '#00d9ff', border: '1px solid #4a4a6a' }}>{showHistory ? 'Hide' : 'Show'}</button>
-            {history.length > 0 && <button onClick={clearHistory} style={{ ...styles.button, padding: '5px 10px', fontSize: '12px', backgroundColor: '#4d1a1a', color: '#ff6b6b' }}>Clear</button>}
+            <button onClick={() => setShowHistory(!showHistory)} style={{ ...styles.button, padding: '5px 10px', fontSize: '12px', backgroundColor: 'rgb(var(--hv-box))', color: 'rgb(var(--hv-info-fg))', border: '1px solid rgb(var(--hv-line-strong))' }}>{showHistory ? 'Hide' : 'Show'}</button>
+            {history.length > 0 && <button onClick={clearHistory} style={{ ...styles.button, padding: '5px 10px', fontSize: '12px', backgroundColor: 'rgb(var(--hv-error-tint))', color: 'rgb(var(--hv-error-text))' }}>Clear</button>}
           </div>
         </div>
         {showHistory && (
           <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-            {history.length === 0 ? <div style={{ textAlign: 'center', color: '#888', padding: '20px' }}>No cards scanned yet</div> : (
+            {history.length === 0 ? <div style={{ textAlign: 'center', color: 'rgb(var(--hv-text-3))', padding: '20px' }}>No cards scanned yet</div> : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead><tr style={{ backgroundColor: '#0f3460' }}><th style={{ padding: '8px', textAlign: 'left', color: '#00d9ff' }}>Time</th><th style={{ padding: '8px', textAlign: 'left', color: '#00d9ff' }}>UID</th><th style={{ padding: '8px', textAlign: 'left', color: '#00d9ff' }}>Type</th><th style={{ padding: '8px', textAlign: 'center', color: '#00d9ff' }}>Actions</th></tr></thead>
+                <thead><tr style={{ backgroundColor: 'rgb(var(--hv-info-tint))' }}><th style={{ padding: '8px', textAlign: 'left', color: 'rgb(var(--hv-info-fg))' }}>Time</th><th style={{ padding: '8px', textAlign: 'left', color: 'rgb(var(--hv-info-fg))' }}>UID</th><th style={{ padding: '8px', textAlign: 'left', color: 'rgb(var(--hv-info-fg))' }}>Type</th><th style={{ padding: '8px', textAlign: 'center', color: 'rgb(var(--hv-info-fg))' }}>Actions</th></tr></thead>
                 <tbody>
                   {history.map((card, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #3a3a5a' }}>
-                      <td style={{ padding: '8px', color: '#aaa' }}>{new Date(card.timestamp).toLocaleTimeString()}</td>
-                      <td style={{ padding: '8px', fontFamily: 'monospace', color: '#00d9ff' }}>{formatUid(card.uid)}</td>
-                      <td style={{ padding: '8px', color: '#aaa' }}>{card.type}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}><button onClick={() => { setLastCard(card); transmitCard(card); }} style={{ ...styles.button, padding: '4px 8px', fontSize: '11px', backgroundColor: '#4ade80', color: '#000' }}>📤 Send</button></td>
+                    <tr key={idx} style={{ borderBottom: '1px solid rgb(var(--hv-line-strong))' }}>
+                      <td style={{ padding: '8px', color: 'rgb(var(--hv-text-2))' }}>{new Date(card.timestamp).toLocaleTimeString()}</td>
+                      <td style={{ padding: '8px', fontFamily: 'monospace', color: 'rgb(var(--hv-info-fg))' }}>{formatUid(card.uid)}</td>
+                      <td style={{ padding: '8px', color: 'rgb(var(--hv-text-2))' }}>{card.type}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}><button onClick={() => { setLastCard(card); transmitCard(card); }} style={{ ...styles.button, padding: '4px 8px', fontSize: '11px', backgroundColor: 'rgb(var(--hv-success-text))', color: '#000' }}>📤 Send</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -564,7 +564,7 @@ export const NFCSection: React.FC = () => {
         )}
       </div>
 
-      <div style={{ fontSize: '11px', color: '#666', textAlign: 'center' }}>
+      <div style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', textAlign: 'center' }}>
         PN532: {pn532Status.connected ? '✓ I2C' : '✗'} | RC522: {rc522Status.connected ? '✓ SPI' : '✗'} | 
         Mode: {config.mode} | Format: {selectedFormat?.name || 'None'} | 
         Polling: {nfcPollingEnabled ? '▶ Active' : '⏸ Stopped'}

@@ -1,6 +1,6 @@
 {
   "version": "3.0",
-  "timestamp": "2026-09-02T23:26:48.116Z",
+  "timestamp": "2026-09-25T06:18:56.119Z",
   "systemOutputs": {
     "powerFault": {
       "name": "Power Fault",
@@ -32,7 +32,7 @@
       "id": 1,
       "name": "Main Entrance",
       "enabled": true,
-      "ioSource": "emulated",
+      "ioSource": "physical",
       "emuBoard": 11,
       "emuReaderPort": 0,
       "lock": {
@@ -94,7 +94,7 @@
       "id": 2,
       "name": "Back Door",
       "enabled": true,
-      "ioSource": "emulated",
+      "ioSource": "physical",
       "emuBoard": 11,
       "emuReaderPort": 0,
       "lock": {
@@ -156,7 +156,7 @@
       "id": 3,
       "name": "Side Door",
       "enabled": true,
-      "ioSource": "emulated",
+      "ioSource": "physical",
       "emuBoard": 12,
       "emuReaderPort": 0,
       "lock": {
@@ -218,7 +218,7 @@
       "id": 4,
       "name": "Elevator",
       "enabled": true,
-      "ioSource": "emulated",
+      "ioSource": "physical",
       "emuBoard": 13,
       "emuReaderPort": 1,
       "lock": {
@@ -275,7 +275,255 @@
           "steps": []
         }
       ]
+    },
+    {
+      "id": 5,
+      "name": "Door 5",
+      "enabled": false,
+      "ioSource": "physical",
+      "emuBoard": 0,
+      "emuReaderPort": 0,
+      "lock": {
+        "name": "Door Strike",
+        "hardwareType": "relay",
+        "channel": 4,
+        "active": false
+      },
+      "dps": {
+        "name": "Door Position",
+        "hardwareType": "opto",
+        "channel": 4,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "rexIn": {
+        "name": "REX Button",
+        "hardwareType": "opto",
+        "channel": 0,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "ios": [],
+      "reader": null,
+      "customEvents": [
+        {
+          "name": "Custom Event 1",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 2",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 3",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 4",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 5",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 6",
+          "enabled": false,
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Door 6",
+      "enabled": false,
+      "ioSource": "physical",
+      "emuBoard": 0,
+      "emuReaderPort": 0,
+      "lock": {
+        "name": "Door Strike",
+        "hardwareType": "relay",
+        "channel": 5,
+        "active": false
+      },
+      "dps": {
+        "name": "Door Position",
+        "hardwareType": "opto",
+        "channel": 5,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "rexIn": {
+        "name": "REX Button",
+        "hardwareType": "opto",
+        "channel": 1,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "ios": [],
+      "reader": null,
+      "customEvents": [
+        {
+          "name": "Custom Event 1",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 2",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 3",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 4",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 5",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 6",
+          "enabled": false,
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Door 7",
+      "enabled": false,
+      "ioSource": "physical",
+      "emuBoard": 0,
+      "emuReaderPort": 0,
+      "lock": {
+        "name": "Door Strike",
+        "hardwareType": "relay",
+        "channel": 6,
+        "active": false
+      },
+      "dps": {
+        "name": "Door Position",
+        "hardwareType": "opto",
+        "channel": 6,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "rexIn": {
+        "name": "REX Button",
+        "hardwareType": "opto",
+        "channel": 2,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "ios": [],
+      "reader": null,
+      "customEvents": [
+        {
+          "name": "Custom Event 1",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 2",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 3",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 4",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 5",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 6",
+          "enabled": false,
+          "steps": []
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Door 8",
+      "enabled": false,
+      "ioSource": "physical",
+      "emuBoard": 0,
+      "emuReaderPort": 0,
+      "lock": {
+        "name": "Door Strike",
+        "hardwareType": "relay",
+        "channel": 7,
+        "active": false
+      },
+      "dps": {
+        "name": "Door Position",
+        "hardwareType": "opto",
+        "channel": 7,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "rexIn": {
+        "name": "REX Button",
+        "hardwareType": "opto",
+        "channel": 3,
+        "active": false,
+        "supervisionState": "normal"
+      },
+      "ios": [],
+      "reader": null,
+      "customEvents": [
+        {
+          "name": "Custom Event 1",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 2",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 3",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 4",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 5",
+          "enabled": false,
+          "steps": []
+        },
+        {
+          "name": "Custom Event 6",
+          "enabled": false,
+          "steps": []
+        }
+      ]
     }
   ],
-  "savedAt": "2026-09-02T23:26:48.221Z"
+  "savedAt": "2026-09-25T06:18:56.991Z"
 }

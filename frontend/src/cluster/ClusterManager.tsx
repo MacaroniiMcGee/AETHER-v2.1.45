@@ -16,6 +16,7 @@ import {
   GripVertical
 } from 'lucide-react';
 import IOAccessEmulator from '../components/IOAccessEmulator';
+import { TopBar } from '../components/shell/AppShell';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ const OverviewCard: React.FC<OverviewCardProps> = ({ node, connected, onSelect }
     <button
       onClick={onSelect}
       className={`rounded-xl p-5 border text-left transition-all hover:scale-[1.02] active:scale-[0.98] ring-2 ring-transparent hover:${c.ring}`}
-      style={{ background: 'linear-gradient(to bottom right, #2A1F22, #231A1D)', borderColor: '#4A3538' }}
+      style={{ background: 'linear-gradient(to bottom right, rgb(var(--hv-widget)), rgb(var(--hv-widget)))', borderColor: 'rgb(var(--hv-line-strong))' }}
     >
       <div className="flex items-start justify-between mb-3">
         <div className={`p-2 rounded-lg ${c.badge}`}>
@@ -174,28 +175,38 @@ const ClusterManager: React.FC = () => {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: '#1F1A1B' }}>
+    <div className="flex flex-col h-screen overflow-hidden bg-hv-surface">
+      {/* HV top bar for the cluster overview. Each node page brings its own top bar
+          with a node switcher, so the node list below is only shown on the overview. */}
+      {activeId === 'overview' && (
+        <TopBar onToggleNav={() => setSidebarOpen(v => !v)} navCollapsed={!sidebarOpen} title="Aether" version="Cluster"
+          subtitle="Access Emulation Testing Hardware Evaluation Resource">
+          <span className="text-xs text-hv-text-3">{connectedCount}/{nodes.length} nodes online</span>
+        </TopBar>
+      )}
+      <div className="flex flex-1 min-h-0">
 
-      {/* ── LEFT SIDEBAR ──────────────────────────────────────────────────── */}
+      {/* ── LEFT SIDEBAR (cluster node list) ─────────────────────────────── */}
       <aside
         className="flex-shrink-0 flex flex-col border-r transition-all duration-300"
         style={{
+          display: activeId === 'overview' ? 'flex' : 'none',
           width: sidebarOpen ? '260px' : '56px',
-          borderColor: '#4A3538',
-          background: 'linear-gradient(to bottom, #231A1D, #1A1316)'
+          borderColor: 'rgb(var(--hv-line))',
+          background: 'rgb(var(--hv-widget-panel))'
         }}
       >
         {/* Sidebar header */}
-        <div className="flex items-center justify-between px-3 py-4 border-b" style={{ borderColor: '#4A3538' }}>
+        <div className="flex items-center justify-between px-3 py-4 border-b" style={{ borderColor: 'rgb(var(--hv-line-strong))' }}>
           {sidebarOpen && (
             <div>
-              <div className="text-sm font-bold text-white">Aether Cluster</div>
+              <div className="text-sm font-bold text-hv-text">Aether Cluster</div>
               <div className="text-xs text-slate-400">{connectedCount}/{nodes.length} online</div>
             </div>
           )}
           <button
             onClick={() => setSidebarOpen(v => !v)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors ml-auto"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-hv-text hover:bg-hv-contrast/10 transition-colors ml-auto"
           >
             {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
           </button>
@@ -206,10 +217,10 @@ const ClusterManager: React.FC = () => {
           onClick={() => setActiveId('overview')}
           className={`flex items-center gap-3 px-3 py-3 text-sm font-semibold transition-colors border-b ${
             activeId === 'overview'
-              ? 'text-white bg-white/10'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
+              ? 'text-hv-text bg-hv-contrast/10'
+              : 'text-slate-400 hover:text-hv-text hover:bg-hv-contrast/5'
           }`}
-          style={{ borderColor: '#4A3538' }}
+          style={{ borderColor: 'rgb(var(--hv-line-strong))' }}
           title={!sidebarOpen ? 'Overview' : undefined}
         >
           <LayoutGrid size={18} className="flex-shrink-0" />
@@ -228,7 +239,7 @@ const ClusterManager: React.FC = () => {
               <div
                 key={node.id}
                 className={`group relative mx-2 mb-1 rounded-lg transition-colors ${
-                  isActive ? 'bg-white/10 ring-1 ring-white/20' : 'hover:bg-white/5'
+                  isActive ? 'bg-hv-contrast/10 ring-1 ring-white/20' : 'hover:bg-hv-contrast/5'
                 }`}
               >
                 {isEditing && sidebarOpen ? (
@@ -240,22 +251,22 @@ const ClusterManager: React.FC = () => {
                       onChange={e => setEditName(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit(); }}
                       placeholder="Node name"
-                      className="w-full text-xs rounded px-2 py-1 text-white border"
-                      style={{ background: '#2A1F22', borderColor: '#5A3538' }}
+                      className="w-full text-xs rounded px-2 py-1 text-hv-text border"
+                      style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line-strong))' }}
                     />
                     <input
                       value={editIp}
                       onChange={e => setEditIp(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit(); }}
                       placeholder="IP address"
-                      className="w-full text-xs rounded px-2 py-1 text-white border font-mono"
-                      style={{ background: '#2A1F22', borderColor: '#5A3538' }}
+                      className="w-full text-xs rounded px-2 py-1 text-hv-text border font-mono"
+                      style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line-strong))' }}
                     />
                     <div className="flex gap-1">
-                      <button onClick={commitEdit} className="flex-1 text-xs py-1 rounded bg-green-700 hover:bg-green-600 text-white flex items-center justify-center gap-1">
+                      <button onClick={commitEdit} className="flex-1 text-xs py-1 rounded bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong flex items-center justify-center gap-1">
                         <Check size={11} /> Save
                       </button>
-                      <button onClick={cancelEdit} className="flex-1 text-xs py-1 rounded bg-slate-700 hover:bg-slate-600 text-white flex items-center justify-center gap-1">
+                      <button onClick={cancelEdit} className="flex-1 text-xs py-1 rounded bg-slate-700 hover:bg-slate-600 text-hv-text flex items-center justify-center gap-1">
                         <X size={11} /> Cancel
                       </button>
                     </div>
@@ -277,7 +288,7 @@ const ClusterManager: React.FC = () => {
 
                     {sidebarOpen && (
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-white truncate">{node.name}</div>
+                        <div className="text-sm font-semibold text-hv-text truncate">{node.name}</div>
                         <div className="text-xs text-slate-400 font-mono truncate">{node.ip}</div>
                       </div>
                     )}
@@ -297,7 +308,7 @@ const ClusterManager: React.FC = () => {
                   <div className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5 bg-slate-800/90 rounded-md p-0.5">
                     <button
                       onClick={e => { e.stopPropagation(); startEdit(node); }}
-                      className="p-1 rounded text-slate-400 hover:text-white hover:bg-white/10"
+                      className="p-1 rounded text-slate-400 hover:text-hv-text hover:bg-hv-contrast/10"
                       title="Edit"
                     >
                       <Edit2 size={11} />
@@ -317,11 +328,11 @@ const ClusterManager: React.FC = () => {
         </div>
 
         {/* Add node button */}
-        <div className="p-2 border-t" style={{ borderColor: '#4A3538' }}>
+        <div className="p-2 border-t" style={{ borderColor: 'rgb(var(--hv-line-strong))' }}>
           <button
             onClick={addNode}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-slate-300 hover:text-white border border-dashed hover:border-blue-500/60 hover:bg-blue-900/10 transition-colors"
-            style={{ borderColor: '#4A3538' }}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-slate-300 hover:text-hv-text border border-dashed hover:border-blue-500/60 hover:bg-blue-900/10 transition-colors"
+            style={{ borderColor: 'rgb(var(--hv-line-strong))' }}
             title={!sidebarOpen ? 'Add node' : undefined}
           >
             <Plus size={16} />
@@ -338,25 +349,26 @@ const ClusterManager: React.FC = () => {
           <div className="p-8">
             {/* Overview header */}
             <div className="mb-8">
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent mb-1">
+              <div className="text-xs leading-[18px] text-hv-text-3">Aether / Cluster</div>
+              <h1 className="mt-1 text-2xl leading-8 font-bold text-hv-text">
                 Aurora Aether Cluster
               </h1>
-              <p className="text-slate-400">
+              <p className="mt-1 text-sm text-hv-text-2">
                 {nodes.length} node{nodes.length !== 1 ? 's' : ''} registered · {connectedCount} online
               </p>
             </div>
 
             {/* Status bar */}
             <div className="flex gap-4 mb-8">
-              <div className="flex-1 rounded-xl p-4 border" style={{ background: '#231A1D', borderColor: '#4A3538' }}>
+              <div className="flex-1 rounded-xl p-4 border" style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line-strong))' }}>
                 <div className="text-xs text-slate-400 mb-1">Total Nodes</div>
-                <div className="text-2xl font-bold text-white">{nodes.length}</div>
+                <div className="text-2xl font-bold text-hv-text">{nodes.length}</div>
               </div>
-              <div className="flex-1 rounded-xl p-4 border" style={{ background: '#231A1D', borderColor: '#4A3538' }}>
+              <div className="flex-1 rounded-xl p-4 border" style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line-strong))' }}>
                 <div className="text-xs text-slate-400 mb-1">Online</div>
                 <div className="text-2xl font-bold text-green-400">{connectedCount}</div>
               </div>
-              <div className="flex-1 rounded-xl p-4 border" style={{ background: '#231A1D', borderColor: '#4A3538' }}>
+              <div className="flex-1 rounded-xl p-4 border" style={{ background: 'rgb(var(--hv-widget))', borderColor: 'rgb(var(--hv-line-strong))' }}>
                 <div className="text-xs text-slate-400 mb-1">Offline</div>
                 <div className="text-2xl font-bold text-slate-400">{nodes.length - connectedCount}</div>
               </div>
@@ -383,7 +395,7 @@ const ClusterManager: React.FC = () => {
                 <button
                   onClick={addNode}
                   className="rounded-xl p-5 border border-dashed text-slate-500 hover:text-slate-300 hover:border-blue-500/50 hover:bg-blue-900/5 transition-all flex flex-col items-center justify-center gap-2 min-h-[140px]"
-                  style={{ borderColor: '#4A3538' }}
+                  style={{ borderColor: 'rgb(var(--hv-line-strong))' }}
                 >
                   <Plus size={24} />
                   <span className="text-sm font-semibold">Add Node</span>
@@ -416,10 +428,12 @@ const ClusterManager: React.FC = () => {
               nodeLabel={node.name}
               externalIp={node.ip}
               onConnectionChange={handleConnectionChange}
+              cluster={{ nodes, activeId, online: connectionMap, onSelect: setActiveId }}
             />
           </div>
         ))}
       </main>
+      </div>
     </div>
   );
 };
