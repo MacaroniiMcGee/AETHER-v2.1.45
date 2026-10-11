@@ -20,6 +20,8 @@ import {
   Search, Edit3, Check, AlertTriangle, FileText, Upload, Library,
   ChevronRight, ChevronLeft, X, Loader2, Zap, RotateCw, Radio, Clock,
 } from 'lucide-react';
+// AETHER-TRACE: live OSDP bus trace during uploads
+import { FirmwareTraceSection, FirmwareTraceHistory } from './FirmwareTracePanel';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Live-status hook
@@ -224,6 +226,7 @@ export default function OSDPFirmwareWizard({ readers = [] }: Props) {
       </div>
 
       <StepBar step={step} />
+      <FirmwareTraceHistory />{/* AETHER-TRACE */}
 
       <div className="mt-4 space-y-3">
         {step === 'target' && (
@@ -296,8 +299,8 @@ function StepBar({ step }: { step: WizardStep }) {
                 : 'text-gray-500'
             }`}>
               <span className={`inline-flex w-5 h-5 rounded-full items-center justify-center text-[10px] ${
-                state === 'done' ? 'bg-emerald-500 text-white'
-                  : state === 'now'  ? 'bg-orange-500 text-white'
+                state === 'done' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40'
+                  : state === 'now'  ? 'bg-hv-brand-tint text-hv-brand-fg ring-1 ring-inset ring-hv-brand/40'
                   : 'bg-gray-700 text-gray-400'
               }`}>
                 {state === 'done' ? <Check size={11}/> : i + 1}
@@ -861,6 +864,9 @@ function StepConfirmFlash({
           form.append('port',    item.target.port);
           form.append('baud',    String(item.target.baud));
           form.append('address', String(item.target.address));
+          // AETHER-TRACE: label the bus trace with what we know about this reader
+          form.append('traceLabel', item.target.readerName || `${item.target.port} addr ${item.target.address}`);
+          if (item.identity) form.append('traceIdentity', JSON.stringify(item.identity));
 
           const res = await fetch('/api/osdp/firmware-upload', { method: 'POST', body: form });
           const json = await res.json();
@@ -871,7 +877,7 @@ function StepConfirmFlash({
               ? { ...x, status: 'success', uploadResult: json } : x));
           } else {
             setQueue(q => q.map(x => x.key === item.key
-              ? { ...x, status: 'failure', uploadError: json.error || 'Upload failed' } : x));
+              ? { ...x, status: 'failure', uploadResult: json, uploadError: json.error || 'Upload failed' } : x));
           }
         } catch (e: any) {
           if (!cancelled) {
@@ -943,6 +949,7 @@ function StepConfirmFlash({
         </div>
       )}
 
+      <FirmwareTraceSection queue={queue} liveTraceId={liveStatus?.traceId || null} running={batchRunning} />{/* AETHER-TRACE */}
       {allBatchDone && <BatchSummary queue={queue} onReset={onReset} />}
     </div>
   );

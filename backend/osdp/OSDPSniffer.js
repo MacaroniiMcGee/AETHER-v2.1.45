@@ -248,6 +248,8 @@ class OSDPSniffer extends EventEmitter {
   }
 
   _onRx(chunk) {
+    // Hand the raw bytes to the trace hub, which does full SIA-2.2.2 decoding.
+    try { this.emit('raw', { bytes: chunk, ts: Date.now() }); } catch (e) { /* never break capture */ }
     this.rxBuf = Buffer.concat([this.rxBuf, chunk]);
     while (this.rxBuf.length >= 6) {
       const start = this.rxBuf.indexOf(0x53);

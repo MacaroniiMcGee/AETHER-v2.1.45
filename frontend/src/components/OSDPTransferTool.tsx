@@ -292,7 +292,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
             <ArrowRightLeft className="w-6 h-6 text-purple-400" />
-            <h2 className="text-2xl font-bold text-white">OSDP Transfer Tool</h2>
+            <h2 className="text-2xl font-bold text-hv-text">OSDP Transfer Tool</h2>
           </div>
           <div className="flex items-center space-x-4 text-sm">
             <div className="flex items-center space-x-2">
@@ -314,7 +314,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
       <div className="bg-slate-800/50 backdrop-blur rounded-xl p-6 border border-slate-700">
         <div className="flex items-center space-x-2 mb-4">
           <Cpu className="w-5 h-5 text-orange-400" />
-          <h3 className="text-lg font-semibold text-white">Firmware Upload</h3>
+          <h3 className="text-lg font-semibold text-hv-text">Firmware Upload</h3>
           <span className="px-2 py-1 bg-orange-600/20 text-orange-400 text-xs rounded-full">
             Hanwha/WaveLynx Compatible
           </span>
@@ -326,7 +326,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
             <select
               value={targetReader}
               onChange={(e) => setTargetReader(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-hv-text"
             >
               <option value="">Select target...</option>
               {readers.map(reader => (
@@ -339,7 +339,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
 
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">Firmware File (.bin)</label>
-            <label className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white hover:bg-slate-700 cursor-pointer flex items-center justify-center">
+            <label className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-hv-text hover:bg-slate-700 cursor-pointer flex items-center justify-center">
               <FileUp className="w-4 h-4 mr-2" />
               {firmwareFile ? firmwareFile.name : 'Choose File'}
               <input
@@ -356,7 +356,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
           <div className="mb-4 p-3 bg-slate-900/50 rounded border border-slate-700">
             <div className="flex items-center justify-between text-sm">
               <div>
-                <div className="text-white font-medium">{firmwareInfo.name}</div>
+                <div className="text-hv-text font-medium">{firmwareInfo.name}</div>
                 <div className="text-slate-400">Size: {(firmwareInfo.size / 1024).toFixed(2)} KB</div>
               </div>
               <button
@@ -406,12 +406,12 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-6 border border-slate-700">
           <div className="flex items-center space-x-2 mb-3">
             <Upload className="w-5 h-5 text-blue-400" />
-            <h3 className="text-lg font-semibold text-white">Source Reader</h3>
+            <h3 className="text-lg font-semibold text-hv-text">Source Reader</h3>
           </div>
           <select
             value={sourceReader}
             onChange={(e) => setSourceReader(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white mb-3"
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-hv-text mb-3"
           >
             <option value="">Select source...</option>
             {readers.map(reader => (
@@ -443,12 +443,12 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-6 border border-slate-700">
           <div className="flex items-center space-x-2 mb-3">
             <Download className="w-5 h-5 text-green-400" />
-            <h3 className="text-lg font-semibold text-white">Target Reader</h3>
+            <h3 className="text-lg font-semibold text-hv-text">Target Reader</h3>
           </div>
           <select
             value={targetReader}
             onChange={(e) => setTargetReader(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white mb-3"
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-hv-text mb-3"
           >
             <option value="">Select target...</option>
             {readers.map(reader => (
@@ -468,7 +468,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
 
       {/* Capture Controls */}
       <div className="bg-slate-800/50 backdrop-blur rounded-xl p-6 border border-slate-700">
-        <h3 className="text-lg font-semibold text-white mb-4">Capture Data</h3>
+        <h3 className="text-lg font-semibold text-hv-text mb-4">Capture Data</h3>
         
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
@@ -476,7 +476,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
             <select
               value={transferType}
               onChange={(e) => setTransferType(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white"
+              className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-hv-text"
             >
               <option value="card">Card Data</option>
               <option value="keypad">Keypad Data</option>
@@ -489,7 +489,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
         <button
           onClick={captureFromSource}
           disabled={!sourceReader || !connected}
-          className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold transition-colors"
+          className="w-full py-3 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong disabled:bg-slate-700 disabled:text-slate-500 rounded-lg font-semibold transition-colors"
         >
           Capture from Source
         </button>
@@ -498,12 +498,12 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
       {/* Transfer Queue */}
       <div className="bg-slate-800/50 backdrop-blur rounded-xl p-6 border border-slate-700">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">
+          <h3 className="text-lg font-semibold text-hv-text">
             Transfer Queue ({transferQueue.length} items)
           </h3>
           
           <div className="flex items-center space-x-2">
-            <label className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded cursor-pointer text-sm">
+            <label className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-hv-text rounded cursor-pointer text-sm">
               Import
               <input
                 type="file"
@@ -516,7 +516,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
             <button
               onClick={exportQueue}
               disabled={transferQueue.length === 0}
-              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded text-sm"
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-600 text-hv-text rounded text-sm"
             >
               Export
             </button>
@@ -548,7 +548,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
                       <span className="px-2 py-1 bg-purple-600/20 text-purple-400 text-xs rounded">
                         {item.type.toUpperCase()}
                       </span>
-                      <span className="text-white font-medium">{item.name}</span>
+                      <span className="text-hv-text font-medium">{item.name}</span>
                     </div>
                     <div className="text-xs text-slate-500 mt-1">
                       {new Date(item.timestamp).toLocaleString()}
@@ -559,7 +559,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
                     <button
                       onClick={() => transferToTarget(item)}
                       disabled={!targetReader || isTransferring}
-                      className="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded text-sm"
+                      className="px-3 py-2 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong disabled:bg-slate-700 disabled:text-slate-500 rounded text-sm"
                     >
                       Transfer
                     </button>
@@ -578,7 +578,7 @@ export default function OSDPTransferTool({ ipAddress, connected, readers, onLog 
             <button
               onClick={transferAllToTarget}
               disabled={!targetReader || isTransferring || transferQueue.length === 0}
-              className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-semibold transition-colors"
+              className="w-full py-3 bg-hv-purple-tint text-hv-purple-fg ring-1 ring-inset ring-hv-purple/40 hover:bg-hv-purple/25 disabled:bg-slate-700 disabled:text-slate-500 rounded-lg font-semibold transition-colors"
             >
               {isTransferring ? 'Transferring...' : `Transfer All to Target (${transferQueue.length})`}
             </button>

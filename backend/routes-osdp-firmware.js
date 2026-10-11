@@ -37,6 +37,8 @@ const { SerialPort } = require('serialport');
 const OSDPFirmwareUploader    = require('./osdp/OSDPFirmwareUploader');
 const OSDPFirmwareScanner     = require('./osdp/OSDPFirmwareScanner');
 const OSDPFirmwareIdentifier  = require('./osdp/OSDPFirmwareIdentifier');
+// AETHER-TRACE: OSDP bus trace logger for firmware uploads
+const { store: traceStore } = require('./osdp/OSDPTraceRecorder');
 
 const UPLOAD_DIR     = path.join(__dirname, 'uploads', 'firmware');
 const LIBRARY_DIR    = path.join(__dirname, 'data', 'firmware-library');
@@ -262,6 +264,8 @@ async function appendHistory(entry) {
 // Route attachment
 // ---------------------------------------------------------------------------
 
+// Exported so other CP-side tools (e.g. the credential enroller) can borrow a
+// serial port from the PD emulator the same coordinated way and hand it back.
 module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
   // Multer's fileFilter rejections come back via `next(err)`, so we wrap
   // single() to translate them into clean JSON 400s.
@@ -404,6 +408,36 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
       portPath, baudRate, address, useCRC: true,
     });
 
+    // AETHER-TRACE: record every OSDP frame of this upload (osdp/OSDPTraceRecorder.js).
+    // Send trace=0 to skip. The trace is written to disk as it happens.
+    let trace = null;
+    if (!(body.trace === '0' || body.trace === 'false')) {
+      try {
+        let identity = null;
+        try { identity = body.traceIdentity ? JSON.parse(body.traceIdentity) : null; } catch (_) {}
+        trace = traceStore.start({
+          kind:     'firmware-upload',
+          reader:   body.traceLabel || displayName,
+          readerId: displayId,
+          port:     portPath,
+          baud:     baudRate,
+          address,
+          identity,
+          firmware: {
+            name:      req.file ? req.file.originalname : String(sourceLabel).replace(/^(uploaded|library):/, ''),
+            source:    sourceLabel,
+            sizeBytes: fileBuffer.length,
+            sha256:    crypto.createHash('sha256').update(fileBuffer).digest('hex'),
+          },
+          host: require('os').hostname(),
+        });
+        trace.bindUploader(uploader);
+      } catch (e) {
+        console.warn('[OSDP-FW] trace logger could not start:', e.message);
+        trace = null;
+      }
+    }
+
     activeUpload = {
       readerId: displayId,
       reader:   displayName,
@@ -418,6 +452,7 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
       lastStatus:   null,
     };
 
+    if (trace && activeUpload) activeUpload.traceId = trace.id;   // AETHER-TRACE
     const emit = (event, payload) => {
       if (io && typeof io.emit === 'function') io.emit(event, { readerId: displayId, ...payload });
     };
@@ -465,9 +500,20 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
       await unlinkSilently(uploadedFilePath);
     }
 
+    // AETHER-TRACE: close the trace with the outcome
+    if (trace) {
+      try {
+        await trace.finish({
+          result:      failure ? (/abort/i.test(failure.message) ? 'aborted' : 'failure') : 'success',
+          error:       failure ? failure.message : null,
+          finalStatus: result ? result.finalStatus : null,
+          bytesSent:   result ? result.bytesSent : null,
+        });
+      } catch (e) { console.warn('[OSDP-FW] trace finish failed:', e.message); }
+    }
     if (failure) {
       await appendHistory({
-        result:   'failure',
+        result:   'failure', traceId: trace ? trace.id : null,
         error:    failure.message,
         reader:   displayName,
         readerId: displayId,
@@ -481,7 +527,7 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
 
       return res.status(500).json({
         success:  false,
-        error:    failure.message,
+        error:    failure.message, traceId: trace ? trace.id : null,
         reader:   displayName,
         readerId: displayId,
         port:     portPath,
@@ -491,7 +537,7 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
     }
 
     await appendHistory({
-      result:      'success',
+      result:      'success', traceId: trace ? trace.id : null,
       reader:      displayName,
       readerId:    displayId,
       port:        portPath,
@@ -506,7 +552,7 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
 
     return res.json({
       success:     true,
-      message:     'Firmware uploaded successfully',
+      message:     'Firmware uploaded successfully', traceId: trace ? trace.id : null,
       reader:      displayName,
       readerId:    displayId,
       port:        portPath,
@@ -545,7 +591,7 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
     // Pre-fragment phase: no progress event yet (still in setup / re-sync POLL)
     if (!prog) {
       return res.json({
-        inProgress:     true,
+        inProgress:     true, traceId: activeUpload.traceId || null,
         readerId:       activeUpload.readerId,
         reader:         activeUpload.reader,
         port:           activeUpload.port,
@@ -573,7 +619,7 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
     }
 
     return res.json({
-      inProgress:     true,
+      inProgress:     true, traceId: activeUpload.traceId || null,
       readerId:       activeUpload.readerId,
       reader:         activeUpload.reader,
       port:           activeUpload.port,
@@ -829,5 +875,10 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
   // mounting a /:readerId route here would shadow those (Express matches by
   // registration order, not specificity).
 
+  traceStore.attachRoutes(app);   // AETHER-TRACE
   console.log('[OSDP-FW] Firmware routes mounted: scan, identify, library, history, upload, abort, status');
 };
+
+// Reused by the credential enroller to coordinate serial-port ownership.
+module.exports.releaseEmulatorPort = releaseEmulatorPort;
+module.exports.reopenEmulatorPort = reopenEmulatorPort;

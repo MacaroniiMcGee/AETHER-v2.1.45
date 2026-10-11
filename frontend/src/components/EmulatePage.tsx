@@ -72,7 +72,7 @@ export default function EmulatePage({ selectedReader, socket, ipAddress, onLog }
 
       {/* ===== MIDDLE: Keypad lives inside the reader in 'both' mode ===== */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <div style={{ fontSize: 11, color: 'rgb(var(--hv-text-2))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Live reader
         </div>
         <InteractiveReader
@@ -117,22 +117,22 @@ function CardPanel({
 
   return (
     <div style={{
-      background: '#0b1222', border: '1px solid #334155', borderRadius: 10,
+      background: 'rgb(var(--hv-surface))', border: '1px solid rgb(var(--hv-line))', borderRadius: 10,
       padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <i className="ti ti-credit-card" style={{ color: '#22d3ee', fontSize: 18 }} aria-hidden />
-        <div style={{ fontSize: 14, fontWeight: 500, color: '#fff' }}>Card</div>
+        <i className="ti ti-credit-card" style={{ color: 'rgb(var(--hv-info-fg))', fontSize: 18 }} aria-hidden />
+        <div style={{ fontSize: 14, fontWeight: 500, color: 'rgb(var(--hv-text))' }}>Card</div>
       </div>
 
       <div>
-        <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 4, textTransform: 'uppercase' }}>Format</div>
+        <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-2))', marginBottom: 4, textTransform: 'uppercase' }}>Format</div>
         <select
           value={value.format}
           onChange={(e) => update({ format: e.target.value })}
           style={{
-            width: '100%', background: '#0f172a', border: '1px solid #334155',
-            color: '#cbd5e1', padding: '6px 8px', borderRadius: 6, fontSize: 12,
+            width: '100%', background: 'rgb(var(--hv-widget-panel))', border: '1px solid rgb(var(--hv-line))',
+            color: 'rgb(var(--hv-text))', padding: '6px 8px', borderRadius: 6, fontSize: 12,
           }}
         >
           {FORMAT_OPTIONS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
@@ -141,7 +141,7 @@ function CardPanel({
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div>
-          <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>Facility</div>
+          <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-2))', marginBottom: 4 }}>Facility</div>
           <input
             type="number"
             value={value.facilityCode}
@@ -150,7 +150,7 @@ function CardPanel({
           />
         </div>
         <div>
-          <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>Card #</div>
+          <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-2))', marginBottom: 4 }}>Card #</div>
           <input
             type="number"
             value={value.cardNumber}
@@ -169,9 +169,9 @@ function CardPanel({
         onClick={onSend}
         disabled={!value.cardNumber}
         style={{
-          background: 'rgba(34,211,238,0.20)',
-          color: '#22d3ee',
-          border: '1px solid rgba(34,211,238,0.40)',
+          background: 'rgb(var(--hv-info) / 0.20)',
+          color: 'rgb(var(--hv-info-fg))',
+          border: '1px solid rgb(var(--hv-info) / 0.40)',
           borderRadius: 8, padding: 10, fontSize: 12, fontWeight: 500,
           cursor: value.cardNumber ? 'pointer' : 'not-allowed',
           opacity: value.cardNumber ? 1 : 0.4,
@@ -180,7 +180,7 @@ function CardPanel({
         Send card
       </button>
 
-      <div style={{ fontSize: 10, color: '#475569', textAlign: 'center', marginTop: 4 }}>
+      <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-disabled))', textAlign: 'center', marginTop: 4 }}>
         Or tap the card target on the reader →
       </div>
     </div>
@@ -198,10 +198,10 @@ function PreConfiguredCardsPanel({ onPick }: { onPick: (c: CardComposition) => v
   ];
   return (
     <div style={{
-      background: '#0b1222', border: '1px solid #334155', borderRadius: 10,
+      background: 'rgb(var(--hv-surface))', border: '1px solid rgb(var(--hv-line))', borderRadius: 10,
       padding: 14, display: 'flex', flexDirection: 'column', gap: 8,
     }}>
-      <div style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+      <div style={{ fontSize: 11, color: 'rgb(var(--hv-text-2))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
         Pre-configured cards
       </div>
       {PRECONFIGURED.map((p, i) => (
@@ -209,13 +209,13 @@ function PreConfiguredCardsPanel({ onPick }: { onPick: (c: CardComposition) => v
           key={i}
           onClick={() => onPick({ format: p.format, facilityCode: p.facilityCode, cardNumber: p.cardNumber })}
           style={{
-            background: '#1e293b', border: '1px solid #334155', color: '#cbd5e1',
+            background: 'rgb(var(--hv-widget))', border: '1px solid rgb(var(--hv-line))', color: 'rgb(var(--hv-text))',
             borderRadius: 6, padding: '8px 10px', fontSize: 12, textAlign: 'left',
             cursor: 'pointer',
           }}
         >
           <div style={{ fontWeight: 500 }}>{p.label}</div>
-          <div style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace' }}>
+          <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-3))', fontFamily: 'monospace' }}>
             FC {p.facilityCode} · #{p.cardNumber} · {p.format}
           </div>
         </button>
@@ -226,12 +226,12 @@ function PreConfiguredCardsPanel({ onPick }: { onPick: (c: CardComposition) => v
 
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box',
-  background: '#0f172a', border: '1px solid #334155',
-  color: '#cbd5e1', padding: '6px 8px', borderRadius: 6, fontSize: 12,
+  background: 'rgb(var(--hv-widget-panel))', border: '1px solid rgb(var(--hv-line))',
+  color: 'rgb(var(--hv-text))', padding: '6px 8px', borderRadius: 6, fontSize: 12,
 };
 
 const secondaryBtn: React.CSSProperties = {
-  flex: 1, background: '#1e293b', border: '1px solid #334155',
-  color: '#94a3b8', borderRadius: 6, padding: '6px 0', fontSize: 11,
+  flex: 1, background: 'rgb(var(--hv-widget))', border: '1px solid rgb(var(--hv-line))',
+  color: 'rgb(var(--hv-text-2))', borderRadius: 6, padding: '6px 0', fontSize: 11,
   cursor: 'pointer',
 };

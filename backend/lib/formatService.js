@@ -19,6 +19,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const cmap = require('./credentialMap');
+
+// User-built formats (Readers → Format builder) live here, beside the library
+const USER_FORMATS_FILE = path.join(__dirname, '../data/custom-formats-user.json');
+// Formats someone has confirmed on a real controller (removes the UNVERIFIED tag)
+const CONFIRMED_FILE = path.join(__dirname, '../data/format-confirmations.json');
 
 class FormatService {
   constructor() {
@@ -54,6 +60,17 @@ class FormatService {
         this.formats = (data.formats || []).filter(fmt => 
           fmt.id && !fmt._section
         );
+        // Give every format an exact bit map; its field sizes and ranges win
+        // over the library's summary numbers (which don't always add up)
+        this.formats.forEach(fmt => this._attachMap(fmt));
+        // Add user-built formats
+        this._loadUserFormats().forEach(fmt => this.formats.push(fmt));
+        // Mark the ones confirmed on a controller
+        const confirmed = this.getConfirmations();
+        this.formats.forEach(fmt => {
+          fmt.libraryStatus = fmt.status;
+          if (fmt.status !== 'verified' && confirmed[fmt.id]) { fmt.status = 'confirmed'; fmt.confirmedAt = confirmed[fmt.id]; }
+        });
         
         // Index by ID
         this.formats.forEach(fmt => {
@@ -105,6 +122,117 @@ class FormatService {
       console.error('[FormatService] Failed to load formats from any path');
       this.formats = [];
     }
+  }
+
+  _attachMap(fmt, map) {
+    const m = map || cmap.buildMap(fmt);
+    const r = cmap.ranges(m);
+    if (!fmt.library) fmt.library = { facilityBits: fmt.facilityBits, cardBits: fmt.cardBits, issueLevel: fmt.issueLevel || 0 };
+    fmt.map = m;
+    fmt.status = m.status;
+    if (m.note) fmt.statusNote = m.note;
+    fmt.facilityBits = r.facilityBits;
+    fmt.cardBits = r.cardBits;
+    fmt.issueLevel = r.issueBits || undefined;
+    fmt.maxFacility = r.maxFacility;
+    fmt.maxCard = r.maxCard;
+    fmt.maxIssueLevel = r.maxIssueLevel;
+    fmt.hasParity = (m.parity || []).length > 0;
+    return fmt;
+  }
+
+  _loadUserFormats() {
+    try {
+      if (!fs.existsSync(USER_FORMATS_FILE)) return [];
+      const list = JSON.parse(fs.readFileSync(USER_FORMATS_FILE, 'utf8')).formats || [];
+      return list.filter(u => u && u.id && u.map && cmap.checkMap(u.map).length === 0).map(u => this._userToFormat(u));
+    } catch (e) {
+      console.error('[FormatService] Could not read user formats:', e.message);
+      return [];
+    }
+  }
+
+  _userToFormat(u) {
+    const fmt = {
+      id: u.id, name: u.name, category: 'custom', bits: u.map.bits,
+      parity: (u.map.parity || []).length ? 'custom' : 'none',
+      description: u.description || 'Built in the format builder',
+      usage: 'Custom format', popularity: 'custom', manufacturer: 'Custom',
+      user: true, createdAt: u.createdAt, updatedAt: u.updatedAt,
+    };
+    return this._attachMap(fmt, { ...u.map, status: 'custom', source: 'user' });
+  }
+
+  getUserFormats() {
+    try { return fs.existsSync(USER_FORMATS_FILE) ? (JSON.parse(fs.readFileSync(USER_FORMATS_FILE, 'utf8')).formats || []) : []; }
+    catch { return []; }
+  }
+
+  /** Save (create or replace) a user format. Returns the stored entry. */
+  saveUserFormat(def) {
+    const map = {
+      bits: Number(def.map && def.map.bits),
+      fields: ((def.map && def.map.fields) || []).map(f => ({
+        key: String(f.key), start: Number(f.start), len: Number(f.len),
+        ...(f.key === 'fixed' ? { value: Number(f.value || 0) } : {}), ...(f.label ? { label: String(f.label).slice(0, 40) } : {}),
+      })),
+      parity: ((def.map && def.map.parity) || []).map(p => ({
+        bit: Number(p.bit), type: p.type === 'even' ? 'even' : p.type === 'xor' ? 'xor' : 'odd',
+        covers: (p.covers || []).map(Number).filter(Number.isInteger), ...(p.type === 'xor' ? { len: Number(p.len || 8) } : {}),
+      })),
+    };
+    const errs = cmap.checkMap(map);
+    if (!def.name || !String(def.name).trim()) errs.unshift('Name is required');
+    if (errs.length) { const e = new Error(errs.join('; ')); e.status = 400; throw e; }
+    const list = this.getUserFormats();
+    const slug = String(def.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'format';
+    let id = def.id && String(def.id).startsWith('user_') && list.some(x => x.id === def.id) ? def.id : `user_${slug}_${map.bits}`;
+    if (!(def.id && id === def.id)) {                     // new format: never overwrite another one
+      let n = 2; const baseId = id;
+      while (list.some(x => x.id === id)) id = `${baseId}_${n++}`;
+    }
+    const now = new Date().toISOString();
+    const prev = list.find(x => x.id === id);
+    const entry = { id, name: String(def.name).trim().slice(0, 60), description: def.description ? String(def.description).slice(0, 200) : '', map, createdAt: prev ? prev.createdAt : now, updatedAt: now };
+    const next = list.filter(x => x.id !== id).concat(entry);
+    fs.mkdirSync(path.dirname(USER_FORMATS_FILE), { recursive: true });
+    fs.writeFileSync(USER_FORMATS_FILE, JSON.stringify({ version: 1, formats: next }, null, 2));
+    this.reload();
+    return entry;
+  }
+
+  deleteUserFormat(id) {
+    const list = this.getUserFormats();
+    const next = list.filter(x => x.id !== id);
+    if (next.length === list.length) return false;
+    fs.writeFileSync(USER_FORMATS_FILE, JSON.stringify({ version: 1, formats: next }, null, 2));
+    this.reload();
+    return true;
+  }
+
+  getConfirmations() {
+    try { return fs.existsSync(CONFIRMED_FILE) ? (JSON.parse(fs.readFileSync(CONFIRMED_FILE, 'utf8')).confirmed || {}) : {}; }
+    catch { return {}; }
+  }
+
+  /** Mark a format as confirmed on a real controller (or undo). */
+  setConfirmed(id, yes) {
+    const fmt = this.getFormatById(id);
+    if (!fmt) { const e = new Error('Format not found'); e.status = 404; throw e; }
+    const c = this.getConfirmations();
+    if (yes) c[fmt.id] = new Date().toISOString(); else delete c[fmt.id];
+    fs.mkdirSync(path.dirname(CONFIRMED_FILE), { recursive: true });
+    fs.writeFileSync(CONFIRMED_FILE, JSON.stringify({ version: 1, confirmed: c }, null, 2));
+    this.reload();
+    return this.getFormatById(fmt.id);
+  }
+
+  /** Encode with an arbitrary map (used by the builder's live preview). */
+  encodeMap(map, values) {
+    const errs = cmap.checkMap(map);
+    if (errs.length) { const e = new Error(errs.join('; ')); e.status = 400; throw e; }
+    const { binary, segments } = cmap.encode(map, values);
+    return { bits: map.bits, binary, segments, hex: cmap.toBytes(binary).toString('hex').toUpperCase() };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -534,122 +662,27 @@ class FormatService {
     if (!fmt) {
       throw new Error(`Unknown format: ${formatId}`);
     }
-
-    const bits = fmt.bits;
-    const facilityBits = fmt.facilityBits || 0;
-    const cardBits = fmt.cardBits || (bits - facilityBits - 2);
-    const issueLevelBits = fmt.issueLevel || 0;
-    const parity = fmt.parity || 'std';
-
-    let fc = BigInt(facility || 0);
-    let cn = BigInt(card || 0);
-    let il = BigInt(issueLevel || 0);
-
-    // Mask to valid ranges
-    if (facilityBits > 0) {
-      fc = fc & ((1n << BigInt(facilityBits)) - 1n);
-    } else {
-      fc = 0n;
-    }
-    cn = cn & ((1n << BigInt(cardBits)) - 1n);
-    if (issueLevelBits > 0) {
-      il = il & ((1n << BigInt(issueLevelBits)) - 1n);
-    }
-
-    // Build data portion (without parity)
-    let dataBits;
-    let dataLength;
-
-    if (issueLevelBits > 0 && facilityBits > 0) {
-      dataBits = (il << BigInt(facilityBits + cardBits)) | (fc << BigInt(cardBits)) | cn;
-      dataLength = issueLevelBits + facilityBits + cardBits;
-    } else if (facilityBits > 0) {
-      dataBits = (fc << BigInt(cardBits)) | cn;
-      dataLength = facilityBits + cardBits;
-    } else {
-      dataBits = cn;
-      dataLength = cardBits;
-    }
-
-        // Calculate parity using format-specific ranges if available
-    let finalValue;
-    
-    if (parity === 'none') {
-      finalValue = dataBits;
-    } else if (parity === 'std') {
-      let evenParity, oddParity;
-      
-      // Check for format-specific parity coverage
-      if (fmt.parityEven && fmt.parityEven.covers && fmt.parityOdd && fmt.parityOdd.covers) {
-        const epRange = fmt.parityEven.covers.split('-').map(Number);
-        const opRange = fmt.parityOdd.covers.split('-').map(Number);
-        
-        // Convert from 1-indexed output position to 0-indexed data position
-        const epStart = epRange[0] - 2;
-        const epEnd = epRange[1] - 2;
-        const opStart = opRange[0] - 2;
-        const opEnd = opRange[1] - 2;
-        
-        // Count 1s in EP range (from MSB)
-        let epCount = 0;
-        for (let i = epStart; i <= epEnd && i < dataLength; i++) {
-          const bitPos = BigInt(dataLength - 1 - i);
-          if ((dataBits >> bitPos) & 1n) epCount++;
-        }
-        
-        // Count 1s in OP range (from MSB)
-        let opCount = 0;
-        for (let i = opStart; i <= opEnd && i < dataLength; i++) {
-          const bitPos = BigInt(dataLength - 1 - i);
-          if ((dataBits >> bitPos) & 1n) opCount++;
-        }
-        
-        evenParity = epCount % 2 === 0 ? 0 : 1;
-        oddParity = opCount % 2 === 0 ? 1 : 0;
-        
-        console.log('[FormatService] Parity: EP covers ' + fmt.parityEven.covers + ' (' + epCount + ' ones)->EP=' + evenParity + ', OP covers ' + fmt.parityOdd.covers + ' (' + opCount + ' ones)->OP=' + oddParity);
-      } else {
-        // Default: split data in half
-        const halfBits = Math.floor(dataLength / 2);
-        const upperHalf = Number((dataBits >> BigInt(halfBits)) & ((1n << BigInt(dataLength - halfBits)) - 1n));
-        const lowerHalf = Number(dataBits & ((1n << BigInt(halfBits)) - 1n));
-        
-        evenParity = this._popcount(upperHalf) % 2 === 0 ? 0 : 1;
-        oddParity = this._popcount(lowerHalf) % 2 === 0 ? 1 : 0;
-      }
-      
-      finalValue = (BigInt(evenParity) << BigInt(bits - 1)) | (dataBits << 1n) | BigInt(oddParity);
-    } else {
-      console.warn('[FormatService] Complex parity ' + parity + ' not fully implemented for ' + formatId);
-      finalValue = dataBits;
-    }
-
-    // Convert to bytes (left-justified)
-    const bytesNeeded = Math.ceil(bits / 8);
-    const leftJustified = finalValue << BigInt((bytesNeeded * 8) - bits);
-    
-    const bytes = Buffer.alloc(bytesNeeded);
-    for (let i = 0; i < bytesNeeded; i++) {
-      const shift = BigInt((bytesNeeded - 1 - i) * 8);
-      bytes[i] = Number((leftJustified >> shift) & 0xFFn);
-    }
-
-    console.log(`[FormatService] Encoded ${fmt.id}: FC=${fc} Card=${cn} -> ${bits}-bit 0x${finalValue.toString(16).toUpperCase()}`);
-
+    const map = fmt.map || this._attachMap(fmt).map;
+    const { binary, segments } = cmap.encode(map, { facility: facility || 0, card: card || 0, issue: issueLevel || 0 });
+    const value = BigInt('0b' + binary);
+    const bytes = cmap.toBytes(binary);
+    console.log(`[FormatService] Encoded ${fmt.id}: FC=${facility} Card=${card}${issueLevel ? ` IL=${issueLevel}` : ''} -> ${fmt.bits}-bit ${binary}`);
     return {
       formatId: fmt.id,
       formatName: fmt.name,
-      bits: bits,
-      facilityBits: facilityBits,
-      cardBits: cardBits,
-      facility: Number(fc),
-      card: Number(cn),
-      issueLevel: Number(il),
-      value: finalValue,
-      valueHex: finalValue.toString(16).toUpperCase().padStart(Math.ceil(bits / 4), '0'),
-      bytes: bytes,
+      status: fmt.status,
+      bits: fmt.bits,
+      facilityBits: fmt.facilityBits,
+      cardBits: fmt.cardBits,
+      facility: Number(facility || 0),
+      card: String(card || 0),
+      issueLevel: Number(issueLevel || 0),
+      value,
+      valueHex: value.toString(16).toUpperCase().padStart(Math.ceil(fmt.bits / 4), '0'),
+      bytes,
       hex: bytes.toString('hex').toUpperCase(),
-      binary: finalValue.toString(2).padStart(bits, '0')
+      binary,
+      segments,
     };
   }
 

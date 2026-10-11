@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, Edit3, Radio, Save, Upload, RefreshCw, Plus, X, Trash2 } from 'lucide-react';
 import { Socket } from 'socket.io-client';
-import DoorAnimation from './DoorAnimation';
+import { DoorScene } from './DoorAnimation';
 import DoorSettings from './DoorSettings';
 import { useCardFormats, isValidFacilityCode, isValidCardNumber } from '../hooks/useCardFormats';
 
@@ -464,6 +464,19 @@ const FORMAT_CATEGORIES = [
   { id: 'proprietary', name: 'Proprietary' },
   { id: 'generic', name: 'Generic/Testing' }
 ];
+
+const DC = {
+  text: 'rgb(var(--hv-text))', text2: 'rgb(var(--hv-text-2))', dim: 'rgb(var(--hv-text-3))', line: 'rgb(var(--hv-popup-panel))',
+  good: 'rgb(var(--hv-success))', teal: 'rgb(var(--hv-info))', blue: 'rgb(var(--hv-info-text))', amber: 'rgb(var(--hv-brand))', warn: 'rgb(var(--hv-warning))', crit: 'rgb(var(--hv-error))',
+};
+
+const IconBtn: React.FC<{ title: string; onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }> = ({ title, onClick, disabled, danger, children }) => (
+  <button title={title} aria-label={title} onClick={onClick} disabled={disabled}
+    className={`w-8 h-8 rounded-md flex items-center justify-center transition-colors disabled:opacity-30 ${danger ? 'hover:bg-hv-error-hover/60 hover:text-hv-text' : 'hover:bg-hv-contrast/5 hover:text-hv-text'}`}
+    style={{ color: 'rgb(var(--hv-text-3))' }}>
+    {children}
+  </button>
+);
 
 const DoorSection: React.FC<DoorSectionProps> = ({
   ipAddress,
@@ -1481,536 +1494,330 @@ const DoorSection: React.FC<DoorSectionProps> = ({
   };
 
   /** #redesign: one door as a self-contained transparent card. */
-  const renderDoorCard = (door: Door) => (
-    <div key={door.id} className="bg-[#241E19]/40 backdrop-blur rounded-xl border border-[#38302A]/70">
-      <div className="p-3 space-y-3">
-            {/* Door Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className={`w-4 h-4 rounded-full ${door.enabled ? 'bg-[#6FBF7E] animate-pulse' : 'bg-[#4A3F36]'}`} />
-                <div>
-                  <h3 className="text-2xl font-bold">{door.name}</h3>
-                  <p className="text-sm text-[#786D60]">
-                    Status: {door.enabled ? (
-                      <span className="text-[#7BD497]">Enabled</span>
-                    ) : (
-                      <span className="text-[#786D60]">Disabled</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => refreshDoorInputs(door.id)}
-                  disabled={!connected || !door.enabled}
-                  className="px-4 py-2 bg-[#2A241E] hover:bg-[#322A22] border border-[#4A3F36]/70 text-[#ADA294] rounded-lg font-semibold flex items-center gap-2 disabled:opacity-30"
-                  title="Refresh input states from hardware"
-                >
-                  <RefreshCw size={18} />
-                  Refresh Inputs
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingDoorId(door.id);
-                    setShowDoorSettings(true);
-                  }}
-                  className="px-4 py-2 bg-[#2A241E] hover:bg-[#322A22] border border-[#4A3F36]/70 text-[#ADA294] rounded-lg font-semibold flex items-center gap-2"
-                >
-                  <Edit3 size={18} />
-                  Settings
-                </button>
-                <button
-                  onClick={() => toggleDoorEnabled(door.id)}
-                  className={`px-4 py-2 rounded-lg font-semibold ${
-                    door.enabled ? 'bg-[#3E6E48]/40 hover:bg-[#3E6E48]/60 border border-[#4F8B5C]/40 text-[#CDEBD3]' : 'bg-[#2A241E] hover:bg-[#322A22] border border-[#4A3F36]/70 text-[#786D60]'
-                  }`}
-                >
-                  {door.enabled ? 'Enabled' : 'Disabled'}
-                </button>
-                <button
-                  onClick={() => deleteDoor(door.id)}
-                  title="Delete this door (empties the slot)"
-                  className="px-3 py-2 bg-[#2A241E] hover:bg-[#A84E3F]/70 rounded-lg font-semibold flex items-center text-[#786D60] hover:text-white transition-colors"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
+  // ── Door card (compact) ────────────────────────────────────────────────
+  const [credOpen, setCredOpen] = useState<Record<number, boolean>>({});
+  const [lastEvent, setLastEvent] = useState<Record<number, number>>({});
+  const [runningEvent, setRunningEvent] = useState<Record<number, number | null>>({});
+
+  const runDoorEvent = async (doorId: number, num: number) => {
+    setLastEvent(p => ({ ...p, [doorId]: num }));
+    setRunningEvent(p => ({ ...p, [doorId]: num }));
+    try { await handleCustomEvent(doorId, num); }
+    finally { setRunningEvent(p => ({ ...p, [doorId]: null })); }
+  };
+
+  const supColor = (s?: string) =>
+    s === 'active' ? DC.good : s === 'trouble' ? DC.warn : s === 'short' ? DC.crit : null;
+
+  const renderReader = (door: Door) => {
+    const rid = door.reader;
+    if (!rid) {
+      return (
+        <div className="flex items-center gap-2 text-xs" style={{ color: DC.dim }}>
+          <Radio className="w-3.5 h-3.5 shrink-0" />
+          No reader assigned. Choose one in
+          <button onClick={() => { setEditingDoorId(door.id); setShowDoorSettings(true); }} className="underline" style={{ color: DC.text2 }}>Settings</button>.
+        </div>
+      );
+    }
+    let label = rid;
+    if (rid.startsWith('ctrl-emu-')) {
+      const m = rid.match(/^ctrl-emu-(\d+)-(\d+)$/);
+      if (m) {
+        const addr = parseInt(m[1], 10), port = parseInt(m[2], 10);
+        const b = emuBoards.find(x => x.address === addr);
+        label = `#${addr}${b ? ' ' + b.model : ''} · Reader ${port}`;
+      }
+    } else {
+      const r = readerPool.find(x => x.id === rid);
+      if (r) label = `${r.name} ${r.type === 'wiegand' ? `(D0:${r.d0}, D1:${r.d1})` : `(OSDP ${r.address})`}`;
+    }
+
+    const entry = credEntry[door.id] || { fmtId: 'w26', fc: '', card: '', cat: 'all' };
+    const setEntry = (patch: Partial<{ fmtId: string; fc: string; card: string; cat: string }>) =>
+      setCredEntry(prev => ({ ...prev, [door.id]: { ...(prev[door.id] || { fmtId: 'w26', fc: '', card: '', cat: 'all' }), ...patch } }));
+    const fmt = getCardFormatById ? getCardFormatById(entry.fmtId) : undefined;
+    const fmtBits = fmt?.bits ?? 26;
+    const hasFC = fmt ? (fmt.facilityBits !== 0) : true;
+    const maxFC = fmt?.maxFacility ?? 255;
+    const maxCard = fmt?.maxCard ?? 65535;
+    const catFormats = (cardFormats || []).filter((f: any) => entry.cat === 'all' ? true : f.category === entry.cat);
+
+    const prefillFromLibrary = (credId: string) => {
+      const cred = credentialLibrary.find(x => x.id === credId);
+      if (!cred) return;
+      let fid = 'w26';
+      const raw = String(cred.format || '').toLowerCase();
+      const byId = (cardFormats || []).find((f: any) => f.id === raw);
+      if (byId) fid = byId.id;
+      else {
+        const m = raw.match(/(\d+)/);
+        if (m) {
+          const b = parseInt(m[1], 10);
+          const byBits = (cardFormats || []).find((f: any) => f.bits === b);
+          if (byBits) fid = byBits.id;
+        }
+      }
+      setEntry({ fmtId: fid, fc: String(cred.facilityCode ?? ''), card: String(cred.cardNumber ?? '') });
+    };
+    const clampFC = (v: string) => { if (v === '') return ''; const n = parseInt(v, 10); return Number.isFinite(n) ? String(Math.max(0, Math.min(n, maxFC))) : ''; };
+    const clampCard = (v: string) => { if (v === '') return ''; const n = parseInt(v, 10); return Number.isFinite(n) ? String(Math.max(0, Math.min(n, maxCard))) : ''; };
+
+    const ready = !!fmt && entry.card !== '' && (!hasFC || entry.fc !== '');
+    const presentCard = () => {
+      const facility = hasFC ? parseInt(entry.fc, 10) : 0;
+      const card = parseInt(entry.card, 10);
+      if (!fmt) { onLog('error', 'Select a valid card format'); return; }
+      if (hasFC && (!Number.isFinite(facility) || !isValidFacilityCode(fmt, facility))) { onLog('error', `Invalid facility code (0-${maxFC})`); setCredOpen(p => ({ ...p, [door.id]: true })); return; }
+      if (!Number.isFinite(card) || !isValidCardNumber(fmt, card)) { onLog('error', `Invalid card number (0-${maxCard.toLocaleString()})`); setCredOpen(p => ({ ...p, [door.id]: true })); return; }
+      sendCredentialToReader(door.reader!, { format: fmtBits, facility, card, formatId: fmt.id } as any);
+    };
+    const open = !!credOpen[door.id];
+    const inputCls = 'w-full rounded-md px-2 py-1.5 text-sm border outline-none focus:border-hv-info';
+    const inputStyle = { background: 'rgb(var(--hv-surface))', borderColor: DC.line, color: DC.text };
+
+    return (
+      <div>
+        <div className="flex items-center gap-2">
+          <Radio className="w-4 h-4 shrink-0" style={{ color: DC.teal }} />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm truncate" style={{ color: DC.text }} title={label}>{label}</div>
+            <button onClick={() => setCredOpen(p => ({ ...p, [door.id]: !open }))} className="text-[11px] flex items-center gap-1.5 max-w-full" style={{ color: DC.dim }}
+              title={fmt ? `${fmt.bits}-bit ${fmt.name}` : undefined}>
+              <span className="truncate">{fmt ? `${fmt.bits}-bit` : 'Format'}{hasFC ? ` · FC ${entry.fc || '–'}` : ''} · Card {entry.card || '–'}</span>
+              <span className="shrink-0 underline" style={{ color: DC.text2 }}>{open ? 'done' : 'edit'}</span>
+            </button>
+          </div>
+          <button onClick={presentCard} disabled={!connected || !door.enabled || cardFormatsLoading || !ready}
+            title={ready ? 'Send this credential to the reader' : 'Enter the card details first'}
+            className="px-3 py-1.5 rounded-md text-xs font-bold border transition-colors disabled:opacity-35"
+            style={{ background: 'rgb(var(--hv-info) / 0.15)', borderColor: 'rgb(var(--hv-info) / 0.45)', color: 'rgb(var(--hv-success-text))' }}>
+            Present card
+          </button>
+        </div>
+
+        {open && (
+          <div className="mt-3 space-y-2">
+            <select defaultValue="" onChange={(e) => { if (e.target.value) prefillFromLibrary(e.target.value); }} className={inputCls} style={inputStyle}>
+              <option value="">Fill from a saved credential…</option>
+              {credentialLibrary.map(cred => <option key={cred.id} value={cred.id}>{cred.name} ({cred.format})</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={entry.cat} disabled={cardFormatsLoading} className={inputCls} style={inputStyle}
+                onChange={(e) => {
+                  const cat = e.target.value;
+                  const list = (cardFormats || []).filter((f: any) => cat === 'all' ? true : f.category === cat);
+                  setEntry({ cat, fmtId: list.some((f: any) => f.id === entry.fmtId) ? entry.fmtId : (list[0]?.id || entry.fmtId) });
+                }}>
+                {FORMAT_CATEGORIES.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+              </select>
+              <select value={entry.fmtId} onChange={(e) => setEntry({ fmtId: e.target.value })} disabled={cardFormatsLoading || catFormats.length === 0} className={inputCls} style={inputStyle}>
+                {catFormats.length === 0
+                  ? <option>{cardFormatsLoading ? 'Loading…' : 'No formats'}</option>
+                  : catFormats.map((f: any) => <option key={f.id} value={f.id}>{f.name || f.id} ({f.bits}-bit)</option>)}
+              </select>
             </div>
-
-            {/* #2: I/O Source — Physical (Sequent GPIO) vs Emulated Azure board */}
-            <div className="bg-[#15110B]/60 rounded-lg p-4 border border-[#2A241E]">
-              <div className="flex items-center gap-4 flex-wrap">
-                <span className="text-sm font-bold text-[#5FB7B0]">I/O Source</span>
-                <div className="flex gap-1 bg-black/30 p-1 rounded-lg">
-                  {(['physical', 'emulated'] as const).map(src => (
-                    <button
-                      key={src}
-                      onClick={() => setDoors(prev => prev.map(d =>
-                        d.id === door.id ? { ...d, ioSource: src } : d
-                      ))}
-                      className={`px-4 py-1.5 rounded text-sm font-semibold transition-all ${
-                        (door.ioSource || 'physical') === src
-                          ? 'bg-[#4F8B5C] text-white'
-                          : 'text-[#786D60] hover:bg-[#2A231C]'
-                      }`}
-                    >
-                      {src === 'physical' ? 'Physical (Sequent GPIO)' : 'Emulated (Azure Controller)'}
-                    </button>
-                  ))}
-                </div>
-
-                {(door.ioSource === 'emulated') && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs text-[#786D60]">Board</label>
-                      <select
-                        value={door.emuBoard ?? 0}
-                        onChange={(e) => setDoors(prev => prev.map(d =>
-                          d.id === door.id ? { ...d, emuBoard: parseInt(e.target.value) || 0 } : d
-                        ))}
-                        className="bg-[#241E19] border border-[#2A241E] rounded px-3 py-1.5 text-sm"
-                      >
-                        <option value={0}>— select board —</option>
-                        {emuBoards.map(b => (
-                          <option key={b.address} value={b.address}>
-                            #{b.address} {b.model} ({b.numInputs} in / {b.numOutputs} out / {b.numReaders} rdr){b.online ? '' : ' [offline]'}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {(() => {
-                      const b = emuBoards.find(x => x.address === door.emuBoard);
-                      if (!b || b.numReaders <= 0) return null;
-                      return (
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs text-[#786D60]">Reader Port</label>
-                          <select
-                            value={door.emuReaderPort ?? 0}
-                            onChange={(e) => setDoors(prev => prev.map(d =>
-                              d.id === door.id ? { ...d, emuReaderPort: parseInt(e.target.value) || 0 } : d
-                            ))}
-                            className="bg-[#241E19] border border-[#2A241E] rounded px-3 py-1.5 text-sm"
-                          >
-                            {Array.from({ length: b.numReaders }, (_, i) => (
-                              <option key={i} value={i}>Reader {i}</option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })()}
-                  </>
-                )}
-              </div>
-              {door.ioSource === 'emulated' && !emuBoards.find(x => x.address === door.emuBoard) && (
-                <p className="text-[11px] text-[#F0A73C] mt-2">
-                  {emuBoards.length === 0
-                    ? 'No emulated boards online. Start the Controller Emulator and add devices.'
-                    : 'Select a board — Lock/DPS/REX channels map to that board\'s outputs/inputs.'}
-                </p>
+            <div className={`grid ${hasFC ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
+              {hasFC && (
+                <input type="number" value={entry.fc} min={0} max={maxFC} placeholder={`Facility (0-${maxFC.toLocaleString()})`}
+                  onChange={(e) => setEntry({ fc: e.target.value })} onBlur={(e) => setEntry({ fc: clampFC(e.target.value) })} className={inputCls} style={inputStyle} />
               )}
-              {(() => {
-                const b = emuBoards.find(x => x.address === door.emuBoard);
-                if (door.ioSource !== 'emulated' || !b) return null;
-                return (
-                  <p className="text-[11px] text-[#8FD3CD]/80 mt-2">
-                    Lock = OUTPUT 0-{Math.max(0, b.numOutputs - 1)} · DPS/REX = INPUT 0-{Math.max(0, b.numInputs - 1)} on #{b.address} {b.model}. Set channels in Settings.
-                  </p>
-                );
-              })()}
+              <input type="number" value={entry.card} min={0} max={maxCard} placeholder={`Card (0-${maxCard.toLocaleString()})`}
+                onChange={(e) => setEntry({ card: e.target.value })} onBlur={(e) => setEntry({ card: clampCard(e.target.value) })} className={inputCls} style={inputStyle} />
             </div>
-
-            {/* Door Animation (wrapped for #1 controller-source stamp) */}
-            <div className="relative">
-              <DoorAnimation
-                doorName={door.name}
-                isLocked={!door.lock.active}
-                isOpen={door.dps.active}
-                rexActive={door.rexIn.active}
-                enabled={door.enabled}
-                onCustomEvent={(eventNumber) => handleCustomEvent(door.id, eventNumber)}
-                customEventNames={door.customEvents?.map(e => e.name) || []}
-              />
-              {/* #1: bottom-left stamp — Azure (emulated) vs Aether (onboard/physical) */}
-              <div
-                className={`absolute bottom-2 left-2 z-10 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide flex items-center gap-1 backdrop-blur-sm border ${
-                  door.ioSource === 'emulated'
-                    ? 'bg-[#173B38]/70 border-[#5FB7B0]/50 text-[#8FD3CD]'
-                    : 'bg-[#1F3A28]/70 border-[#6FBF7E]/50 text-[#9BD9AB]'
-                }`}
-                title={door.ioSource === 'emulated'
-                  ? `Azure Controller${door.emuBoard ? ` — board #${door.emuBoard}` : ''}`
-                  : 'Aether (onboard Sequent/Pi I/O)'}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${door.ioSource === 'emulated' ? 'bg-[#6FC7C0]' : 'bg-[#7BD497]'}`} />
-                {door.ioSource === 'emulated' ? 'AZURE CONTROLLER' : 'AETHER'}
-              </div>
-            </div>
-
-            {/* Mandatory I/O - CORRECTED ARCHITECTURE */}
-            <div className="bg-[#15110B]/60 rounded-lg p-3 border border-[#2A241E]">
-              <h4 className="text-xs font-bold mb-2 text-[#5FB7B0] uppercase tracking-wider">Mandatory I/O</h4>
-              <div className="grid grid-cols-3 gap-4">
-                {/* Lock - OUTPUT (Relay) */}
-                <div className="bg-[#241E19]/60 rounded-lg p-4 border border-[#38302A]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-3 h-3 rounded-full ${door.lock.active ? 'bg-[#6FBF7E] animate-pulse' : 'bg-[#38302A]'}`} />
-                    <div className="font-semibold">{door.lock.name}</div>
-                    <span className="text-xs px-2 py-0.5 bg-[#5FB7B0]/15 rounded text-[#8FD3CD]">OUTPUT</span>
-                    {door.ioSource === 'emulated' && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-[#173B38]/60 rounded text-[#8FD3CD]" title="Lock state is driven by IC2 and monitored live. The button is a manual override.">
-                        ◉ MONITORED
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-[#786D60] mb-3">
-                    {door.ioSource === 'emulated'
-                      ? `OUTPUT ${door.lock.channel}${door.emuBoard ? ` (#${door.emuBoard})` : ''}`
-                      : `Relay ${door.lock.channel}`}
-                    {door.lock.stackLevel !== undefined && door.lock.stackLevel > 0 && (
-                      <span className="ml-2 text-[#8FD3CD]">Board {door.lock.stackLevel}</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => toggleDoorLock(door.id)}
-                    disabled={!connected || !door.enabled}
-                    title={door.ioSource === 'emulated'
-                      ? 'Emulated: this reflects IC2\'s lock output (live). Click to manually override.'
-                      : 'Toggle the door strike relay'}
-                    className={`w-full px-3 py-2 rounded-lg font-semibold text-sm transition-all ${
-                      door.lock.active ? 'bg-[#4F8B5C] hover:bg-[#3E6E48]' : 'bg-[#2A241E] hover:bg-[#322A22]'
-                    } disabled:opacity-30`}
-                  >
-                    {door.lock.active ? 'UNLOCKED' : 'LOCKED'}
-                    {door.ioSource === 'emulated' && <span className="ml-1 opacity-60 text-xs">(override)</span>}
-                  </button>
-                </div>
-
-                {/* DPS - INPUT (Opto or Analog) */}
-                <div className="bg-[#241E19]/60 rounded-lg p-4 border border-[#38302A]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-3 h-3 rounded-full ${
-                      door.dps.supervisionState === 'active' ? 'bg-[#6FBF7E] animate-pulse' :
-                      door.dps.supervisionState === 'trouble' ? 'bg-[#E6C766]' :
-                      door.dps.supervisionState === 'short' ? 'bg-[#E0705F]' :
-                      'bg-[#38302A]'
-                    }`} />
-                    <div className="font-semibold">{door.dps.name}</div>
-                    <span className="text-xs px-2 py-0.5 bg-[#7BD497]/15 rounded text-[#9BD9AB]">INPUT</span>
-                  </div>
-                  <div className="text-xs text-[#786D60] mb-3">
-                    {door.ioSource === 'emulated' ? `INPUT ${door.dps.channel}${door.emuBoard ? ` (#${door.emuBoard})` : ''}` : `${door.dps.hardwareType === 'opto' ? 'Opto' : 'Analog'} ${door.dps.channel}`}
-                    {door.dps.supervisionState && door.dps.supervisionState !== 'normal' && (
-                      <span className={`ml-2 ${
-                        door.dps.supervisionState === 'active' ? 'text-[#7BD497]' :
-                        door.dps.supervisionState === 'trouble' ? 'text-[#E6C766]' :
-                        'text-[#F07A6C]'
-                      }`}>
-                        ({door.dps.supervisionState.toUpperCase()})
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => simulateDoorDPS(door.id)}
-                    disabled={!connected || !door.enabled}
-                    className={`w-full px-3 py-2 rounded-lg font-semibold text-sm transition-all ${
-                      door.dps.active ? 'bg-[#4F8B5C] hover:bg-[#3E6E48]' : 'bg-[#2A241E] hover:bg-[#322A22]'
-                    } disabled:opacity-30`}
-                    title="Drive DPS input on the matching channel (loopback rig)"
-                  >
-                    {door.dps.active ? 'OPEN' : 'CLOSED'}
-                  </button>
-                </div>
-
-                {/* REX - INPUT (Opto or Analog) */}
-                <div className="bg-[#241E19]/60 rounded-lg p-4 border border-[#38302A]">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-3 h-3 rounded-full ${
-                      door.rexIn.supervisionState === 'active' ? 'bg-[#6FBF7E] animate-pulse' :
-                      door.rexIn.supervisionState === 'trouble' ? 'bg-[#E6C766]' :
-                      door.rexIn.supervisionState === 'short' ? 'bg-[#E0705F]' :
-                      'bg-[#38302A]'
-                    }`} />
-                    <div className="font-semibold">{door.rexIn.name}</div>
-                    <span className="text-xs px-2 py-0.5 bg-[#7BD497]/15 rounded text-[#9BD9AB]">INPUT</span>
-                  </div>
-                  <div className="text-xs text-[#786D60] mb-3">
-                    {door.ioSource === 'emulated' ? `INPUT ${door.rexIn.channel}${door.emuBoard ? ` (#${door.emuBoard})` : ''}` : `${door.rexIn.hardwareType === 'opto' ? 'Opto' : 'Analog'} ${door.rexIn.channel}`}
-                    {door.rexIn.supervisionState && door.rexIn.supervisionState !== 'normal' && (
-                      <span className={`ml-2 ${
-                        door.rexIn.supervisionState === 'active' ? 'text-[#7BD497]' :
-                        door.rexIn.supervisionState === 'trouble' ? 'text-[#E6C766]' :
-                        'text-[#F07A6C]'
-                      }`}>
-                        ({door.rexIn.supervisionState.toUpperCase()})
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => simulateDoorREX(door.id)}
-                    disabled={!connected || !door.enabled}
-                    className={`w-full px-3 py-2 rounded-lg font-semibold text-sm transition-all ${
-                      door.rexIn.active ? 'bg-[#4F8B5C] hover:bg-[#3E6E48]' : 'bg-[#2A241E] hover:bg-[#322A22]'
-                    } disabled:opacity-30`}
-                    title="Drive REX input on the matching channel (loopback rig)"
-                  >
-                    {door.rexIn.active ? 'PRESSED' : 'IDLE'}
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            {/* #compact: custom I/O Configuration moved into the Settings modal (Custom I/O tab) */}
-            {/* #cred: reader (configured in Settings) + editable credential entry.
-                Neutral/transparent styling (no purple), prefill from library. */}
-            <div className="bg-[#241E19]/40 backdrop-blur rounded-xl p-3 border border-[#38302A]/70">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-bold text-[#ADA294] flex items-center gap-1.5">
-                  <Radio className="w-4 h-4" />
-                  Reader
-                </h4>
-                <span className="text-[10px] text-[#786D60]">configured in Settings</span>
-              </div>
-              {(() => {
-                const rid = door.reader;
-                if (!rid) {
-                  return (
-                    <p className="text-center py-3 text-[#786D60] text-xs">
-                      No reader assigned — open <span className="text-[#ADA294] font-semibold">Settings</span> to choose one.
-                    </p>
-                  );
-                }
-                // Friendly label for the assigned reader
-                let label = rid;
-                if (rid.startsWith('ctrl-emu-')) {
-                  const m = rid.match(/^ctrl-emu-(\d+)-(\d+)$/);
-                  if (m) {
-                    const addr = parseInt(m[1], 10), port = parseInt(m[2], 10);
-                    const b = emuBoards.find(x => x.address === addr);
-                    label = `Emulated #${addr}${b ? ' ' + b.model : ''} — Reader ${port}`;
-                  }
-                } else {
-                  const r = readerPool.find(x => x.id === rid);
-                  if (r) label = `${r.name} ${r.type === 'wiegand' ? `(D0:${r.d0}, D1:${r.d1})` : `(OSDP ${r.address})`}`;
-                }
-
-                const entry = credEntry[door.id] || { fmtId: 'w26', fc: '', card: '', cat: 'all' };
-                const setEntry = (patch: Partial<{ fmtId: string; fc: string; card: string; cat: string }>) =>
-                  setCredEntry(prev => ({ ...prev, [door.id]: { ...(prev[door.id] || { fmtId: 'w26', fc: '', card: '', cat: 'all' }), ...patch } }));
-
-                const fmt = getCardFormatById ? getCardFormatById(entry.fmtId) : undefined;
-                const fmtBits = fmt?.bits ?? 26;
-                const hasFC = fmt ? (fmt.facilityBits !== 0) : true;
-                const maxFC = fmt?.maxFacility ?? 255;
-                const maxCard = fmt?.maxCard ?? 65535;
-
-                const catFormats = (cardFormats || []).filter((f: any) =>
-                  entry.cat === 'all' ? true : f.category === entry.cat);
-
-                // Prefill the editable fields from a saved library credential
-                const prefillFromLibrary = (credId: string) => {
-                  const cred = credentialLibrary.find(x => x.id === credId);
-                  if (!cred) return;
-                  // map a library 'NN-bit'/'wNN' to a real format id when possible
-                  let fid = 'w26';
-                  const raw = String(cred.format || '').toLowerCase();
-                  const byId = (cardFormats || []).find((f: any) => f.id === raw);
-                  if (byId) fid = byId.id;
-                  else {
-                    const m = raw.match(/(\d+)/);
-                    if (m) {
-                      const b = parseInt(m[1], 10);
-                      const byBits = (cardFormats || []).find((f: any) => f.bits === b);
-                      if (byBits) fid = byBits.id;
-                    }
-                  }
-                  setEntry({
-                    fmtId: fid,
-                    fc: String(cred.facilityCode ?? ''),
-                    card: String(cred.cardNumber ?? ''),
-                  });
-                };
-
-                const clampFC = (v: string) => {
-                  if (v === '') return '';
-                  const n = parseInt(v, 10);
-                  if (!Number.isFinite(n)) return '';
-                  return String(Math.max(0, Math.min(n, maxFC)));
-                };
-                const clampCard = (v: string) => {
-                  if (v === '') return '';
-                  const n = parseInt(v, 10);
-                  if (!Number.isFinite(n)) return '';
-                  return String(Math.max(0, Math.min(n, maxCard)));
-                };
-
-                const presentCard = () => {
-                  const facility = hasFC ? parseInt(entry.fc, 10) : 0;
-                  const card = parseInt(entry.card, 10);
-                  if (!fmt) { onLog('error', 'Select a valid card format'); return; }
-                  if (hasFC && (!Number.isFinite(facility) || !isValidFacilityCode(fmt, facility))) {
-                    onLog('error', `Invalid facility code (0-${maxFC})`); return;
-                  }
-                  if (!Number.isFinite(card) || !isValidCardNumber(fmt, card)) {
-                    onLog('error', `Invalid card number (0-${maxCard.toLocaleString()})`); return;
-                  }
-                  // Q2: send BOTH the format id and numeric bits for max compatibility
-                  sendCredentialToReader(door.reader!, {
-                    format: fmtBits,
-                    facility,
-                    card,
-                    formatId: fmt.id,
-                  } as any);
-                };
-
-                return (
-                  <div className="space-y-2">
-                    <div className="bg-[#15110B]/60 rounded px-3 py-2 border border-[#2A241E] text-sm text-[#F3ECE3] truncate" title={label}>
-                      {label}
-                    </div>
-
-                    {/* Prefill from saved library (optional) */}
-                    <select
-                      defaultValue=""
-                      onChange={(e) => { if (e.target.value) prefillFromLibrary(e.target.value); }}
-                      className="w-full bg-[#241E19] border border-[#2A241E] rounded px-2 py-1.5 text-sm text-[#ADA294]"
-                      title="Optionally prefill the fields from a saved credential"
-                    >
-                      <option value="">— Prefill from saved credential —</option>
-                      {credentialLibrary.map(cred => (
-                        <option key={cred.id} value={cred.id}>{cred.name} ({cred.format})</option>
-                      ))}
-                    </select>
-
-                    {/* Category + Format (all 63 formats from the shared catalog) */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] text-[#786D60] mb-0.5">Category</label>
-                        <select
-                          value={entry.cat}
-                          onChange={(e) => {
-                            const cat = e.target.value;
-                            const list = (cardFormats || []).filter((f: any) => cat === 'all' ? true : f.category === cat);
-                            const stillThere = list.some((f: any) => f.id === entry.fmtId);
-                            setEntry({ cat, fmtId: stillThere ? entry.fmtId : (list[0]?.id || entry.fmtId) });
-                          }}
-                          disabled={cardFormatsLoading}
-                          className="w-full bg-[#241E19] border border-[#2A241E] rounded px-2 py-1.5 text-sm"
-                        >
-                          {FORMAT_CATEGORIES.map(cat => (
-                            <option key={cat.id} value={cat.id}>{cat.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-[#786D60] mb-0.5">
-                          Format {cardFormatsLoading ? '(loading…)' : `(${catFormats.length})`}
-                        </label>
-                        <select
-                          value={entry.fmtId}
-                          onChange={(e) => setEntry({ fmtId: e.target.value })}
-                          disabled={cardFormatsLoading || catFormats.length === 0}
-                          className="w-full bg-[#241E19] border border-[#2A241E] rounded px-2 py-1.5 text-sm"
-                        >
-                          {catFormats.length === 0 ? (
-                            <option>{cardFormatsLoading ? 'Loading…' : 'No formats'}</option>
-                          ) : (
-                            catFormats.map((f: any) => (
-                              <option key={f.id} value={f.id}>
-                                {f.name || f.id} ({f.bits}-bit)
-                              </option>
-                            ))
-                          )}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Editable Facility / Card (clamped to the selected format) */}
-                    <div className={`grid ${hasFC ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
-                      {hasFC && (
-                        <div>
-                          <label className="block text-[10px] text-[#786D60] mb-0.5">
-                            Facility <span className="text-[#5E5449]">(0-{maxFC.toLocaleString()})</span>
-                          </label>
-                          <input
-                            type="number"
-                            value={entry.fc}
-                            onChange={(e) => setEntry({ fc: e.target.value })}
-                            onBlur={(e) => setEntry({ fc: clampFC(e.target.value) })}
-                            placeholder="FC"
-                            min={0}
-                            max={maxFC}
-                            className="w-full bg-[#241E19] border border-[#2A241E] rounded px-2 py-1.5 text-sm"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <label className="block text-[10px] text-[#786D60] mb-0.5">
-                          Card # <span className="text-[#5E5449]">(0-{maxCard.toLocaleString()})</span>
-                        </label>
-                        <input
-                          type="number"
-                          value={entry.card}
-                          onChange={(e) => setEntry({ card: e.target.value })}
-                          onBlur={(e) => setEntry({ card: clampCard(e.target.value) })}
-                          placeholder="Card"
-                          min={0}
-                          max={maxCard}
-                          className="w-full bg-[#241E19] border border-[#2A241E] rounded px-2 py-1.5 text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    {fmt && (
-                      <div className="text-[10px] text-[#786D60] truncate" title={fmt.description || fmt.name}>
-                        {fmt.bits}-bit · {fmt.name}{!hasFC ? ' · card-only' : ''}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={presentCard}
-                      disabled={!connected || !door.enabled || cardFormatsLoading}
-                      className="w-full px-3 py-2 bg-[#2A241E] hover:bg-[#322A22] border border-[#4A3F36] rounded font-semibold text-xs disabled:opacity-30"
-                    >
-                      Present Card
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
+          </div>
+        )}
       </div>
+    );
+  };
+
+  const IoRow = ({ label, meta, dot, badge, btn, active, onClick, disabled, title, activeColor = DC.good }: {
+    label: string; meta: React.ReactNode; dot: string | null; badge?: React.ReactNode;
+    btn: string; active: boolean; onClick: () => void; disabled?: boolean; title?: string; activeColor?: string;
+  }) => (
+    <div className="flex items-center gap-3 px-3 py-2">
+      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: dot || 'rgb(var(--hv-line))', boxShadow: dot ? `0 0 8px color-mix(in srgb, ${dot} 53%, transparent)` : 'none' }} />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold truncate" style={{ color: DC.text }}>{label}{badge}</div>
+        <div className="text-[11px] truncate" style={{ color: DC.dim }}>{meta}</div>
+      </div>
+      <button onClick={onClick} disabled={disabled} title={title}
+        className="w-[92px] shrink-0 py-1.5 rounded-md text-xs font-bold border transition-all disabled:opacity-35"
+        style={active
+          ? { background: `color-mix(in srgb, ${activeColor} 20%, transparent)`, borderColor: activeColor, color: 'rgb(var(--hv-text))' }
+          : { background: 'rgb(var(--hv-widget-panel))', borderColor: DC.line, color: DC.text2 }}>
+        {btn}
+      </button>
     </div>
   );
+
+  const renderDoorCard = (door: Door) => {
+    const emu = door.ioSource === 'emulated';
+    const board = emuBoards.find(x => x.address === door.emuBoard);
+    const isOpen = door.dps.active;
+    const unlocked = door.lock.active;
+    const state = !door.enabled ? 'DISABLED' : isOpen ? 'OPEN' : unlocked ? 'UNLOCKED' : 'LOCKED';
+    const stateColor = !door.enabled ? DC.dim : isOpen ? DC.blue : unlocked ? DC.good : DC.crit;
+    const events = (door.customEvents || []).map((e, i) => ({ ...e, num: i + 1 })).filter(e => e.enabled);
+    const chan = (io: { channel: number; hardwareType?: string }, kind: 'in' | 'out') =>
+      emu ? `${kind === 'out' ? 'Output' : 'Input'} ${io.channel}${door.emuBoard ? ` · #${door.emuBoard}` : ''}`
+          : kind === 'out' ? `Relay ${io.channel}` : `${io.hardwareType === 'analog' ? 'Analog' : 'Opto'} ${io.channel}`;
+
+    return (
+      <div key={door.id} className="rounded-xl border overflow-hidden transition-colors"
+        style={{ background: 'rgb(var(--hv-widget) / 0.45)', borderColor: door.enabled && (isOpen || unlocked) ? `color-mix(in srgb, ${stateColor} 40%, transparent)` : 'rgb(var(--hv-line))' }}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: DC.line }}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <h3 className="text-lg font-bold truncate" style={{ color: DC.text }}>{door.name}</h3>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider shrink-0"
+                style={{ background: `color-mix(in srgb, ${stateColor} 13%, transparent)`, color: stateColor, border: `1px solid color-mix(in srgb, ${stateColor} 33%, transparent)` }}>{state}</span>
+            </div>
+            <div className="text-[11px] mt-0.5 truncate" style={{ color: DC.dim }}>
+              {emu
+                ? <>Azure controller · {board ? `#${board.address} ${board.model}${board.online ? '' : ' (offline)'}` : <span style={{ color: DC.warn }}>no board selected</span>}</>
+                : 'Aether · onboard Sequent I/O'}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <IconBtn title="Refresh inputs from hardware" onClick={() => refreshDoorInputs(door.id)} disabled={!connected || !door.enabled}><RefreshCw size={15} /></IconBtn>
+            <IconBtn title="Door settings" onClick={() => { setEditingDoorId(door.id); setShowDoorSettings(true); }}><Settings size={15} /></IconBtn>
+            <IconBtn title="Delete this door" onClick={() => deleteDoor(door.id)} danger><Trash2 size={15} /></IconBtn>
+            <button onClick={() => toggleDoorEnabled(door.id)} title={door.enabled ? 'Enabled: click to disable' : 'Disabled: click to enable'}
+              className="ml-1 relative w-10 h-5 rounded-full transition-colors" style={{ background: door.enabled ? 'rgb(var(--hv-success-strong))' : 'rgb(var(--hv-line))' }}>
+              <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: door.enabled ? 22 : 2 }} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]">
+          {/* Door: fills the whole panel, whatever height the controls make it */}
+          <div className="relative sm:border-r" style={{ borderColor: DC.line, background: 'rgb(var(--hv-surface) / 0.45)', minHeight: 270 }}>
+            <DoorScene isLocked={!door.lock.active} isOpen={door.dps.active} rexActive={door.rexIn.active} enabled={door.enabled}
+              viewBox="22 1 156 250"
+              style={{ position: 'absolute', top: 10, left: 8, width: 'calc(100% - 16px)', height: 'calc(100% - 20px)' }} />
+            {door.enabled && door.rexIn.active && (
+              <span className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded text-[10px] font-bold"
+                style={{ background: 'rgb(var(--hv-brand) / 0.2)', color: DC.amber, border: `1px solid color-mix(in srgb, ${DC.amber} 40%, transparent)` }}>REX</span>
+            )}
+          </div>
+
+          {/* Controls */}
+          <div className="flex flex-col min-w-0">
+            <div className="divide-y divide-hv-popup-panel">
+              <IoRow label={door.lock.name} meta={<>{chan(door.lock, 'out')}{emu ? ' · driven by controller' : ''}</>}
+                dot={unlocked ? DC.good : null} active={unlocked} btn={unlocked ? 'UNLOCKED' : 'LOCKED'}
+                onClick={() => toggleDoorLock(door.id)} disabled={!connected || !door.enabled}
+                title={emu ? 'Shows the controller’s lock output. Click to override.' : 'Toggle the door strike relay'} />
+              <IoRow label={door.dps.name} meta={<>{chan(door.dps, 'in')}{door.dps.supervisionState && door.dps.supervisionState !== 'normal' ? ` · ${door.dps.supervisionState.toUpperCase()}` : ''}</>}
+                dot={supColor(door.dps.supervisionState) || (isOpen ? DC.blue : null)} active={isOpen} activeColor={DC.blue}
+                btn={isOpen ? 'OPEN' : 'CLOSED'} onClick={() => simulateDoorDPS(door.id)} disabled={!connected || !door.enabled}
+                title="Drive the door position input" />
+              <IoRow label={door.rexIn.name} meta={<>{chan(door.rexIn, 'in')}{door.rexIn.supervisionState && door.rexIn.supervisionState !== 'normal' ? ` · ${door.rexIn.supervisionState.toUpperCase()}` : ''}</>}
+                dot={supColor(door.rexIn.supervisionState) || (door.rexIn.active ? DC.amber : null)} active={door.rexIn.active} activeColor={DC.amber}
+                btn={door.rexIn.active ? 'PRESSED' : 'PRESS'} onClick={() => simulateDoorREX(door.id)} disabled={!connected || !door.enabled}
+                title="Drive the request-to-exit input" />
+            </div>
+
+            {/* Events */}
+            <div className="px-3 py-2.5 border-t" style={{ borderColor: DC.line }}>
+              <div className="text-[10px] font-bold tracking-wider mb-1.5" style={{ color: DC.dim }}>EVENTS</div>
+              {events.length === 0 ? (
+                <div className="text-[11px]" style={{ color: DC.dim }}>None set up. Add them in <button className="underline" style={{ color: DC.text2 }} onClick={() => { setEditingDoorId(door.id); setShowDoorSettings(true); }}>Settings</button>.</div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {events.map(e => {
+                    const running = runningEvent[door.id] === e.num;
+                    const last = lastEvent[door.id] === e.num;
+                    return (
+                      <button key={e.num} onClick={() => runDoorEvent(door.id, e.num)} disabled={!connected || !door.enabled || running}
+                        title={`Run "${e.name}" (${e.steps.length} steps)`}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold border flex items-center gap-1 max-w-full disabled:opacity-60"
+                        style={{ background: running ? 'rgb(var(--hv-info) / 0.25)' : last ? 'rgb(var(--hv-info) / 0.1)' : 'rgb(var(--hv-widget-panel))', borderColor: running || last ? `color-mix(in srgb, ${DC.teal} 53%, transparent)` : DC.line, color: running || last ? 'rgb(var(--hv-success-text))' : DC.text2 }}>
+                        <span style={{ fontSize: 8 }}>{running ? '■' : '▶'}</span><span className="truncate">{e.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Reader */}
+            <div className="px-3 py-2.5 border-t mt-auto" style={{ borderColor: DC.line }}>
+              {renderReader(door)}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer: I/O source */}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-t text-xs" style={{ borderColor: DC.line, background: 'rgb(var(--hv-surface) / 0.35)' }}>
+          <span style={{ color: DC.dim }}>I/O</span>
+          <div className="flex p-0.5 rounded-md" style={{ background: 'rgb(var(--hv-surface))' }}>
+            {(['physical', 'emulated'] as const).map(src => {
+              const on = (door.ioSource || 'physical') === src;
+              return (
+                <button key={src} onClick={() => setDoors(prev => prev.map(d => d.id === door.id ? { ...d, ioSource: src } : d))}
+                  className="px-2.5 py-1 rounded font-semibold transition-colors"
+                  style={on ? { background: 'rgb(var(--hv-success-tint-strong))', color: 'rgb(var(--hv-success-text))' } : { color: DC.dim }}>
+                  {src === 'physical' ? 'Aether (Sequent)' : 'Azure (emulated)'}
+                </button>
+              );
+            })}
+          </div>
+          {emu && (
+            <>
+              <select value={door.emuBoard ?? 0} className="rounded-md px-2 py-1 border" style={{ background: 'rgb(var(--hv-surface))', borderColor: DC.line, color: DC.text }}
+                onChange={(e) => setDoors(prev => prev.map(d => d.id === door.id ? { ...d, emuBoard: parseInt(e.target.value) || 0 } : d))}>
+                <option value={0}>{emuBoards.length ? 'Select board…' : 'No boards online'}</option>
+                {emuBoards.map(b => (
+                  <option key={b.address} value={b.address} title={`${b.numInputs} in / ${b.numOutputs} out${b.numReaders ? ` / ${b.numReaders} readers` : ''}`}>#{b.address} {b.model}{b.online ? '' : ' (offline)'}</option>
+                ))}
+              </select>
+              {board && board.numReaders > 0 && (
+                <select value={door.emuReaderPort ?? 0} className="rounded-md px-2 py-1 border" style={{ background: 'rgb(var(--hv-surface))', borderColor: DC.line, color: DC.text }}
+                  onChange={(e) => setDoors(prev => prev.map(d => d.id === door.id ? { ...d, emuReaderPort: parseInt(e.target.value) || 0 } : d))}>
+                  {Array.from({ length: board.numReaders }, (_, i) => <option key={i} value={i}>Reader {i}</option>)}
+                </select>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   /** ---------- Render ---------- */
   return (
     <div className="space-y-6">
       {/* Global System I/O Panel */}
-      <div className="bg-gradient-to-br from-[#C6604F]/12 to-[#C67A3E]/12 backdrop-blur rounded-xl p-6 border border-[#C6604F]/40">
-        <div className="flex items-center justify-between mb-4">
+      <div className="backdrop-blur rounded-xl px-5 py-4 border" style={{ background: 'rgb(var(--hv-widget) / 0.45)', borderColor: 'rgb(var(--hv-error-tint-strong))' }}>
+        <div className="flex items-center justify-between mb-3">
           <h2
             onClick={() => setSystemOutputsCollapsed(v => !v)}
-            className="text-2xl font-bold flex items-center gap-2 cursor-pointer select-none"
+            className="text-lg font-bold flex items-center gap-2 cursor-pointer select-none"
             title={systemOutputsCollapsed ? 'Expand' : 'Collapse'}
           >
-            <span className="text-[#786D60] text-base w-4 inline-block">{systemOutputsCollapsed ? '▶' : '▼'}</span>
-            <div className="w-3 h-3 bg-[#E0705F] rounded-full animate-pulse" />
-            System Outputs (ACS Global Triggers)
+            <span className="text-hv-text-3 text-base w-4 inline-block">{systemOutputsCollapsed ? '▶' : '▼'}</span>
+            <div className="w-2.5 h-2.5 bg-hv-error rounded-full" />
+            System Outputs
+            <span className="text-xs font-normal" style={{ color: DC.dim }}>ACS global triggers</span>
           </h2>
           <button
             onClick={() => setShowSystemOutputConfig(!showSystemOutputConfig)}
-            className="px-4 py-2 bg-[#2A241E] hover:bg-[#322A22] rounded-lg font-semibold flex items-center gap-2 transition-all"
+            className="px-3 py-1.5 text-sm bg-hv-popup-panel hover:bg-hv-box rounded-lg font-semibold flex items-center gap-2 transition-all"
           >
-            <Settings size={18} />
+            <Settings size={15} />
             {showSystemOutputConfig ? 'Hide Config' : 'Configure GPIO'}
           </button>
         </div>
 
         {!systemOutputsCollapsed && (<>
         {showSystemOutputConfig && (
-          <div className="mb-6 p-4 bg-[#15110B]/60 rounded-lg border border-[#38302A]">
-            <h3 className="text-lg font-bold mb-3 text-[#5FB7B0]">Relay Channel Configuration</h3>
-            <p className="text-xs text-[#786D60] mb-4">
+          <div className="mb-6 p-4 bg-hv-surface/60 rounded-lg border border-hv-line">
+            <h3 className="text-lg font-bold mb-3 text-hv-info-fg">Relay Channel Configuration</h3>
+            <p className="text-xs text-hv-text-3 mb-4">
               Configure Sequent IOplus relay channels (0-7). Enter -1 for unconfigured.
             </p>
             <div className="grid grid-cols-4 gap-4">
@@ -2021,7 +1828,7 @@ const DoorSection: React.FC<DoorSectionProps> = ({
                 { io: globalFAI, setIO: setGlobalFAI, label: 'Fire Alarm Relay' }
               ].map(({ io, setIO, label }) => (
                 <div key={label}>
-                  <label className="block text-sm font-semibold text-[#ADA294] mb-2">{label}</label>
+                  <label className="block text-sm font-semibold text-hv-text-2 mb-2">{label}</label>
                   <input
                     type="number"
                     value={io.channel === -1 ? '' : io.channel}
@@ -2029,7 +1836,7 @@ const DoorSection: React.FC<DoorSectionProps> = ({
                     placeholder="-1"
                     min={-1}
                     max={7}
-                    className="w-full bg-[#241E19] border border-[#2A241E] rounded-lg px-3 py-2 text-white"
+                    className="w-full bg-hv-widget border border-hv-popup-panel rounded-lg px-3 py-2 text-hv-text"
                   />
                 </div>
               ))}
@@ -2037,45 +1844,43 @@ const DoorSection: React.FC<DoorSectionProps> = ({
           </div>
         )}
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { io: globalPowerFault, setIO: setGlobalPowerFault, color: 'red', activeLabel: 'FAULT', normalLabel: 'NORMAL' },
-            { io: globalBatteryFault, setIO: setGlobalBatteryFault, color: 'orange', activeLabel: 'FAULT', normalLabel: 'NORMAL' },
-            { io: globalTamper, setIO: setGlobalTamper, color: 'yellow', activeLabel: 'TAMPER ACTIVE', normalLabel: 'NORMAL' },
-            { io: globalFAI, setIO: setGlobalFAI, color: 'red', activeLabel: 'FIRE ALARM', normalLabel: 'NORMAL' }
-          ].map(({ io, setIO, color, activeLabel, normalLabel }) => (
-            <div key={io.name} className="bg-[#15110B]/60 rounded-lg p-4 border border-[#2A241E]">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="font-semibold text-lg">{io.name}</div>
-                  <div className="text-sm text-[#786D60]">
-                    Relay: {io.channel === -1 ? (
-                      <span className="text-[#D9B24E]">UNCONFIGURED</span>
-                    ) : (
-                      <span className="text-[#5FB7B0]">{io.channel}</span>
-                    )}
+            { io: globalPowerFault, setIO: setGlobalPowerFault, color: DC.crit, activeLabel: 'FAULT' },
+            { io: globalBatteryFault, setIO: setGlobalBatteryFault, color: DC.amber, activeLabel: 'FAULT' },
+            { io: globalTamper, setIO: setGlobalTamper, color: DC.warn, activeLabel: 'TAMPER' },
+            { io: globalFAI, setIO: setGlobalFAI, color: DC.crit, activeLabel: 'FIRE ALARM' }
+          ].map(({ io, setIO, color, activeLabel }) => {
+            const unconfigured = io.channel === -1;
+            return (
+              <div key={io.name} className="flex items-center gap-3 rounded-lg px-3 py-2.5 border"
+                style={{ background: io.active ? `color-mix(in srgb, ${color} 12%, transparent)` : 'rgb(var(--hv-surface) / 0.55)', borderColor: io.active ? `color-mix(in srgb, ${color} 53%, transparent)` : DC.line }}>
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${io.active ? 'animate-pulse' : ''}`}
+                  style={{ background: io.active ? color : 'rgb(var(--hv-line))', boxShadow: io.active ? `0 0 10px ${color}` : 'none' }} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold truncate" style={{ color: DC.text }}>{io.name}</div>
+                  <div className="text-[11px]" style={{ color: unconfigured ? DC.warn : DC.dim }}>
+                    {unconfigured ? 'No relay set' : `Relay ${io.channel}`}
                   </div>
                 </div>
-                <div className={`w-6 h-6 rounded-full ${io.active ? `bg-${color}-500 shadow-lg shadow-${color}-500/50 animate-pulse` : 'bg-[#38302A]'}`} />
+                <button
+                  onClick={() => toggleGlobalIO(io, setIO)}
+                  disabled={!connected || unconfigured}
+                  title={unconfigured ? 'Set a relay channel in Configure GPIO first' : io.active ? 'Click to restore' : 'Click to trigger'}
+                  className="px-2.5 py-1.5 rounded-md text-[11px] font-bold border shrink-0 disabled:opacity-35"
+                  style={io.active ? { background: `color-mix(in srgb, ${color} 25%, transparent)`, borderColor: color, color: 'rgb(var(--hv-text))' } : { background: 'rgb(var(--hv-widget-panel))', borderColor: DC.line, color: DC.text2 }}>
+                  {io.active ? activeLabel : 'NORMAL'}
+                </button>
               </div>
-              <button
-                onClick={() => toggleGlobalIO(io, setIO)}
-                disabled={!connected || io.channel === -1}
-                className={`w-full px-4 py-2 rounded-lg font-semibold transition-all ${
-                  io.active ? `bg-${color}-600 hover:bg-${color}-700` : 'bg-[#2A241E] hover:bg-[#322A22]'
-                } disabled:opacity-30 disabled:cursor-not-allowed`}
-              >
-                {io.active ? activeLabel : normalLabel}
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
         </>)}
       </div>
 
       {/* #5: fixed 8-slot transparent grid — configured doors render as
           cards, empty slots show a "+ Add Door" tile. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {Array.from({ length: MAX_DOORS }, (_, slot) => {
           const door = doors[slot];
           if (door) return renderDoorCard(door);
@@ -2083,13 +1888,13 @@ const DoorSection: React.FC<DoorSectionProps> = ({
             <button
               key={`empty-${slot}`}
               onClick={() => { setNewDoorName(''); setNewDoorSource('physical'); setShowAddDialog(true); }}
-              className="bg-[#241E19]/30 hover:bg-[#241E19]/50 backdrop-blur rounded-xl border-2 border-dashed border-[#38302A]/70 hover:border-[#4F8B5C]/50 transition-all min-h-[280px] flex flex-col items-center justify-center gap-3 text-[#786D60] hover:text-[#7BD497] group"
+              className="bg-hv-widget/30 hover:bg-hv-widget/50 backdrop-blur rounded-xl border-2 border-dashed border-hv-line/70 hover:border-hv-success-strong/50 transition-all min-h-[200px] flex flex-col items-center justify-center gap-3 text-hv-text-3 hover:text-hv-success-text group"
             >
               <div className="w-14 h-14 rounded-full border-2 border-current flex items-center justify-center group-hover:scale-110 transition-transform">
                 <Plus size={28} />
               </div>
               <div className="text-sm font-semibold">Add Door</div>
-              <div className="text-[11px] text-[#5E5449]">Slot {slot + 1} of {MAX_DOORS}</div>
+              <div className="text-[11px] text-hv-text-3">Slot {slot + 1} of {MAX_DOORS}</div>
             </button>
           );
         })}
@@ -2097,33 +1902,33 @@ const DoorSection: React.FC<DoorSectionProps> = ({
 
 
       {/* Configuration Management */}
-      <div className="bg-[#241E19]/60 backdrop-blur rounded-xl p-6 border border-[#38302A]">
+      <div className="bg-hv-widget/60 backdrop-blur rounded-xl p-6 border border-hv-line">
         <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-          <div className="w-3 h-3 bg-[#786D60] rounded-full" />
+          <div className="w-3 h-3 bg-hv-text-3 rounded-full" />
           Configuration Management
         </h2>
-        <p className="text-sm text-[#ADA294] mb-4">
+        <p className="text-sm text-hv-text-2 mb-4">
           Save your complete door configuration including system outputs, door I/O mappings,
           reader assignments, and custom events. Save writes to this device so it survives a reboot.
         </p>
         <div className="flex gap-3">
           <button
             onClick={() => saveDoorConfiguration()}
-            className="flex-1 px-6 py-3 bg-[#2A231C] hover:bg-[#322A22] border border-[#4A3F36] rounded-lg font-semibold flex items-center justify-center gap-2"
+            className="flex-1 px-6 py-3 bg-hv-popup-panel hover:bg-hv-box border border-hv-line-strong rounded-lg font-semibold flex items-center justify-center gap-2"
           >
             <Save size={20} />
             Save Configuration
           </button>
           <button
             onClick={() => loadDoorConfigurationFromBackend()}
-            className="flex-1 px-6 py-3 bg-[#2A231C] hover:bg-[#322A22] border border-[#38302A] rounded-lg font-semibold flex items-center justify-center gap-2"
+            className="flex-1 px-6 py-3 bg-hv-popup-panel hover:bg-hv-box border border-hv-line rounded-lg font-semibold flex items-center justify-center gap-2"
           >
             <Upload size={20} />
             Load Configuration
           </button>
           <button
             onClick={() => resetDoorConfiguration()}
-            className="px-6 py-3 bg-[#241E19] hover:bg-[#2A231C] border border-[#A84E3F]/60 text-[#F5988A] rounded-lg font-semibold flex items-center justify-center gap-2"
+            className="px-6 py-3 bg-hv-widget hover:bg-hv-popup-panel border border-hv-error-hover/60 text-hv-error-text rounded-lg font-semibold flex items-center justify-center gap-2"
           >
             <RefreshCw size={20} />
             Reset to Defaults
@@ -2134,46 +1939,46 @@ const DoorSection: React.FC<DoorSectionProps> = ({
       {/* #5: Add Door dialog */}
       {showAddDialog && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-[#15110B] rounded-xl w-[420px] border border-[#38302A] overflow-hidden">
-            <div className="bg-gradient-to-r from-[#4F8B5C]/25 to-[#173B38]/40 p-5 border-b border-[#38302A] flex items-center justify-between">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2"><Plus size={22} /> Add Door</h3>
-              <button onClick={() => setShowAddDialog(false)} className="text-[#786D60] hover:text-white"><X size={22} /></button>
+          <div className="bg-hv-surface rounded-xl w-[420px] border border-hv-line overflow-hidden">
+            <div className="bg-gradient-to-r from-hv-success-strong/25 to-hv-info-tint/40 p-5 border-b border-hv-line flex items-center justify-between">
+              <h3 className="text-xl font-bold text-hv-text flex items-center gap-2"><Plus size={22} /> Add Door</h3>
+              <button onClick={() => setShowAddDialog(false)} className="text-hv-text-3 hover:text-hv-text"><X size={22} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-[#ADA294] mb-2">Door Name</label>
+                <label className="block text-sm font-semibold text-hv-text-2 mb-2">Door Name</label>
                 <input
                   type="text"
                   value={newDoorName}
                   onChange={(e) => setNewDoorName(e.target.value)}
                   placeholder={`Door ${doors.length + 1}`}
                   autoFocus
-                  className="w-full bg-[#241E19] border border-[#38302A] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-[#6FBF7E]"
+                  className="w-full bg-hv-widget border border-hv-line rounded-lg px-4 py-2.5 text-hv-text focus:outline-none focus:ring-2 focus:ring-hv-success"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-[#ADA294] mb-2">I/O Source</label>
-                <div className="flex gap-1 bg-black/30 p-1 rounded-lg">
+                <label className="block text-sm font-semibold text-hv-text-2 mb-2">I/O Source</label>
+                <div className="flex gap-1 bg-hv-surface/30 p-1 rounded-lg">
                   {(['physical', 'emulated'] as const).map(src => (
                     <button
                       key={src}
                       onClick={() => setNewDoorSource(src)}
                       className={`flex-1 px-3 py-2 rounded text-sm font-semibold transition-all ${
-                        newDoorSource === src ? 'bg-[#4F8B5C] text-white' : 'text-[#786D60] hover:bg-[#2A231C]'
+                        newDoorSource === src ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'text-hv-text-3 hover:bg-hv-popup-panel'
                       }`}
                     >
                       {src === 'physical' ? 'Physical (Sequent GPIO)' : 'Emulated (Azure)'}
                     </button>
                   ))}
                 </div>
-                <p className="text-[11px] text-[#786D60] mt-2">
+                <p className="text-[11px] text-hv-text-3 mt-2">
                   You can change the source, board, channels and readers in Settings after creating.
                 </p>
               </div>
             </div>
-            <div className="bg-[#1B1613]/60 p-5 border-t border-[#38302A] flex gap-3">
-              <button onClick={() => setShowAddDialog(false)} className="flex-1 px-4 py-2.5 bg-[#2A231C] hover:bg-[#322A22] rounded-lg font-semibold">Cancel</button>
-              <button onClick={createDoor} className="flex-1 px-4 py-2.5 bg-[#4F8B5C] hover:bg-[#3E6E48] rounded-lg font-semibold flex items-center justify-center gap-2">
+            <div className="bg-hv-widget-panel/60 p-5 border-t border-hv-line flex gap-3">
+              <button onClick={() => setShowAddDialog(false)} className="flex-1 px-4 py-2.5 bg-hv-popup-panel hover:bg-hv-box rounded-lg font-semibold">Cancel</button>
+              <button onClick={createDoor} className="flex-1 px-4 py-2.5 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong rounded-lg font-semibold flex items-center justify-center gap-2">
                 <Plus size={18} /> Create &amp; Configure
               </button>
             </div>

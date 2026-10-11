@@ -55,12 +55,12 @@ const FORMAT_CATEGORIES = [
 
 // v5.0 Parity type display info
 const PARITY_INFO: Record<string, { label: string; color: string; warning?: string }> = {
-  'std': { label: 'Standard', color: '#6FBF7E' },
-  'none': { label: 'No Parity', color: '#786D60' },
-  'interleaved': { label: 'Interleaved', color: '#E6C766', warning: 'Complex parity - verify with real cards' },
-  'multi-row': { label: 'Multi-Row', color: '#C6604F', warning: 'Multi-row parity - complex encoding' },
-  'xor': { label: 'XOR Checksum', color: '#5FB7B0', warning: 'XOR byte checksum - not traditional parity' },
-  'scrambled': { label: 'Scrambled', color: '#D98A3D', warning: 'Scrambled bit positions - lookup tables required' }
+  'std': { label: 'Standard', color: 'rgb(var(--hv-success-fg))' },
+  'none': { label: 'No Parity', color: 'rgb(var(--hv-text-3))' },
+  'interleaved': { label: 'Interleaved', color: 'rgb(var(--hv-warning-fg))', warning: 'Complex parity - verify with real cards' },
+  'multi-row': { label: 'Multi-Row', color: 'rgb(var(--hv-error-strong))', warning: 'Multi-row parity - complex encoding' },
+  'xor': { label: 'XOR Checksum', color: 'rgb(var(--hv-info-fg))', warning: 'XOR byte checksum - not traditional parity' },
+  'scrambled': { label: 'Scrambled', color: 'rgb(var(--hv-brand-fg))', warning: 'Scrambled bit positions - lookup tables required' }
 };
 
 const getApiUrl = (): string => {
@@ -276,57 +276,57 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
       margin: '0 auto',
       backgroundColor: 'transparent',
       minHeight: '100vh',
-      color: '#EDE6DB'
+      color: 'rgb(var(--hv-text))'
     } as React.CSSProperties,
     card: {
-      border: '1px solid rgba(74, 63, 54, 0.6)',
+      border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
       borderRadius: '8px',
       padding: '20px',
-      backgroundColor: 'rgba(0, 0, 0, 0.25)',
-      color: '#EDE6DB'
+      backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+      color: 'rgb(var(--hv-text))'
     } as React.CSSProperties,
     configPanel: {
-      border: '1px solid rgba(74, 63, 54, 0.6)',
+      border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
       borderRadius: '8px',
       padding: '20px',
       marginBottom: '20px',
-      backgroundColor: 'rgba(0, 0, 0, 0.25)',
-      color: '#EDE6DB'
+      backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+      color: 'rgb(var(--hv-text))'
     } as React.CSSProperties,
     readerConfig: {
-      border: '2px solid rgba(74, 63, 54, 0.6)',
+      border: '2px solid rgb(var(--hv-line-strong) / 0.6)',
       borderRadius: '8px',
       padding: '15px',
-      backgroundColor: 'rgba(0, 0, 0, 0.25)',
-      color: '#EDE6DB'
+      backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+      color: 'rgb(var(--hv-text))'
     } as React.CSSProperties,
     input: {
       width: '100%',
       padding: '8px',
-      border: '1px solid rgba(74, 63, 54, 0.6)',
+      border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
       borderRadius: '4px',
-      backgroundColor: 'rgba(0, 0, 0, 0.25)',
-      color: '#EDE6DB',
+      backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+      color: 'rgb(var(--hv-text))',
       fontSize: '14px'
     } as React.CSSProperties,
     button: {
       padding: '8px 16px',
-      border: '1px solid rgba(74, 63, 54, 0.6)',
+      border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
       borderRadius: '4px',
-      backgroundColor: 'rgba(42, 35, 28, 0.6)',
-      color: '#fff',
+      backgroundColor: 'rgb(var(--hv-popup-panel) / 0.6)',
+      color: 'rgb(var(--hv-text))',
       cursor: 'pointer',
       fontSize: '14px'
     } as React.CSSProperties,
     tabActive: {
       padding: '10px 20px',
       border: 'none',
-      borderBottom: '3px solid #F0A73C',
-      backgroundColor: 'rgba(240, 167, 60, 0.14)',
+      borderBottom: '3px solid rgb(var(--hv-brand))',
+      backgroundColor: 'rgb(var(--hv-brand) / 0.14)',
       cursor: 'pointer',
       fontWeight: 'bold',
       fontSize: '14px',
-      color: '#F0A73C'
+      color: 'rgb(var(--hv-brand-fg))'
     } as React.CSSProperties,
     tabInactive: {
       padding: '10px 20px',
@@ -335,22 +335,22 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
       backgroundColor: 'transparent',
       cursor: 'pointer',
       fontSize: '14px',
-      color: '#A79C8C'
+      color: 'rgb(var(--hv-text-2))'
     } as React.CSSProperties,
     presetBtn: {
       flex: 1,
       padding: '8px',
-      border: '2px solid rgba(74, 63, 54, 0.6)',
-      backgroundColor: 'rgba(42, 35, 28, 0.6)',
+      border: '2px solid rgb(var(--hv-line-strong) / 0.6)',
+      backgroundColor: 'rgb(var(--hv-popup-panel) / 0.6)',
       borderRadius: '6px',
       cursor: 'pointer',
       fontSize: '12px',
-      color: '#EDE6DB'
+      color: 'rgb(var(--hv-text))'
     } as React.CSSProperties,
     transmitBtn: {
       width: '100%',
       padding: '12px',
-      backgroundColor: '#F0A73C',
+      backgroundColor: 'rgb(var(--hv-brand))',
       color: '#000',
       border: 'none',
       borderRadius: '4px',
@@ -362,7 +362,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
     broadcastBtn: {
       width: '100%',
       padding: '12px',
-      backgroundColor: '#F0A73C',
+      backgroundColor: 'rgb(var(--hv-brand))',
       color: '#000',
       border: 'none',
       borderRadius: '4px',
@@ -707,8 +707,8 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
     <div style={styles.container}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
-          <h2 style={{ margin: 0, color: '#E3D8C8', fontSize: '28px', fontWeight: 800 }}>Wiegand Transmitter v1.1.0</h2>
-          <p style={{ color: '#ADA294', fontSize: '15px', margin: '6px 0 0 0' }}>Send Wiegand credentials and keypad PINs to Emulated Wiegand readers</p>
+          <h2 style={{ margin: 0, color: 'rgb(var(--hv-text))', fontSize: '28px', fontWeight: 800 }}>Wiegand Transmitter v1.1.0</h2>
+          <p style={{ color: 'rgb(var(--hv-text-2))', fontSize: '15px', margin: '6px 0 0 0' }}>Send Wiegand credentials and keypad PINs to Emulated Wiegand readers</p>
         </div>
         <button onClick={() => setShowReaderConfig(!showReaderConfig)} style={styles.button}>
           ⚙️ {showReaderConfig ? 'Hide' : 'Configure'} Readers
@@ -717,12 +717,12 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
       {!transmitterAvailable && (
         <div style={{
-          backgroundColor: '#2E2410',
-          border: '1px solid #E6C766',
+          backgroundColor: 'rgb(var(--hv-brand-tint))',
+          border: '1px solid rgb(var(--hv-warning))',
           borderRadius: '4px',
           padding: '12px',
           marginBottom: '20px',
-          color: '#F0C674'
+          color: 'rgb(var(--hv-brand-text))'
         }}>
           ⚠️ Wiegand transmitter not available. Please compile wiegand_tx first.
         </div>
@@ -730,7 +730,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
       {showReaderConfig && (
         <div style={styles.configPanel}>
-          <h3 style={{ marginTop: 0, color: '#E3D8C8' }}>Reader Configuration</h3>
+          <h3 style={{ marginTop: 0, color: 'rgb(var(--hv-text))' }}>Reader Configuration</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
             {readers.map((reader, index) => (
               <div key={index} style={{
@@ -748,10 +748,10 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                       border: 'none',
                       backgroundColor: 'transparent',
                       width: '60%',
-                      color: '#E3D8C8'
+                      color: 'rgb(var(--hv-text))'
                     }}
                   />
-                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', color: '#EDE6DB' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', color: 'rgb(var(--hv-text))' }}>
                     <input
                       type="checkbox"
                       checked={reader.enabled}
@@ -764,7 +764,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#A79C8C', display: 'block', marginBottom: '5px' }}>D0 Pin</label>
+                    <label style={{ fontSize: '12px', color: 'rgb(var(--hv-text-2))', display: 'block', marginBottom: '5px' }}>D0 Pin</label>
                     <input
                       type="number"
                       value={reader.d0Pin}
@@ -776,7 +776,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#A79C8C', display: 'block', marginBottom: '5px' }}>D1 Pin</label>
+                    <label style={{ fontSize: '12px', color: 'rgb(var(--hv-text-2))', display: 'block', marginBottom: '5px' }}>D1 Pin</label>
                     <input
                       type="number"
                       value={reader.d1Pin}
@@ -788,7 +788,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '12px', color: '#A79C8C', display: 'block', marginBottom: '5px' }}>Pulse (μs)</label>
+                    <label style={{ fontSize: '12px', color: 'rgb(var(--hv-text-2))', display: 'block', marginBottom: '5px' }}>Pulse (μs)</label>
                     <input
                       type="number"
                       value={reader.pulseWidth}
@@ -838,13 +838,13 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
       {mode === 'emulate' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div style={styles.card}>
-            <h3 style={{ marginTop: 0, color: '#E3D8C8' }}>Transmit Credential</h3>
+            <h3 style={{ marginTop: 0, color: 'rgb(var(--hv-text))' }}>Transmit Credential</h3>
 
             <div style={{
               display: 'flex',
               gap: '10px',
               marginBottom: '20px',
-              borderBottom: '2px solid rgba(74, 63, 54, 0.6)',
+              borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)',
               paddingBottom: '10px'
             }}>
               {readers.map((reader, index) => (
@@ -869,7 +869,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
             {/* v5.0: Format warnings and parity type display */}
             {selectedFormat && (parityType !== 'std' || formatWarning) && (
               <div style={{
-                backgroundColor: '#241E10',
+                backgroundColor: 'rgb(var(--hv-brand-tint))',
                 border: `1px solid ${parityInfo.color}`,
                 borderRadius: '4px',
                 padding: '10px',
@@ -878,7 +878,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <span style={{
                     ...styles.warningBadge,
-                    backgroundColor: parityInfo.color + '30',
+                    backgroundColor: `color-mix(in srgb, ${parityInfo.color} 19%, transparent)`,
                     color: parityInfo.color,
                     border: `1px solid ${parityInfo.color}`
                   }}>
@@ -887,9 +887,9 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                   {isCardOnly && (
                     <span style={{
                       ...styles.warningBadge,
-                      backgroundColor: 'rgba(74, 63, 54, 0.35)',
-                      color: '#ADA294',
-                      border: '1px solid #ADA294'
+                      backgroundColor: 'rgb(var(--hv-line-strong) / 0.35)',
+                      color: 'rgb(var(--hv-text-2))',
+                      border: '1px solid rgb(var(--hv-text-2))'
                     }}>
                       📇 Card-Only Format
                     </span>
@@ -897,9 +897,9 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                   {hasIssueLevel && (
                     <span style={{
                       ...styles.warningBadge,
-                      backgroundColor: '#5FB7B030',
-                      color: '#5FB7B0',
-                      border: '1px solid #5FB7B0'
+                      backgroundColor: 'rgb(var(--hv-info) / 0.19)',
+                      color: 'rgb(var(--hv-info-fg))',
+                      border: '1px solid rgb(var(--hv-info))'
                     }}>
                       🔢 Issue Level Required
                     </span>
@@ -907,16 +907,16 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                   {(selectedFormat as any).requiresBigInt && (
                     <span style={{
                       ...styles.warningBadge,
-                      backgroundColor: 'rgba(74, 63, 54, 0.35)',
-                      color: '#ADA294',
-                      border: '1px solid #ADA294'
+                      backgroundColor: 'rgb(var(--hv-line-strong) / 0.35)',
+                      color: 'rgb(var(--hv-text-2))',
+                      border: '1px solid rgb(var(--hv-text-2))'
                     }}>
                       📊 BigInt Format
                     </span>
                   )}
                 </div>
                 {(parityInfo.warning || formatWarning) && (
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#E6C766' }}>
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: 'rgb(var(--hv-warning-fg))' }}>
                     ⚠️ {formatWarning || parityInfo.warning}
                   </div>
                 )}
@@ -925,7 +925,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
             {/* Credential Input Fields */}
             <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#E3D8C8' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: 'rgb(var(--hv-text))' }}>
                 Credential
               </label>
               
@@ -937,9 +937,9 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                 {/* Issue Level (v5.0) */}
                 {hasIssueLevel && (
                   <div>
-                    <label style={{ fontSize: '12px', color: '#5FB7B0', display: 'block', marginBottom: '5px' }}>
+                    <label style={{ fontSize: '12px', color: 'rgb(var(--hv-info-fg))', display: 'block', marginBottom: '5px' }}>
                       Issue Level
-                      <span style={{ color: '#E3D8C8', marginLeft: '5px' }}>
+                      <span style={{ color: 'rgb(var(--hv-text))', marginLeft: '5px' }}>
                         (0-{maxIssueLevel})
                       </span>
                     </label>
@@ -951,10 +951,10 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                       max={maxIssueLevel}
                       style={{
                         ...styles.input,
-                        borderColor: '#5FB7B0'
+                        borderColor: 'rgb(var(--hv-info))'
                       }}
                     />
-                    <div style={{ color: '#786D60', fontSize: '10px', marginTop: '3px' }}>
+                    <div style={{ color: 'rgb(var(--hv-text-3))', fontSize: '10px', marginTop: '3px' }}>
                       {issueLevelBits}-bit field
                     </div>
                   </div>
@@ -963,10 +963,10 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                 {/* Facility Code */}
                 {hasFacilityCode && (
                   <div>
-                    <label style={{ fontSize: '12px', color: '#A79C8C', display: 'block', marginBottom: '5px' }}>
+                    <label style={{ fontSize: '12px', color: 'rgb(var(--hv-text-2))', display: 'block', marginBottom: '5px' }}>
                       {facilityLabel}
                       {selectedFormat && (
-                        <span style={{ color: '#E3D8C8', marginLeft: '5px' }}>
+                        <span style={{ color: 'rgb(var(--hv-text))', marginLeft: '5px' }}>
                           (0-{selectedFormat.maxFacility.toLocaleString()})
                         </span>
                       )}
@@ -981,13 +981,13 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                       style={{
                         ...styles.input,
                         borderColor: selectedFormat && !isValidFacilityCode(selectedFormat, facility)
-                          ? '#C6604F'
-                          : 'rgba(74, 63, 54, 0.6)',
+                          ? 'rgb(var(--hv-error-strong))'
+                          : 'rgb(var(--hv-line-strong) / 0.6)',
                         opacity: isCardOnly ? 0.5 : 1
                       }}
                     />
                     {selectedFormat && !isValidFacilityCode(selectedFormat, facility) && (
-                      <div style={{ color: '#E0705F', fontSize: '11px', marginTop: '3px' }}>
+                      <div style={{ color: 'rgb(var(--hv-error-fg))', fontSize: '11px', marginTop: '3px' }}>
                         Must be 0-{selectedFormat.maxFacility.toLocaleString()}
                       </div>
                     )}
@@ -996,10 +996,10 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
                 {/* Card Number */}
                 <div>
-                  <label style={{ fontSize: '12px', color: '#A79C8C', display: 'block', marginBottom: '5px' }}>
+                  <label style={{ fontSize: '12px', color: 'rgb(var(--hv-text-2))', display: 'block', marginBottom: '5px' }}>
                     Card Number
                     {selectedFormat && (
-                      <span style={{ color: '#E3D8C8', marginLeft: '5px' }}>
+                      <span style={{ color: 'rgb(var(--hv-text))', marginLeft: '5px' }}>
                         (0-{selectedFormat.maxCard.toLocaleString()})
                       </span>
                     )}
@@ -1013,12 +1013,12 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                     style={{
                       ...styles.input,
                       borderColor: selectedFormat && !isValidCardNumber(selectedFormat, card)
-                        ? '#C6604F'
-                        : 'rgba(74, 63, 54, 0.6)'
+                        ? 'rgb(var(--hv-error-strong))'
+                        : 'rgb(var(--hv-line-strong) / 0.6)'
                     }}
                   />
                   {selectedFormat && !isValidCardNumber(selectedFormat, card) && (
-                    <div style={{ color: '#E0705F', fontSize: '11px', marginTop: '3px' }}>
+                    <div style={{ color: 'rgb(var(--hv-error-fg))', fontSize: '11px', marginTop: '3px' }}>
                       Must be 0-{selectedFormat.maxCard.toLocaleString()}
                     </div>
                   )}
@@ -1028,13 +1028,13 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
             {/* Format Selection - v5.0 with Category Filter */}
             <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#E3D8C8' }}>
-                Wiegand Format {formatsLoading && <span style={{ fontSize: '11px', color: '#786D60' }}>(Loading...)</span>}
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: 'rgb(var(--hv-text))' }}>
+                Wiegand Format {formatsLoading && <span style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))' }}>(Loading...)</span>}
               </label>
               
               {/* Category Filter (v5.0) */}
               <div style={{ marginBottom: '10px' }}>
-                <label style={{ fontSize: '11px', color: '#786D60', display: 'block', marginBottom: '3px' }}>
+                <label style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', display: 'block', marginBottom: '3px' }}>
                   Category Filter
                 </label>
                 <select
@@ -1055,7 +1055,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
               {/* Bit Count + Format Type */}
               <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: '#786D60', display: 'block', marginBottom: '3px' }}>
+                  <label style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', display: 'block', marginBottom: '3px' }}>
                     Bits
                   </label>
                   <select
@@ -1078,7 +1078,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '11px', color: '#786D60', display: 'block', marginBottom: '3px' }}>
+                  <label style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', display: 'block', marginBottom: '3px' }}>
                     Format ({formatsForSelectedBits.length} available)
                   </label>
                   <select
@@ -1106,31 +1106,31 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                 <div style={{
                   marginTop: '10px',
                   padding: '10px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                  border: '1px solid #E3D8C8',
+                  backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+                  border: '1px solid rgb(var(--hv-text))',
                   borderRadius: '4px',
                   fontSize: '12px'
                 }}>
-                  <div style={{ color: '#A79C8C', marginBottom: '5px' }}>{selectedFormat.description || selectedFormat.name}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#E3D8C8', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ color: 'rgb(var(--hv-text-2))', marginBottom: '5px' }}>{selectedFormat.description || selectedFormat.name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'rgb(var(--hv-text))', flexWrap: 'wrap', gap: '10px' }}>
                     {hasIssueLevel && (
-                      <span style={{ color: '#5FB7B0' }}>IL: 0-{maxIssueLevel}</span>
+                      <span style={{ color: 'rgb(var(--hv-info-fg))' }}>IL: 0-{maxIssueLevel}</span>
                     )}
                     {hasFacilityCode ? (
                       <span>{facilityLabel}: 0-{selectedFormat.maxFacility.toLocaleString()}</span>
                     ) : (
-                      <span style={{ color: '#786D60' }}>No {facilityLabel}</span>
+                      <span style={{ color: 'rgb(var(--hv-text-3))' }}>No {facilityLabel}</span>
                     )}
                     <span>Card: 0-{selectedFormat.maxCard.toLocaleString()}</span>
                   </div>
                   <div style={{ marginTop: '5px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                     {(selectedFormat as any).manufacturer && (
-                      <span style={{ color: '#786D60', fontSize: '11px' }}>
+                      <span style={{ color: 'rgb(var(--hv-text-3))', fontSize: '11px' }}>
                         🏭 {(selectedFormat as any).manufacturer}
                       </span>
                     )}
                     {(selectedFormat as any).category && (
-                      <span style={{ color: '#786D60', fontSize: '11px' }}>
+                      <span style={{ color: 'rgb(var(--hv-text-3))', fontSize: '11px' }}>
                         📁 {(selectedFormat as any).category}
                       </span>
                     )}
@@ -1140,7 +1140,7 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
             </div>
 
             <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#E3D8C8' }}>
+              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: 'rgb(var(--hv-text))' }}>
                 Quick Presets
               </label>
               <div style={{ display: 'flex', gap: '10px' }}>
@@ -1187,19 +1187,19 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                 marginTop: '15px',
                 padding: '10px',
                 borderRadius: '4px',
-                backgroundColor: status === 'success' ? '#1E3A24' :
-                  status === 'error' ? '#3A1E1A' : 'rgba(58, 48, 38, 0.55)',
-                border: `1px solid ${status === 'success' ? '#6FBF7E' :
-                  status === 'error' ? '#C6604F' : '#E3D8C8'}`,
-                color: status === 'success' ? '#6FBF7E' :
-                  status === 'error' ? '#E0705F' : '#E3D8C8'
+                backgroundColor: status === 'success' ? 'rgb(var(--hv-success-tint))' :
+                  status === 'error' ? 'rgb(var(--hv-error-tint))' : 'rgb(var(--hv-box) / 0.55)',
+                border: `1px solid ${status === 'success' ? 'rgb(var(--hv-success))' :
+                  status === 'error' ? 'rgb(var(--hv-error-strong))' : 'rgb(var(--hv-text))'}`,
+                color: status === 'success' ? 'rgb(var(--hv-success))' :
+                  status === 'error' ? 'rgb(var(--hv-error))' : 'rgb(var(--hv-text))'
               }}>
                 {message}
               </div>
             )}
             {/* Transmission History (inside left card) */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, color: '#E3D8C8' }}>Transmission History</h3>
+              <h3 style={{ margin: 0, color: 'rgb(var(--hv-text))' }}>Transmission History</h3>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={loadHistory} style={styles.button}> Refresh</button>
                 <button onClick={clearHistory} style={styles.button}>🗑️ Clear</button>
@@ -1208,37 +1208,37 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
             <div style={{
               maxHeight: '350px',
               overflowY: 'auto',
-              border: '1px solid rgba(74, 63, 54, 0.6)',
+              border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
               borderRadius: '4px',
-              backgroundColor: 'rgba(0, 0, 0, 0.25)'
+              backgroundColor: 'rgb(var(--hv-surface) / 0.25)'
             }}>
               {history.length === 0 ? (
-                <div style={{ padding: '20px', textAlign: 'center', color: '#786D60' }}>
+                <div style={{ padding: '20px', textAlign: 'center', color: 'rgb(var(--hv-text-3))' }}>
                   No transmissions yet
                 </div>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <thead style={{ backgroundColor: 'rgba(0, 0, 0, 0.25)', position: 'sticky', top: 0 }}>
+                  <thead style={{ backgroundColor: 'rgb(var(--hv-surface) / 0.25)', position: 'sticky', top: 0 }}>
                     <tr>
-                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgba(74, 63, 54, 0.6)', color: '#E3D8C8' }}>Time</th>
-                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgba(74, 63, 54, 0.6)', color: '#E3D8C8' }}>Credential</th>
-                      <th style={{ padding: '8px', textAlign: 'center', borderBottom: '2px solid rgba(74, 63, 54, 0.6)', color: '#E3D8C8' }}>Status</th>
-                      <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid rgba(74, 63, 54, 0.6)', color: '#E3D8C8' }}>Duration</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)', color: 'rgb(var(--hv-text))' }}>Time</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)', color: 'rgb(var(--hv-text))' }}>Credential</th>
+                      <th style={{ padding: '8px', textAlign: 'center', borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)', color: 'rgb(var(--hv-text))' }}>Status</th>
+                      <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)', color: 'rgb(var(--hv-text))' }}>Duration</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.map((item, index) => (
-                      <tr key={index} style={{ borderBottom: '1px solid rgba(74, 63, 54, 0.6)' }}>
-                        <td style={{ padding: '8px', color: '#EDE6DB' }}>
+                      <tr key={index} style={{ borderBottom: '1px solid rgb(var(--hv-line-strong) / 0.6)' }}>
+                        <td style={{ padding: '8px', color: 'rgb(var(--hv-text))' }}>
                           {new Date(item.timestamp).toLocaleTimeString()}
                         </td>
                         <td style={{ padding: '8px' }}>
-                          <div style={{ fontWeight: 'bold', color: '#E3D8C8' }}>
+                          <div style={{ fontWeight: 'bold', color: 'rgb(var(--hv-text))' }}>
                             {item.issueLevel !== undefined && ('IL:' + item.issueLevel + ' ')}
                             {item.facility > 0 && ('Fac:' + item.facility + ' ')}
                             Card:{item.card}
                           </div>
-                          <div style={{ color: '#786D60', fontSize: '11px' }}>
+                          <div style={{ color: 'rgb(var(--hv-text-3))', fontSize: '11px' }}>
                             {item.formatId || (item.bits + '-bit')} • {item.readerName || ('D0:' + item.d0Pin + ' D1:' + item.d1Pin)}
                           </div>
                         </td>
@@ -1246,14 +1246,14 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
                           <span style={{
                             padding: '2px 8px',
                             borderRadius: '12px',
-                            backgroundColor: item.success ? '#1E3A24' : '#3A1E1A',
-                            color: item.success ? '#6FBF7E' : '#E0705F',
+                            backgroundColor: item.success ? 'rgb(var(--hv-success-tint))' : 'rgb(var(--hv-error-tint))',
+                            color: item.success ? 'rgb(var(--hv-success))' : 'rgb(var(--hv-error))',
                             fontSize: '11px'
                           }}>
                             {item.success ? '✓ Success' : '✗ Failed'}
                           </span>
                         </td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#A79C8C' }}>
+                        <td style={{ padding: '8px', textAlign: 'right', color: 'rgb(var(--hv-text-2))' }}>
                           {item.duration}ms
                         </td>
                       </tr>
@@ -1266,9 +1266,9 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
 
           {/* Interactive Wiegand Reader */}
           <div style={styles.card}>
-            <h3 style={{ marginTop: 0, color: '#E3D8C8' }}>Interactive Wiegand Reader</h3>
+            <h3 style={{ marginTop: 0, color: 'rgb(var(--hv-text))' }}>Interactive Wiegand Reader</h3>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}>
-              <label style={{ fontSize: '11px', color: '#786D60', whiteSpace: 'nowrap' }}>
+              <label style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', whiteSpace: 'nowrap' }}>
                 Keypad format:
               </label>
               <select
@@ -1305,10 +1305,10 @@ export const WiegandSection: React.FC<WiegandSectionProps> = ({
               <div style={{
                 padding: '40px 20px',
                 textAlign: 'center',
-                color: '#786D60',
-                backgroundColor: 'rgba(0, 0, 0, 0.25)',
+                color: 'rgb(var(--hv-text-3))',
+                backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
                 borderRadius: '4px',
-                border: '1px dashed rgba(74, 63, 54, 0.6)',
+                border: '1px dashed rgb(var(--hv-line-strong) / 0.6)',
               }}>
                Interactive Reader is Only Available Per Reader<br />
 		Please Select Individual Reader Please!

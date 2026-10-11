@@ -140,7 +140,7 @@ export default function PacketCaptureDebug({ baseUrl = 'http://localhost:3000' }
           <button
             onClick={autoRefresh ? () => setAutoRefresh(false) : () => setAutoRefresh(true)}
             className={`px-3 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 ${
-              autoRefresh ? 'bg-cyan-600 hover:bg-cyan-700' : 'bg-slate-700 hover:bg-slate-600'
+              autoRefresh ? 'bg-hv-data-sapphire-tint text-hv-text ring-1 ring-inset ring-hv-data-sapphire/40 hover:bg-hv-data-sapphire/25' : 'bg-slate-700 hover:bg-slate-600'
             }`}
           >
             <RefreshCw className={`w-4 h-4 ${autoRefresh ? 'animate-spin' : ''}`} />
@@ -162,7 +162,7 @@ export default function PacketCaptureDebug({ baseUrl = 'http://localhost:3000' }
           <button
             onClick={enableCapture}
             disabled={loading}
-            className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg font-semibold transition-all flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-3 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong disabled:opacity-50 rounded-lg font-semibold transition-all flex items-center justify-center gap-2"
           >
             <Eye className="w-5 h-5" />
             Enable Capture Mode
@@ -188,7 +188,7 @@ export default function PacketCaptureDebug({ baseUrl = 'http://localhost:3000' }
         <button
           onClick={downloadPackets}
           disabled={packets.length === 0}
-          className="px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-30 rounded-lg font-semibold transition-all flex items-center gap-2"
+          className="px-4 py-3 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong disabled:opacity-30 rounded-lg font-semibold transition-all flex items-center gap-2"
         >
           <Download className="w-5 h-5" />
           Export

@@ -6,29 +6,40 @@
 // is left intact on disk — re-enable by flipping FEATURES.NFC to true.
 
 import React, { useState, useEffect } from 'react';
-import { Radio, Wifi, CreditCard, Smartphone } from 'lucide-react';
+import WiegandEmulator from './readers/WiegandEmulator';
+import ReaderTools from './readers/ReaderTools';
+import OsdpTrace from './readers/OsdpTrace';
+import { useFormatLibrary } from './readers/formatLib';
 
 // Import existing sections
 import OSDPSection from './OSDPSection';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import NFCSection from './NFCSection';      // kept imported behind feature flag
-import WiegandSection from './WiegandSection';
+// WiegandSection.tsx (old Wiegand page) is kept on disk but no longer shown;
+// readers/WiegandEmulator.tsx replaces it.
 
 // ============================================================
 // FEATURE FLAGS — flip NFC to true to bring it back into the UI
 // ============================================================
-const FEATURES = {
+export const FEATURES = {
   NFC: false,
 } as const;
 
+
+// AETHER-GNB-2DEPTH: the page is chosen in the GNB (Readers › OSDP · OSDP Trace · Wiegand · Card Formats · NFC).
+export type ReadersPage = 'osdp' | 'trace' | 'wiegand' | 'formats' | 'nfc';
 
 interface ReadersSectionProps {
   ipAddress: string;
   connected: boolean;
   onLog: (message: string) => void;
+  page: ReadersPage;
+  /** Live counts for the GNB badges and the page description. */
+  onStats?: (s: ReaderStats) => void;
+  [k: string]: any;   // the parent still passes the legacy reader-pool props
 }
 
-interface ReaderStats {
+export interface ReaderStats {
   osdp: {
     connected: number;
     total: number;
@@ -45,15 +56,16 @@ interface ReaderStats {
   };
 }
 
-export default function ReadersSection({ ipAddress, connected, onLog }: ReadersSectionProps) {
-  const [activeTab, setActiveTab] = useState<'osdp' | 'nfc' | 'wiegand'>('osdp');
+export default function ReadersSection({ ipAddress, connected, onLog, page, onStats }: ReadersSectionProps) {
   const [stats, setStats] = useState<ReaderStats>({
     osdp: { connected: 0, total: 0, serialOpen: false },
     nfc: { enabled: false, connected: false, reading: false },
     wiegand: { readers: 0, active: 0 }
   });
+  useEffect(() => { onStats?.(stats); }, [stats]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const backendUrl = `http://${ipAddress}:3001`;
+  const lib = useFormatLibrary(backendUrl);
 
   // Fetch statistics for all reader types
   useEffect(() => {
@@ -99,17 +111,12 @@ export default function ReadersSection({ ipAddress, connected, onLog }: ReadersS
         }
 
         // Wiegand stats
-        const wiegandRes = await fetch(`${backendUrl}/api/wiegand/status`);
+        const wiegandRes = await fetch(`${backendUrl}/api/wiegand/readers`);
         if (wiegandRes.ok) {
           const wiegandData = await wiegandRes.json();
           if (wiegandData.success) {
-            setStats(prev => ({
-              ...prev,
-              wiegand: {
-                readers: wiegandData.readers?.length || 0,
-                active: wiegandData.readers?.filter((r: any) => r.enabled).length || 0
-              }
-            }));
+            const rs: any[] = wiegandData.readers || [];
+            setStats(prev => ({ ...prev, wiegand: { readers: rs.length, active: rs.filter((r: any) => r.enabled).length } }));
           }
         }
       } catch (err) {
@@ -122,160 +129,40 @@ export default function ReadersSection({ ipAddress, connected, onLog }: ReadersS
     return () => clearInterval(interval);
   }, [backendUrl, connected]);
 
-  // If NFC gets disabled while the user happens to be on the NFC tab
-  // (e.g. stale state in dev hot-reload), fall back to OSDP rather than
-  // showing a blank content area.
-  useEffect(() => {
-    if (!FEATURES.NFC && activeTab === 'nfc') {
-      setActiveTab('osdp');
-    }
-  }, [activeTab]);
-
-  // Grid columns adapt to how many cards are visible
-  const gridColsClass = FEATURES.NFC
-    ? 'grid-cols-1 md:grid-cols-3'
-    : 'grid-cols-1 md:grid-cols-2';
+  // NFC hidden by the feature flag → show OSDP instead of a blank page.
+  const shown: ReadersPage = !FEATURES.NFC && page === 'nfc' ? 'osdp' : page;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="rounded-xl p-6 border border-[#38302A]">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-white flex items-center gap-2">
-               Reader Management
-            </h1>
-            <p className="text-[#ADA294] mt-1">
-              {FEATURES.NFC
-                ? 'Control, Configure and Simulate OSDP, NFC, and Wiegand readers'
-                : 'Control, Configure and Simulate OSDP and Wiegand readers'}
-            </p>
-          </div>
-          {!connected && (
-            <div className="px-4 py-2 bg-[#C6604F]/20 border border-[#C6604F] rounded-lg">
-              <span className="text-[#E0705F] font-semibold">Disconnected</span>
-            </div>
-          )}
-        </div>
+    <div className="space-y-5">
+      {lib.error && (shown === 'wiegand' || shown === 'formats') && (
+        <div className="px-3 py-2 rounded-lg text-xs" style={{ color: 'rgb(var(--hv-warning-fg))', background: 'rgb(var(--hv-warning-tint))' }}>Formats not loaded: {lib.error}</div>
+      )}
 
-        {/* Reader Type Cards — these ARE the tab selector. A second row of
-            buttons beneath duplicated the same three actions, so it was
-            removed; the cards carry the live counts as well. */}
-        <div className={`grid ${gridColsClass} gap-4`}>
-          {/* OSDP Card */}
-          <button
-            onClick={() => setActiveTab('osdp')}
-            className={`p-6 rounded-lg border-2 transition-all text-left bg-transparent ${
-              activeTab === 'osdp'
-                ? 'border-[#5FB7B0] shadow-lg shadow-[#5FB7B0]/20'
-                : 'border-[#4A3F36] hover:border-[#786D60]'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <Radio className={`w-8 h-8 ${
-                activeTab === 'osdp' ? 'text-[#5FB7B0]' : 'text-[#ADA294]'
-              }`} />
-              {stats.osdp.serialOpen && (
-                <span className="px-2 py-1 bg-[#6FBF7E]/20 text-[#7BD497] text-xs rounded-full border border-[#6FBF7E]">
-                  ● RS485 Active
-                </span>
-              )}
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-2">OSDP Readers</h3>
-            <p className="text-sm text-[#ADA294]">
-              {stats.osdp.connected} of {stats.osdp.total} active
-            </p>
-            <div className="mt-3 text-xs text-[#786D60]">
-              RS485 Protocol • ACS Panels
-            </div>
-          </button>
+      {shown === 'osdp' && (
+        <OSDPSection
+          ipAddress={ipAddress}
+          connected={connected}
+          onLog={onLog}
+        />
+      )}
 
-          {/* NFC Card — feature-flagged */}
-          {FEATURES.NFC && (
-            <button
-              onClick={() => setActiveTab('nfc')}
-              className={`p-6 rounded-lg border-2 transition-all text-left bg-transparent ${
-                activeTab === 'nfc'
-                  ? 'border-[#8FB488] shadow-lg shadow-[#8FB488]/20'
-                  : 'border-[#4A3F36] hover:border-[#786D60]'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <Smartphone className={`w-8 h-8 ${
-                  activeTab === 'nfc' ? 'text-[#8FB488]' : 'text-[#ADA294]'
-                }`} />
-                {stats.nfc.reading && (
-                  <span className="px-2 py-1 bg-[#5FB7B0]/20 text-[#5FB7B0] text-xs rounded-full border border-[#5FB7B0] animate-pulse">
-                    📡 Reading
-                  </span>
-                )}
-              </div>
-              <h3 className="text-lg font-semibold text-white mb-2">NFC Reader</h3>
-              <p className="text-sm text-[#ADA294]">
-                {stats.nfc.connected ? '✓ PN532 Connected' : stats.nfc.enabled ? 'Enabled' : 'Disabled'}
-              </p>
-              <div className="mt-3 text-xs text-[#786D60]">
-                I2C Protocol • MIFARE/NFC Cards
-              </div>
-            </button>
-          )}
+      {shown === 'trace' && <OsdpTrace api={backendUrl} />}
 
-          {/* Wiegand Card */}
-          <button
-            onClick={() => setActiveTab('wiegand')}
-            className={`p-6 rounded-lg border-2 transition-all text-left bg-transparent ${
-              activeTab === 'wiegand'
-                ? 'border-[#6FBF7E] shadow-lg shadow-[#6FBF7E]/20'
-                : 'border-[#4A3F36] hover:border-[#786D60]'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <CreditCard className={`w-8 h-8 ${
-                activeTab === 'wiegand' ? 'text-[#7BD497]' : 'text-[#ADA294]'
-              }`} />
-              {stats.wiegand.active > 0 && (
-                <span className="px-2 py-1 bg-[#5FB7B0]/20 text-[#5FB7B0] text-xs rounded-full border border-[#5FB7B0]">
-                  {stats.wiegand.active} Active
-                </span>
-              )}
-            </div>
-            <h3 className="text-lg font-semibold text-white mb-2">Wiegand Readers</h3>
-            <p className="text-sm text-[#ADA294]">
-              {stats.wiegand.readers} reader{stats.wiegand.readers !== 1 ? 's' : ''} configured
-            </p>
-            <div className="mt-3 text-xs text-[#786D60]">
-              GPIO Protocol • Legacy Support
-            </div>
-          </button>
-        </div>
-      </div>
+      {FEATURES.NFC && shown === 'nfc' && (
+        <NFCSection
+          ipAddress={ipAddress}
+          connected={connected}
+          onLog={onLog}
+        />
+      )}
 
-      {/* Content Area */}
-      <div>
-        {activeTab === 'osdp' && (
-          <OSDPSection 
-            ipAddress={ipAddress} 
-            connected={connected} 
-            onLog={onLog} 
-          />
-        )}
+      {shown === 'wiegand' && (
+        <WiegandEmulator api={backendUrl} formats={lib.formats} reload={lib.reload} connected={connected} onLog={onLog} />
+      )}
 
-        {FEATURES.NFC && activeTab === 'nfc' && (
-          <NFCSection 
-            ipAddress={ipAddress}
-            connected={connected}
-            onLog={onLog}
-          />
-        )}
-
-        {activeTab === 'wiegand' && (
-          // FIX: WiegandSection's actual signature is { apiUrl?: string }.
-          // Previously this was passing ipAddress/connected/onLog which were
-          // silently ignored, causing apiUrl to fall back to localhost:3001.
-          // That broke any client not running on the same host as the backend.
-          <WiegandSection apiUrl={backendUrl} />
-        )}
-      </div>
+      {shown === 'formats' && (
+        <ReaderTools api={backendUrl} formats={lib.formats} reload={lib.reload} connected={connected} onLog={onLog} />
+      )}
     </div>
   );
 }

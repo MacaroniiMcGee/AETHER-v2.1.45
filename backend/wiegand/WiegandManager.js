@@ -13,10 +13,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const { promisify } = require('util');
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // UNIFIED: Import formatService for all format lookups
 const formatService = require('../lib/formatService');
@@ -391,22 +392,34 @@ class WiegandManager {
    * Send Wiegand pulses over GPIO
    */
   async _sendWiegandPulses(d0Pin, d1Pin, bitString) {
-    const nativePath = path.join(__dirname, 'wiegand_tx');
-    if (!fs.existsSync(nativePath)) {
-      throw new Error('Wiegand TX binary not found at ' + nativePath);
+    // AETHER_WIEGAND_NOSUDO (Update 64): run the transmitter as the backend's own
+    // user, the same way POST /api/wiegand/transmit does. It used to be run with
+    // "sudo", which needs a password under the service and failed every send.
+    // bin/wiegand_tx is preferred (the one the transmit route and rebuilds use).
+    const candidates = [
+      path.join(__dirname, '..', 'bin', 'wiegand_tx'),
+      path.join(__dirname, 'wiegand_tx')
+    ];
+    const nativePath = candidates.find(p => fs.existsSync(p));
+    if (!nativePath) {
+      throw new Error('Wiegand TX binary not found at ' + candidates.join(' or '));
     }
     if (!/^[01]+$/.test(bitString)) {
       throw new Error('Invalid bit string: must contain only 0s and 1s');
     }
-    const cmd = 'sudo ' + nativePath + ' --raw ' + d0Pin + ' ' + d1Pin + ' ' + bitString + ' ' + this.PULSE_WIDTH;
-    console.log('[WiegandManager] Exec: ' + cmd);
+    const d0 = Number(d0Pin), d1 = Number(d1Pin);
+    if (!Number.isInteger(d0) || !Number.isInteger(d1) || d0 < 0 || d1 < 0 || d0 > 27 || d1 > 27 || d0 === d1) {
+      throw new Error('Invalid Wiegand pins D0=' + d0Pin + ' D1=' + d1Pin);
+    }
+    const args = ['--raw', String(d0), String(d1), bitString, String(this.PULSE_WIDTH)];
+    console.log('[WiegandManager] Exec: ' + nativePath + ' ' + args.join(' '));
     try {
-      const { stdout, stderr } = await execAsync(cmd, { timeout: 10000 });
+      const { stdout, stderr } = await execFileAsync(nativePath, args, { timeout: 10000 });
       if (stdout && stdout.trim()) console.log('[WiegandManager] ' + stdout.trim());
       if (stderr && stderr.trim()) console.warn('[WiegandManager] wiegand_tx stderr: ' + stderr.trim());
     } catch (error) {
       const detail = (error.stderr || error.message || '').trim();
-      throw new Error('wiegand_tx failed on D0=' + d0Pin + ' D1=' + d1Pin + ': ' + detail);
+      throw new Error('wiegand_tx failed on D0=' + d0 + ' D1=' + d1 + ': ' + detail);
     }
   }
 

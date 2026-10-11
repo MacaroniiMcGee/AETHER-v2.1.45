@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# aether-netcfg: the only thing the Aether backend may run as root for networking.
+# Installed to /usr/local/sbin/aether-netcfg (root:root 0755) with a sudoers rule
+# that allows exactly this file for the backend user.
+#
+#   aether-netcfg check
+#   aether-netcfg apply <iface> <dhcp|static> <ip> <prefix> <gateway> <dns,dns> <hostname>
+#   aether-netcfg confirm              keep the new settings (cancel the rollback)
+#   aether-netcfg restore <iface>      put the saved settings back (run by the rollback timer)
+#
+# Every apply first saves the current settings, then arms a 90 s systemd timer
+# that restores them. If the new address works, the Config page calls confirm.
+set -euo pipefail
+
+STATE=/var/lib/aether-net
+RUNINFO=/run/aether-net-rollback.json
+ROLLBACK_S=90
+SELF=/usr/local/sbin/aether-netcfg
+
+die() { echo "$*" >&2; exit 2; }
+ipv4() { [[ $1 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1; local IFS=.; for o in $1; do (( o <= 255 )) || return 1; done; }
+nm_active() { [ "$(systemctl is-active NetworkManager 2>/dev/null)" = active ]; }
+con_of() { nmcli -t -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -1; }
+
+cmd=${1:-}; shift || true
+case "$cmd" in
+  check)
+    nm_active || die "NetworkManager is not running"
+    echo ok ;;
+
+  apply)
+    [ $# -eq 7 ] || die "usage: apply iface mode ip prefix gateway dns hostname"
+    iface=$1 mode=$2 ip=$3 prefix=$4 gw=$5 dns=$6 host=$7
+    nm_active || die "NetworkManager is not running on this Pi"
+    [[ $iface =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || die "Bad interface name"
+    [[ $mode == dhcp || $mode == static ]] || die "Mode must be dhcp or static"
+    if [[ $mode == static ]]; then
+      ipv4 "$ip" || die "Invalid IP address: $ip"
+      [[ $prefix =~ ^[0-9]{1,2}$ ]] && (( prefix >= 1 && prefix <= 32 )) || die "Invalid prefix: $prefix"
+      [[ -z $gw ]] || ipv4 "$gw" || die "Invalid gateway: $gw"
+      if [[ -n $dns ]]; then IFS=, read -ra D <<< "$dns"; for d in "${D[@]}"; do ipv4 "$d" || die "Invalid DNS server: $d"; done; fi
+    fi
+    [[ -z $host ]] || [[ $host =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] || die "Invalid hostname: $host"
+    con=$(con_of "$iface"); [ -n "$con" ] || die "No NetworkManager connection is active on $iface"
+
+    # Save what we're replacing (unless a rollback is already armed: keep the original)
+    mkdir -p "$STATE"
+    if ! systemctl is-active --quiet aether-net-rollback.timer; then
+      nmcli -t -g ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns connection show "$con" > "$STATE/backup-$iface"
+      hostname > "$STATE/backup-hostname"
+      echo "$con" > "$STATE/backup-con-$iface"
+    fi
+
+    if [[ $mode == static ]]; then
+      nmcli connection modify "$con" ipv4.method manual ipv4.addresses "$ip/$prefix" ipv4.gateway "$gw" ipv4.dns "${dns//,/ }"
+    else
+      nmcli connection modify "$con" ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+    fi
+    if [[ -n $host && $host != "$(hostname)" ]]; then
+      old=$(hostname)
+      hostnamectl set-hostname "$host"
+      if grep -q '^127\.0\.1\.1' /etc/hosts; then sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$host/" /etc/hosts; else printf '127.0.1.1\t%s\n' "$host" >> /etc/hosts; fi
+    fi
+
+    # Arm the rollback, then re-apply the connection after we've answered
+    systemctl stop aether-net-rollback.timer 2>/dev/null || true
+    systemctl reset-failed aether-net-rollback.service aether-net-rollback.timer 2>/dev/null || true
+    systemd-run --quiet --unit=aether-net-rollback --on-active=${ROLLBACK_S}s "$SELF" restore "$iface"
+    deadline=$(( $(date +%s) + ROLLBACK_S ))
+    printf '{"iface":"%s","deadline":%s}\n' "$iface" "$deadline" > "$RUNINFO"; chmod 644 "$RUNINFO"
+    setsid bash -c "sleep 2; nmcli connection up '$con' >/dev/null 2>&1" </dev/null >/dev/null 2>&1 &
+    printf '{"connection":"%s","mode":"%s","ip":"%s","deadline":%s}\n' "$con" "$mode" "${ip}" "$deadline" ;;
+
+  confirm)
+    systemctl stop aether-net-rollback.timer 2>/dev/null || true
+    rm -f "$RUNINFO"
+    echo kept ;;
+
+  restore)
+    iface=${1:-}; [[ $iface =~ ^[a-zA-Z0-9_.-]{1,15}$ ]] || die "Bad interface name"
+    [ -f "$STATE/backup-$iface" ] || die "No saved settings for $iface"
+    con=$(cat "$STATE/backup-con-$iface")
+    mapfile -t B < "$STATE/backup-$iface"
+    method=${B[0]:-auto} addrs=${B[1]:-} gw=${B[2]:-} dns=${B[3]:-}
+    if [[ $method == manual ]]; then
+      nmcli connection modify "$con" ipv4.method manual ipv4.addresses "${addrs//\\/}" ipv4.gateway "$gw" ipv4.dns "${dns//,/ }"
+    else
+      nmcli connection modify "$con" ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+    fi
+    if [ -f "$STATE/backup-hostname" ]; then
+      h=$(cat "$STATE/backup-hostname")
+      if [[ $h != "$(hostname)" ]]; then hostnamectl set-hostname "$h"; sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$h/" /etc/hosts; fi
+    fi
+    rm -f "$RUNINFO"
+    nmcli connection up "$con" >/dev/null 2>&1 || true
+    logger -t aether-netcfg "Network settings on $iface rolled back (not confirmed within ${ROLLBACK_S}s)"
+    echo restored ;;
+
+  *) die "usage: aether-netcfg check|apply|confirm|restore" ;;
+esac

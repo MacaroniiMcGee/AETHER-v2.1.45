@@ -219,6 +219,8 @@ interface EmulationWorkflowProps {
   setIsEmulating: (val: boolean) => void;
   logEmulation: (message: string) => void;
   logSystem: (type: string, message: string) => void;
+  /** True while the Emulation page is the one on screen (the component stays mounted while hidden). */
+  active?: boolean;
 }
 
 const DEFAULT_FORMATS: CardFormat[] = [
@@ -229,16 +231,16 @@ const DEFAULT_FORMATS: CardFormat[] = [
 ];
 
 const BLOCK_CONFIG: Record<BlockType, { icon: React.ReactNode; color: string; bgColor: string; label: string; category: 'basic' | 'advanced' | 'test' }> = {
-  reader:      { icon: <CreditCard className="w-5 h-5" />, color: 'indigo', bgColor: 'bg-[#F0A73C]', label: 'Read', category: 'basic' },
-  door:        { icon: <DoorOpen className="w-5 h-5" />, color: 'blue', bgColor: 'bg-[#5E86B8]', label: 'Door', category: 'basic' },
-  io:          { icon: <Zap className="w-5 h-5" />, color: 'yellow', bgColor: 'bg-[#C79A34]', label: 'I/O', category: 'basic' },
-  wait:        { icon: <Clock className="w-5 h-5" />, color: 'orange', bgColor: 'bg-[#C67A3E]', label: 'Wait', category: 'basic' },
-  schedule:    { icon: <Timer className="w-5 h-5" />, color: 'sage', bgColor: 'bg-[#8FB488]', label: 'Schedule', category: 'basic' },
-  control:     { icon: <RotateCw className="w-5 h-5" />, color: 'red', bgColor: 'bg-[#C6604F]', label: 'Control', category: 'basic' },
-  waitInput:   { icon: <Eye className="w-5 h-5" />, color: 'cyan', bgColor: 'bg-[#4F9E97]', label: 'Wait Input', category: 'advanced' },
-  log:         { icon: <MessageSquare className="w-5 h-5" />, color: 'slate', bgColor: 'bg-[#322A22]', label: 'Log/Assert', category: 'advanced' },
-  supervision: { icon: <Shield className="w-5 h-5" />, color: 'amber', bgColor: 'bg-[#F0A73C]', label: 'Supervision', category: 'advanced' },
-  scenario:    { icon: <Target className="w-5 h-5" />, color: 'emerald', bgColor: 'bg-[#4E9E74]', label: 'Scenario', category: 'test' },
+  reader:      { icon: <CreditCard className="w-5 h-5" />, color: 'indigo', bgColor: 'bg-hv-data-indigo-tint text-hv-text border border-hv-data-indigo/40 [&_svg]:text-hv-data-indigo', label: 'Read', category: 'basic' },
+  door:        { icon: <DoorOpen className="w-5 h-5" />, color: 'blue', bgColor: 'bg-hv-data-blue-tint text-hv-text border border-hv-data-blue/40 [&_svg]:text-hv-data-blue', label: 'Door', category: 'basic' },
+  io:          { icon: <Zap className="w-5 h-5" />, color: 'yellow', bgColor: 'bg-hv-data-yellow-tint text-hv-text border border-hv-data-yellow/40 [&_svg]:text-hv-data-yellow', label: 'I/O', category: 'basic' },
+  wait:        { icon: <Clock className="w-5 h-5" />, color: 'orange', bgColor: 'bg-hv-data-orange-tint text-hv-text border border-hv-data-orange/40 [&_svg]:text-hv-data-orange', label: 'Wait', category: 'basic' },
+  schedule:    { icon: <Timer className="w-5 h-5" />, color: 'sage', bgColor: 'bg-hv-data-green-tint text-hv-text border border-hv-data-green/40 [&_svg]:text-hv-data-green', label: 'Schedule', category: 'basic' },
+  control:     { icon: <RotateCw className="w-5 h-5" />, color: 'red', bgColor: 'bg-hv-data-red-tint text-hv-text border border-hv-data-red/40 [&_svg]:text-hv-data-red', label: 'Control', category: 'basic' },
+  waitInput:   { icon: <Eye className="w-5 h-5" />, color: 'cyan', bgColor: 'bg-hv-data-sapphire-tint text-hv-text border border-hv-data-sapphire/40 [&_svg]:text-hv-data-sapphire', label: 'Wait Input', category: 'advanced' },
+  log:         { icon: <MessageSquare className="w-5 h-5" />, color: 'slate', bgColor: 'bg-hv-data-gray-tint text-hv-text border border-hv-data-gray/40 [&_svg]:text-hv-data-gray', label: 'Log/Assert', category: 'advanced' },
+  supervision: { icon: <Shield className="w-5 h-5" />, color: 'amber', bgColor: 'bg-hv-data-coral-tint text-hv-text border border-hv-data-coral/40 [&_svg]:text-hv-data-coral', label: 'Supervision', category: 'advanced' },
+  scenario:    { icon: <Target className="w-5 h-5" />, color: 'emerald', bgColor: 'bg-hv-data-emerald-tint text-hv-text border border-hv-data-emerald/40 [&_svg]:text-hv-data-emerald', label: 'Scenario', category: 'test' },
 };
 
 // Safe fallback so an unknown/legacy block type can NEVER crash the render
@@ -246,7 +248,7 @@ const BLOCK_CONFIG: Record<BlockType, { icon: React.ReactNode; color: string; bg
 const FALLBACK_BLOCK_CONFIG = {
   icon: <HelpCircle className="w-5 h-5" />,
   color: 'slate',
-  bgColor: 'bg-[#38302A]',
+  bgColor: 'bg-hv-line',
   label: 'Unknown',
   category: 'basic' as const,
 };
@@ -268,7 +270,7 @@ const SCENARIO_TEMPLATES: Record<ScenarioType, { name: string; description: stri
 
 const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   ipAddress, connected, inputs, outputs, controllerOutputs, controllerInputs, doors,
-  readerPool: propReaderPool, isEmulating, setIsEmulating, logEmulation, logSystem,
+  readerPool: propReaderPool, isEmulating, setIsEmulating, logEmulation, logSystem, active = true,
 }) => {
   const [workflow, setWorkflow] = useState<WorkflowColumn[]>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
@@ -440,6 +442,18 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
       hasLoadedRef.current = false;
     }
   }, [connected, ipAddress]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The page stays mounted while hidden, so refresh readers, formats and saved
+  // workflows each time it is shown again (it used to remount and reload).
+  const wasActiveRef = useRef(active);
+  useEffect(() => {
+    if (active && !wasActiveRef.current && connected && ipAddress) {
+      loadReadersFromBackend();
+      loadCardFormats();
+      loadSavedWorkflows();
+    }
+    wasActiveRef.current = active;
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createBlock = (type: BlockType): WorkflowBlock => {
     const block: WorkflowBlock = { id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, type };
@@ -836,16 +850,22 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   };
   // ─────────────────────────────────────────────────────────────────────────
 
-  const sendCard = async (reader: Reader, fc: number, cn: number, bits: number) => {
+  // AETHER_EMU_FORMATID (Update 65): send the block's real format id, not just its bit
+  // count, so e.g. H10302 37-bit isn't sent as the generic 37-bit layout and formats with
+  // no generic layout (Indala 29-bit) encode. The built-in fallback list uses bare bit
+  // counts as ids ('26', '37'); those still go out by bit length as before.
+  const sendCard = async (reader: Reader, fc: number, cn: number, fmt: CardFormat) => {
+    const bits = fmt.bits;
+    const fid = /^\d+$/.test(String(fmt.id)) ? null : String(fmt.id);
     if (reader.type === 'wiegand') {
       const d0Pin = reader.d0 ?? reader.pins?.d0; const d1Pin = reader.d1 ?? reader.pins?.d1;
-      const response = await fetch(`http://${ipAddress}:3001/api/wiegand/transmit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ d0Pin, d1Pin, facility: fc, card: cn, bits, pulseWidth: 50 }) });
+      const response = await fetch(`http://${ipAddress}:3001/api/wiegand/transmit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ d0Pin, d1Pin, facility: fc, card: cn, ...(fid ? { formatId: fid } : { bits }), pulseWidth: 50 }) });
       return response.json();
     } else if (reader.type === 'osdp') {
-      const response = await fetch(`http://${ipAddress}:3001/api/osdp/card-read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ readerId: reader.id, facility: fc, card: cn, format: `wiegand${bits}` }) });
+      const response = await fetch(`http://${ipAddress}:3001/api/osdp/card-read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ readerId: reader.id, facility: fc, card: cn, format: fid || `wiegand${bits}` }) });
       return response.json();
     } else if (reader.type === 'controller-emulator') {
-      const response = await fetch(`http://${ipAddress}:3001/api/emulator/device/${reader.address}/reader/${reader.port}/card`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: `w${bits}`, facility: fc, card: cn }) });
+      const response = await fetch(`http://${ipAddress}:3001/api/emulator/device/${reader.address}/reader/${reader.port}/card`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: fid || `w${bits}`, facility: fc, card: cn }) });
       return response.json();
     }
     return { success: false, error: 'Unknown reader type' };
@@ -1017,7 +1037,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           for (let i = 0; i < cards.length; i++) {
             if (executionControlRef.current.shouldStop) break;
             const { fc, cn } = cards[i];
-            const result = await sendCard(reader, fc, cn, format.bits);
+            const result = await sendCard(reader, fc, cn, format);
             if (result.success) { addLog(columnIndex, `  ✓ Card ${i+1}/${cards.length}: FC:${fc} CN:${cn}`, 'success'); }
             else { addLog(columnIndex, `  ✗ Card ${i+1} failed: ${result.error}`, 'error'); }
             if (i < cards.length - 1 && block.delayBetweenCards) await new Promise(r => setTimeout(r, block.delayBetweenCards));
@@ -1230,7 +1250,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'valid_access': {
               if (!reader) { FAIL('No reader configured'); break; }
               INFO(`Step 1 — Send card FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format.bits);
+              await sendCard(reader, fc, cn, format);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} for grant (up to ${timeout}ms)...`);
               const unlock = await scenarioWaitFor(block, lockInput, true, timeout);
@@ -1255,7 +1275,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'denied_access': {
               if (!reader) { FAIL('No reader configured'); break; }
               INFO(`Step 1 — Send invalid card FC:${badFc} CN:${badCn} → ${reader.name}`);
-              await sendCard(reader, badFc, badCn, format.bits);
+              await sendCard(reader, badFc, badCn, format);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} — must stay inactive for ${timeout}ms (no grant)...`);
               const granted = await scenarioWaitFor(block, lockInput, true, timeout);
@@ -1310,7 +1330,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               if (!reader) { FAIL('No reader configured'); break; }
 
               INFO(`Step 1 — Send credential FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format.bits);
+              await sendCard(reader, fc, cn, format);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} for grant (up to ${timeout}ms)...`);
               const grant = await scenarioWaitFor(block, lockInput, true, timeout);
@@ -1369,7 +1389,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'anti_passback': {
               if (!reader) { FAIL('No reader configured'); break; }
               INFO(`Step 1 — First presentation: FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format.bits);
+              await sendCard(reader, fc, cn, format);
               const firstGrant = await scenarioWaitFor(block, lockInput, true, timeout);
               if (!firstGrant.reached) { FAIL(`First card denied — can't test anti-passback`); break; }
               PASS(`First card granted — ${RD(lockInput)} active in ${firstGrant.elapsedMs}ms`);
@@ -1380,7 +1400,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               await new Promise(r => setTimeout(r, apbDelay));
 
               INFO(`Step 3 — Second presentation of same card (anti-passback should deny)...`);
-              await sendCard(reader, fc, cn, format.bits);
+              await sendCard(reader, fc, cn, format);
               const secondGrant = await scenarioWaitFor(block, lockInput, true, timeout);
               if (secondGrant.reached) FAIL(`Anti-passback NOT enforced — ${RD(lockInput)} went active on 2nd presentation`);
               else PASS(`Anti-passback ENFORCED — 2nd presentation denied (${RD(lockInput)} stayed inactive)`);
@@ -1402,7 +1422,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 if (executionControlRef.current.shouldStop) break;
                 const cr = creds[i];
                 INFO(`Person ${i + 1} — FC:${cr.fc} CN:${cr.cn} → ${reader.name}`);
-                await sendCard(reader, cr.fc, cr.cn, format.bits);
+                await sendCard(reader, cr.fc, cr.cn, format);
                 const g = await scenarioWaitFor(block, lockInput, true, timeout);
                 if (g.reached) {
                   granted++;
@@ -1434,7 +1454,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 : `Opto I${ch}`;
 
               INFO(`Step 1 — Unlock Door 1: FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format.bits);
+              await sendCard(reader, fc, cn, format);
               const door1unlock = await scenarioWaitFor(block, lockInput, true, timeout);
               if (!door1unlock.reached) { FAIL(`Door 1 did not unlock — ${RD(lockInput)} did not activate; cannot test interlock`); break; }
               PASS(`Door 1 unlocked — ${RD(lockInput)} active in ${door1unlock.elapsedMs}ms`);
@@ -1447,7 +1467,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               if (settleMs > 0) { INFO(`Settle: waiting ${settleMs}ms before attempting Door 2...`); await new Promise(r => setTimeout(r, settleMs)); }
 
               INFO(`Step 3 — While Door 1 is open, attempt Door 2: ${reader2.name}${d2Board ? ` (board #${d2Board})` : ''}`);
-              await sendCard(reader2, fc, cn, format.bits);
+              await sendCard(reader2, fc, cn, format);
               const door2blocked = await scenarioWaitDoor2(block, lock2Input, true, ilkTimeout);
               if (door2blocked.reached) FAIL(`Interlock NOT enforced — Door 2 ${D2(lock2Input)} went active while Door 1 open`);
               else PASS(`Interlock ENFORCED — Door 2 ${D2(lock2Input)} stayed inactive for ${ilkTimeout}ms while Door 1 open`);
@@ -1461,7 +1481,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               if (settleMs > 0) { INFO(`Settle: waiting ${settleMs}ms before retrying Door 2...`); await new Promise(r => setTimeout(r, settleMs)); }
 
               INFO(`Step 5 — Door 1 closed. Retry Door 2: ${reader2.name}`);
-              await sendCard(reader2, fc, cn, format.bits);
+              await sendCard(reader2, fc, cn, format);
               const door2now = await scenarioWaitDoor2(block, lock2Input, true, ilkTimeout);
               if (door2now.reached) PASS(`Door 2 ${D2(lock2Input)} unlocked after Door 1 closed (${door2now.elapsedMs}ms) — interlock correct`);
               else FAIL(`Door 2 ${D2(lock2Input)} still locked after Door 1 closed — check panel interlock config`);
@@ -1951,15 +1971,15 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               const ports = selIsEmu ? emuReaders.filter(r => r.address === selected?.address).sort((a, b) => (a.port ?? 0) - (b.port ?? 0)) : [];
               return (
                 <>
-                  <div><label className="text-xs text-[#786D60] block mb-1">Reader</label>
-                    <select value={topVal} onChange={e => onTop(e.target.value)} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">
+                  <div><label className="text-xs text-hv-text-3 block mb-1">Reader</label>
+                    <select value={topVal} onChange={e => onTop(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
                       {otherReaders.length > 0 && <optgroup label="Physical / OSDP">{otherReaders.map(r => <option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}</optgroup>}
                       {emuBoards.length > 0 && <optgroup label="Emulated Controllers">{emuBoards.map(b => <option key={`emu:${b.address}`} value={`emu:${b.address}`}>#{b.address} {b.model}</option>)}</optgroup>}
                     </select>
                   </div>
                   {selIsEmu && ports.length > 0 && (
-                    <div><label className="text-xs text-[#786D60] block mb-1">Reader Port <span className="text-[#786D60]">— #{selected?.address} {selected?.model}</span></label>
-                      <select value={selectedBlock.readerId || ''} onChange={e => updateBlock(selectedBlock.id, { readerId: e.target.value })} className="w-full bg-[#15110B] border border-[#F0A73C]/40 rounded px-3 py-2 text-sm">
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Reader Port <span className="text-hv-text-3">— #{selected?.address} {selected?.model}</span></label>
+                      <select value={selectedBlock.readerId || ''} onChange={e => updateBlock(selectedBlock.id, { readerId: e.target.value })} className="w-full bg-hv-surface border border-hv-brand/40 rounded px-3 py-2 text-sm">
                         {ports.map(r => <option key={r.id} value={r.id}>Reader {r.port}</option>)}
                       </select>
                     </div>
@@ -1969,22 +1989,22 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             })()}
             {/* Read Type toggle — card vs PIN */}
             <div>
-              <label className="text-xs text-[#786D60] block mb-1">Read Type</label>
+              <label className="text-xs text-hv-text-3 block mb-1">Read Type</label>
               <div className="grid grid-cols-2 gap-1">
-                <button onClick={() => updateBlock(selectedBlock.id, { readType: 'card' })} className={`px-2 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 ${(selectedBlock.readType || 'card') === 'card' ? 'bg-[#F0A73C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}><CreditCard className="w-3.5 h-3.5" />Card</button>
-                <button onClick={() => updateBlock(selectedBlock.id, { readType: 'pin' })} className={`px-2 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 ${selectedBlock.readType === 'pin' ? 'bg-[#F0A73C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}><Hash className="w-3.5 h-3.5" />PIN</button>
+                <button onClick={() => updateBlock(selectedBlock.id, { readType: 'card' })} className={`px-2 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 ${(selectedBlock.readType || 'card') === 'card' ? 'bg-hv-brand' : 'bg-hv-popup-panel hover:bg-hv-box'}`}><CreditCard className="w-3.5 h-3.5" />Card</button>
+                <button onClick={() => updateBlock(selectedBlock.id, { readType: 'pin' })} className={`px-2 py-1.5 rounded text-xs flex items-center justify-center gap-1.5 ${selectedBlock.readType === 'pin' ? 'bg-hv-brand' : 'bg-hv-popup-panel hover:bg-hv-box'}`}><Hash className="w-3.5 h-3.5" />PIN</button>
               </div>
             </div>
             {selectedBlock.readType === 'pin' ? (
               <>
                 <div>
-                  <label className="text-xs text-[#786D60] block mb-1">PIN Value</label>
-                  <input type="text" maxLength={16} value={selectedBlock.pinValue || ''} onChange={e => updateBlock(selectedBlock.id, { pinValue: e.target.value.replace(/[^0-9*#]/g, '') })} placeholder="1234" className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm font-mono tracking-widest" />
-                  <p className="text-[10px] text-[#786D60] mt-1">Digits, * and # only. Terminator (#) appended automatically for burst formats.</p>
+                  <label className="text-xs text-hv-text-3 block mb-1">PIN Value</label>
+                  <input type="text" maxLength={16} value={selectedBlock.pinValue || ''} onChange={e => updateBlock(selectedBlock.id, { pinValue: e.target.value.replace(/[^0-9*#]/g, '') })} placeholder="1234" className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm font-mono tracking-widest" />
+                  <p className="text-[10px] text-hv-text-3 mt-1">Digits, * and # only. Terminator (#) appended automatically for burst formats.</p>
                 </div>
                 <div>
-                  <label className="text-xs text-[#786D60] block mb-1">Keypad Format</label>
-                  <select value={selectedBlock.keypadFormat || '4bit'} onChange={e => updateBlock(selectedBlock.id, { keypadFormat: e.target.value as KeypadFormat })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">
+                  <label className="text-xs text-hv-text-3 block mb-1">Keypad Format</label>
+                  <select value={selectedBlock.keypadFormat || '4bit'} onChange={e => updateBlock(selectedBlock.id, { keypadFormat: e.target.value as KeypadFormat })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
                     <option value="4bit">4-bit Packed (burst)</option>
                     <option value="8bit">8-bit ASCII (burst)</option>
                     <option value="8bit-wiegand">8-bit Wiegand / Farpointe (burst)</option>
@@ -1993,33 +2013,33 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 </div>
                 {selectedBlock.keypadFormat === '26bit' && (
                   <div>
-                    <label className="text-xs text-[#786D60] block mb-1">Facility Code (for 26-bit)</label>
-                    <input type="number" value={selectedBlock.facilityCode || 0} onChange={e => updateBlock(selectedBlock.id, { facilityCode: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                    <label className="text-xs text-hv-text-3 block mb-1">Facility Code (for 26-bit)</label>
+                    <input type="number" value={selectedBlock.facilityCode || 0} onChange={e => updateBlock(selectedBlock.id, { facilityCode: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                   </div>
                 )}
               </>
             ) : (
               <>
-                <div><label className="text-xs text-[#786D60] block mb-1">Mode</label><div className="grid grid-cols-2 gap-1">{['single','range'].map(mode => <button key={mode} onClick={() => updateBlock(selectedBlock.id, { mode: mode as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.mode === mode ? 'bg-[#F0A73C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{mode}</button>)}</div></div>
-                <div><label className="text-xs text-[#786D60] block mb-1">Format</label><select value={selectedBlock.format || '26'} onChange={e => updateBlock(selectedBlock.id, { format: e.target.value })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{cardFormats.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Mode</label><div className="grid grid-cols-2 gap-1">{['single','range'].map(mode => <button key={mode} onClick={() => updateBlock(selectedBlock.id, { mode: mode as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.mode === mode ? 'bg-hv-brand' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{mode}</button>)}</div></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Format</label><select value={selectedBlock.format || '26'} onChange={e => updateBlock(selectedBlock.id, { format: e.target.value })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{cardFormats.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></div>
                 {selectedBlock.mode === 'single' ? (
                   <div className="grid grid-cols-2 gap-2">
-                    <div><label className="text-xs text-[#786D60] block mb-1">Facility Code</label><input type="number" value={selectedBlock.facilityCode || 0} onChange={e => updateBlock(selectedBlock.id, { facilityCode: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
-                    <div><label className="text-xs text-[#786D60] block mb-1">Card Number</label><input type="number" value={selectedBlock.cardNumber || 0} onChange={e => updateBlock(selectedBlock.id, { cardNumber: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Facility Code</label><input type="number" value={selectedBlock.facilityCode || 0} onChange={e => updateBlock(selectedBlock.id, { facilityCode: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Card Number</label><input type="number" value={selectedBlock.cardNumber || 0} onChange={e => updateBlock(selectedBlock.id, { cardNumber: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
                   </div>
                 ) : (
                   <>
-                    <div><label className="text-xs text-[#786D60] block mb-1">Sequence Mode</label><select value={selectedBlock.sequenceMode || 'sequential'} onChange={e => updateBlock(selectedBlock.id, { sequenceMode: e.target.value as CardSequenceMode })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"><option value="sequential">Sequential</option><option value="increment_cn">Increment CN only</option><option value="increment_fc">Increment FC only</option><option value="increment_both">Increment both</option><option value="random">Random from range</option><option value="replay">Replay same card N times</option><option value="invalid">Invalid/Out of range</option></select></div>
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Sequence Mode</label><select value={selectedBlock.sequenceMode || 'sequential'} onChange={e => updateBlock(selectedBlock.id, { sequenceMode: e.target.value as CardSequenceMode })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="sequential">Sequential</option><option value="increment_cn">Increment CN only</option><option value="increment_fc">Increment FC only</option><option value="increment_both">Increment both</option><option value="random">Random from range</option><option value="replay">Replay same card N times</option><option value="invalid">Invalid/Out of range</option></select></div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div><label className="text-xs text-[#786D60] block mb-1">FC Start</label><input type="number" value={selectedBlock.facilityStart || 0} onChange={e => updateBlock(selectedBlock.id, { facilityStart: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
-                      <div><label className="text-xs text-[#786D60] block mb-1">FC End</label><input type="number" value={selectedBlock.facilityEnd || 0} onChange={e => updateBlock(selectedBlock.id, { facilityEnd: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+                      <div><label className="text-xs text-hv-text-3 block mb-1">FC Start</label><input type="number" value={selectedBlock.facilityStart || 0} onChange={e => updateBlock(selectedBlock.id, { facilityStart: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
+                      <div><label className="text-xs text-hv-text-3 block mb-1">FC End</label><input type="number" value={selectedBlock.facilityEnd || 0} onChange={e => updateBlock(selectedBlock.id, { facilityEnd: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div><label className="text-xs text-[#786D60] block mb-1">CN Start</label><input type="number" value={selectedBlock.cardStart || 0} onChange={e => updateBlock(selectedBlock.id, { cardStart: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
-                      <div><label className="text-xs text-[#786D60] block mb-1">CN End</label><input type="number" value={selectedBlock.cardEnd || 0} onChange={e => updateBlock(selectedBlock.id, { cardEnd: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+                      <div><label className="text-xs text-hv-text-3 block mb-1">CN Start</label><input type="number" value={selectedBlock.cardStart || 0} onChange={e => updateBlock(selectedBlock.id, { cardStart: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
+                      <div><label className="text-xs text-hv-text-3 block mb-1">CN End</label><input type="number" value={selectedBlock.cardEnd || 0} onChange={e => updateBlock(selectedBlock.id, { cardEnd: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
                     </div>
-                    {(selectedBlock.sequenceMode === 'random' || selectedBlock.sequenceMode === 'replay') && <div><label className="text-xs text-[#786D60] block mb-1">Card Count</label><input type="number" value={selectedBlock.cardCount || 10} onChange={e => updateBlock(selectedBlock.id, { cardCount: parseInt(e.target.value) || 10 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>}
-                    <div><label className="text-xs text-[#786D60] block mb-1">Delay Between Cards (ms)</label><input type="number" value={selectedBlock.delayBetweenCards || 500} onChange={e => updateBlock(selectedBlock.id, { delayBetweenCards: parseInt(e.target.value) || 500 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+                    {(selectedBlock.sequenceMode === 'random' || selectedBlock.sequenceMode === 'replay') && <div><label className="text-xs text-hv-text-3 block mb-1">Card Count</label><input type="number" value={selectedBlock.cardCount || 10} onChange={e => updateBlock(selectedBlock.id, { cardCount: parseInt(e.target.value) || 10 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>}
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Delay Between Cards (ms)</label><input type="number" value={selectedBlock.delayBetweenCards || 500} onChange={e => updateBlock(selectedBlock.id, { delayBetweenCards: parseInt(e.target.value) || 500 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
                   </>
                 )}
               </>
@@ -2029,16 +2049,16 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
         {selectedBlock.type === 'door' && (
           <>
-            <div><label className="text-xs text-[#786D60] block mb-1">Door</label><select value={selectedBlock.doorId || 1} onChange={e => updateBlock(selectedBlock.id, { doorId: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">Event</label><select value={selectedBlock.eventType || 'lock'} onChange={e => updateBlock(selectedBlock.id, { eventType: e.target.value as any })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"><option value="lock">Lock</option><option value="dps">DPS</option><option value="rexIn">REX</option></select></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">Action</label><div className="grid grid-cols-3 gap-1">{['activate','deactivate','pulse'].map(action => <button key={action} onClick={() => updateBlock(selectedBlock.id, { action: action as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.action === action ? action === 'activate' ? 'bg-[#4F8B5C]' : action === 'deactivate' ? 'bg-[#C6604F]' : 'bg-[#5E86B8]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{action}</button>)}</div></div>
-            {selectedBlock.action === 'pulse' && <div><label className="text-xs text-[#786D60] block mb-1">Pulse Duration (ms)</label><input type="number" value={selectedBlock.pulseDuration || 500} onChange={e => updateBlock(selectedBlock.id, { pulseDuration: parseInt(e.target.value) || 500 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>}
+            <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.doorId || 1} onChange={e => updateBlock(selectedBlock.id, { doorId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Event</label><select value={selectedBlock.eventType || 'lock'} onChange={e => updateBlock(selectedBlock.id, { eventType: e.target.value as any })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="lock">Lock</option><option value="dps">DPS</option><option value="rexIn">REX</option></select></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Action</label><div className="grid grid-cols-3 gap-1">{['activate','deactivate','pulse'].map(action => <button key={action} onClick={() => updateBlock(selectedBlock.id, { action: action as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.action === action ? action === 'activate' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : action === 'deactivate' ? 'bg-hv-error-tint text-hv-error-fg ring-1 ring-inset ring-hv-error/40' : 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{action}</button>)}</div></div>
+            {selectedBlock.action === 'pulse' && <div><label className="text-xs text-hv-text-3 block mb-1">Pulse Duration (ms)</label><input type="number" value={selectedBlock.pulseDuration || 500} onChange={e => updateBlock(selectedBlock.id, { pulseDuration: parseInt(e.target.value) || 500 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>}
           </>
         )}
 
         {selectedBlock.type === 'io' && (
           <>
-            <div><label className="text-xs text-[#786D60] block mb-1">Type</label><select value={selectedBlock.ioType || 'output'} onChange={e => updateBlock(selectedBlock.id, { ioType: e.target.value as any, ioId: 1 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"><option value="output">Pi GPIO Output</option><option value="controller">Controller Input (simulate)</option><option value="input">Pi GPIO Input (read)</option></select></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Type</label><select value={selectedBlock.ioType || 'output'} onChange={e => updateBlock(selectedBlock.id, { ioType: e.target.value as any, ioId: 1 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="output">Pi GPIO Output</option><option value="controller">Controller Input (simulate)</option><option value="input">Pi GPIO Input (read)</option></select></div>
             {selectedBlock.ioType === 'controller' ? (
               (() => {
                 const currentAddr = Math.floor((selectedBlock.ioId || 0) / 100);
@@ -2046,7 +2066,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 return (
                   <>
                     <div>
-                      <label className="text-xs text-[#786D60] block mb-1">Board</label>
+                      <label className="text-xs text-hv-text-3 block mb-1">Board</label>
                       <select
                         value={currentAddr || ''}
                         onChange={e => {
@@ -2054,7 +2074,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                           const first = controllerItemsForBoard(addr, 'input')[0];
                           updateBlock(selectedBlock.id, { ioId: first ? first.id : addr * 100 });
                         }}
-                        className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"
+                        className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"
                       >
                         {controllerBoards.length === 0 && <option value="">— no boards (start Controller Emulator) —</option>}
                         {controllerBoards.length > 0 && !currentAddr && <option value="">— pick a board —</option>}
@@ -2064,12 +2084,12 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-[#786D60] block mb-1">Input (simulated)</label>
+                      <label className="text-xs text-hv-text-3 block mb-1">Input (simulated)</label>
                       <select
                         value={currentAddr ? (selectedBlock.ioId || items[0]?.id || '') : ''}
                         onChange={e => updateBlock(selectedBlock.id, { ioId: parseInt(e.target.value) })}
                         disabled={!currentAddr || items.length === 0}
-                        className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm disabled:opacity-50"
+                        className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm disabled:opacity-50"
                       >
                         {items.length === 0 && <option value="">— no inputs on this board —</option>}
                         {items.map(io => (
@@ -2083,12 +2103,12 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 );
               })()
             ) : (
-              <div><label className="text-xs text-[#786D60] block mb-1">Select</label><select value={selectedBlock.ioId || 1} onChange={e => updateBlock(selectedBlock.id, { ioId: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{(selectedBlock.ioType === 'output' ? outputs : inputs).map(io => <option key={io.id} value={io.id}>{io.name}</option>)}</select></div>
+              <div><label className="text-xs text-hv-text-3 block mb-1">Select</label><select value={selectedBlock.ioId || 1} onChange={e => updateBlock(selectedBlock.id, { ioId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{(selectedBlock.ioType === 'output' ? outputs : inputs).map(io => <option key={io.id} value={io.id}>{io.name}</option>)}</select></div>
             )}
             {selectedBlock.ioType !== 'input' && (
               <>
-                <div><label className="text-xs text-[#786D60] block mb-1">Action</label><div className="grid grid-cols-3 gap-1">{['activate','deactivate','pulse'].map(action => <button key={action} onClick={() => updateBlock(selectedBlock.id, { action: action as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.action === action ? action === 'activate' ? 'bg-[#4F8B5C]' : action === 'deactivate' ? 'bg-[#C6604F]' : 'bg-[#5E86B8]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{action}</button>)}</div></div>
-                {selectedBlock.action === 'pulse' && <div><label className="text-xs text-[#786D60] block mb-1">Pulse Duration (ms)</label><input type="number" value={selectedBlock.pulseDuration || 500} onChange={e => updateBlock(selectedBlock.id, { pulseDuration: parseInt(e.target.value) || 500 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>}
+                <div><label className="text-xs text-hv-text-3 block mb-1">Action</label><div className="grid grid-cols-3 gap-1">{['activate','deactivate','pulse'].map(action => <button key={action} onClick={() => updateBlock(selectedBlock.id, { action: action as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.action === action ? action === 'activate' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : action === 'deactivate' ? 'bg-hv-error-tint text-hv-error-fg ring-1 ring-inset ring-hv-error/40' : 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{action}</button>)}</div></div>
+                {selectedBlock.action === 'pulse' && <div><label className="text-xs text-hv-text-3 block mb-1">Pulse Duration (ms)</label><input type="number" value={selectedBlock.pulseDuration || 500} onChange={e => updateBlock(selectedBlock.id, { pulseDuration: parseInt(e.target.value) || 500 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>}
               </>
             )}
           </>
@@ -2097,8 +2117,8 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         {selectedBlock.type === 'wait' && (
           <>
             <div>
-              <label className="text-xs text-[#786D60] block mb-1">Wait Type</label>
-              <select value={selectedBlock.waitType || 'seconds'} onChange={e => updateBlock(selectedBlock.id, { waitType: e.target.value as any })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">
+              <label className="text-xs text-hv-text-3 block mb-1">Wait Type</label>
+              <select value={selectedBlock.waitType || 'seconds'} onChange={e => updateBlock(selectedBlock.id, { waitType: e.target.value as any })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
                 <option value="seconds">Seconds</option>
                 <option value="minutes">Minutes</option>
                 <option value="random">Random (seconds)</option>
@@ -2109,23 +2129,23 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-[#786D60] block mb-1">Time (24h)</label>
-                    <input type="time" value={selectedBlock.waitUntilTime || ''} onChange={e => updateBlock(selectedBlock.id, { waitUntilTime: e.target.value })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                    <label className="text-xs text-hv-text-3 block mb-1">Time (24h)</label>
+                    <input type="time" value={selectedBlock.waitUntilTime || ''} onChange={e => updateBlock(selectedBlock.id, { waitUntilTime: e.target.value })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                   </div>
                   <div>
-                    <label className="text-xs text-[#786D60] block mb-1">Date (optional)</label>
-                    <input type="date" value={selectedBlock.waitUntilDate || ''} onChange={e => updateBlock(selectedBlock.id, { waitUntilDate: e.target.value || undefined })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                    <label className="text-xs text-hv-text-3 block mb-1">Date (optional)</label>
+                    <input type="date" value={selectedBlock.waitUntilDate || ''} onChange={e => updateBlock(selectedBlock.id, { waitUntilDate: e.target.value || undefined })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                   </div>
                 </div>
-                <p className="text-[10px] text-[#786D60] -mt-2">Leave date blank to wait for the next occurrence of this time (today, or tomorrow if already past).</p>
+                <p className="text-[10px] text-hv-text-3 -mt-2">Leave date blank to wait for the next occurrence of this time (today, or tomorrow if already past).</p>
               </>
             ) : selectedBlock.waitType === 'random' ? (
               <div className="grid grid-cols-2 gap-2">
-                <div><label className="text-xs text-[#786D60] block mb-1">Min (sec)</label><input type="number" value={selectedBlock.waitMin || 1} onChange={e => updateBlock(selectedBlock.id, { waitMin: parseInt(e.target.value) || 1 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
-                <div><label className="text-xs text-[#786D60] block mb-1">Max (sec)</label><input type="number" value={selectedBlock.waitMax || 5} onChange={e => updateBlock(selectedBlock.id, { waitMax: parseInt(e.target.value) || 5 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Min (sec)</label><input type="number" value={selectedBlock.waitMin || 1} onChange={e => updateBlock(selectedBlock.id, { waitMin: parseInt(e.target.value) || 1 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Max (sec)</label><input type="number" value={selectedBlock.waitMax || 5} onChange={e => updateBlock(selectedBlock.id, { waitMax: parseInt(e.target.value) || 5 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
               </div>
             ) : (
-              <div><label className="text-xs text-[#786D60] block mb-1">Duration</label><input type="number" value={selectedBlock.waitValue || 5} onChange={e => updateBlock(selectedBlock.id, { waitValue: parseInt(e.target.value) || 5 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+              <div><label className="text-xs text-hv-text-3 block mb-1">Duration</label><input type="number" value={selectedBlock.waitValue || 5} onChange={e => updateBlock(selectedBlock.id, { waitValue: parseInt(e.target.value) || 5 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
             )}
           </>
         )}
@@ -2134,16 +2154,16 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           <>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-[#786D60] block mb-1">Time (24h)</label>
-                <input type="time" value={selectedBlock.scheduleTime || ''} onChange={e => updateBlock(selectedBlock.id, { scheduleTime: e.target.value })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                <label className="text-xs text-hv-text-3 block mb-1">Time (24h)</label>
+                <input type="time" value={selectedBlock.scheduleTime || ''} onChange={e => updateBlock(selectedBlock.id, { scheduleTime: e.target.value })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
               </div>
               <div>
-                <label className="text-xs text-[#786D60] block mb-1">Date (optional)</label>
-                <input type="date" value={selectedBlock.scheduleDate || ''} onChange={e => updateBlock(selectedBlock.id, { scheduleDate: e.target.value || undefined })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                <label className="text-xs text-hv-text-3 block mb-1">Date (optional)</label>
+                <input type="date" value={selectedBlock.scheduleDate || ''} onChange={e => updateBlock(selectedBlock.id, { scheduleDate: e.target.value || undefined })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
               </div>
             </div>
-            <p className="text-[10px] text-[#786D60]">Holds workflow execution until the scheduled time. Place at the start of a workflow to schedule when it runs. Leave date blank for next occurrence.</p>
-            <div className="bg-[#F0A73C]/15 border border-[#F0A73C]/40 rounded p-2 text-[11px] text-[#F3ECE3]">
+            <p className="text-[10px] text-hv-text-3">Holds workflow execution until the scheduled time. Place at the start of a workflow to schedule when it runs. Leave date blank for next occurrence.</p>
+            <div className="bg-hv-brand/15 border border-hv-brand/40 rounded p-2 text-[11px] text-hv-text">
               💡 Schedules can be paused, resumed, and stopped like any other block. Workflow runs in foreground while waiting.
             </div>
           </>
@@ -2152,7 +2172,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         {selectedBlock.type === 'control' && (
           <>
             <div>
-              <label className="text-xs text-[#786D60] block mb-1">Control Type</label>
+              <label className="text-xs text-hv-text-3 block mb-1">Control Type</label>
               <select
                 value={selectedBlock.controlType || 'stop'}
                 onChange={e => {
@@ -2165,7 +2185,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   }
                   updateBlock(selectedBlock.id, updates);
                 }}
-                className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"
+                className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"
               >
                 <option value="stop">Stop Workflow</option>
                 <option value="loop">Loop to Column</option>
@@ -2173,11 +2193,11 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             </div>
             {selectedBlock.controlType === 'loop' && (
               <div>
-                <label className="text-xs text-[#786D60] block mb-1">Loop to Column</label>
+                <label className="text-xs text-hv-text-3 block mb-1">Loop to Column</label>
                 <select
                   value={selectedBlock.loopToColumn ?? 0}
                   onChange={e => updateBlock(selectedBlock.id, { loopToColumn: parseInt(e.target.value) })}
-                  className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"
+                  className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"
                 >
                   {workflow.slice(0, workflow.findIndex(c => c.blocks.some(b => b.id === selectedBlock.id))).map((_, idx) => (
                     <option key={idx} value={idx}>Column {idx + 1}</option>
@@ -2190,7 +2210,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
         {selectedBlock.type === 'waitInput' && (
           <>
-            <div><label className="text-xs text-[#786D60] block mb-1">Input Type</label><select value={selectedBlock.waitInputType || 'input'} onChange={e => updateBlock(selectedBlock.id, { waitInputType: e.target.value as any, waitInputId: 1 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"><option value="input">General Input (local)</option><option value="controller_input">Controller Input (emulated)</option><option value="controller_output">Controller Output (emulated, monitor)</option><option value="door_dps">Door DPS</option><option value="door_rex">Door REX</option></select></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Input Type</label><select value={selectedBlock.waitInputType || 'input'} onChange={e => updateBlock(selectedBlock.id, { waitInputType: e.target.value as any, waitInputId: 1 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="input">General Input (local)</option><option value="controller_input">Controller Input (emulated)</option><option value="controller_output">Controller Output (emulated, monitor)</option><option value="door_dps">Door DPS</option><option value="door_rex">Door REX</option></select></div>
             {(selectedBlock.waitInputType === 'controller_input' || selectedBlock.waitInputType === 'controller_output') ? (() => {
               const kind: 'input' | 'output' = selectedBlock.waitInputType === 'controller_output' ? 'output' : 'input';
               const currentAddr = Math.floor((selectedBlock.waitInputId || 0) / 100);
@@ -2198,7 +2218,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               return (
                 <>
                   <div>
-                    <label className="text-xs text-[#786D60] block mb-1">Board</label>
+                    <label className="text-xs text-hv-text-3 block mb-1">Board</label>
                     <select
                       value={currentAddr || ''}
                       onChange={e => {
@@ -2206,7 +2226,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                         const first = controllerItemsForBoard(addr, kind)[0];
                         updateBlock(selectedBlock.id, { waitInputId: first ? first.id : addr * 100 });
                       }}
-                      className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"
+                      className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"
                     >
                       {controllerBoards.length === 0 && <option value="">— no boards (start Controller Emulator) —</option>}
                       {controllerBoards.length > 0 && !currentAddr && <option value="">— pick a board —</option>}
@@ -2216,14 +2236,14 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-[#786D60] block mb-1">
-                      {kind === 'output' ? 'Output' : 'Input'} <span className="text-[#786D60]">{kind === 'output' ? '— IC2-driven, read-only' : '— settable'}</span>
+                    <label className="text-xs text-hv-text-3 block mb-1">
+                      {kind === 'output' ? 'Output' : 'Input'} <span className="text-hv-text-3">{kind === 'output' ? '— IC2-driven, read-only' : '— settable'}</span>
                     </label>
                     <select
                       value={currentAddr ? (selectedBlock.waitInputId || items[0]?.id || '') : ''}
                       onChange={e => updateBlock(selectedBlock.id, { waitInputId: parseInt(e.target.value) })}
                       disabled={!currentAddr || items.length === 0}
-                      className={`w-full bg-[#15110B] border rounded px-3 py-2 text-sm disabled:opacity-50 ${kind === 'output' ? 'border-[#F0A73C]/40' : 'border-[#5FB7B0]/40'}`}
+                      className={`w-full bg-hv-surface border rounded px-3 py-2 text-sm disabled:opacity-50 ${kind === 'output' ? 'border-hv-brand/40' : 'border-hv-info/40'}`}
                     >
                       {items.length === 0 && <option value="">— none on this board —</option>}
                       {items.map(io => (
@@ -2234,24 +2254,24 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 </>
               );
             })()
-            : selectedBlock.waitInputType === 'input' ? <div><label className="text-xs text-[#786D60] block mb-1">Input</label><select value={selectedBlock.waitInputId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputId: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{inputs.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
-            : <div><label className="text-xs text-[#786D60] block mb-1">Door</label><select value={selectedBlock.waitInputDoorId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputDoorId: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>}
-            <div><label className="text-xs text-[#786D60] block mb-1">Wait For State</label><div className="grid grid-cols-3 gap-1">{['high','low','any_change'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { waitInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.waitInputState === state ? 'bg-[#4F9E97]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{state === 'any_change' ? 'Change' : state.toUpperCase()}</button>)}</div></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">Timeout (ms, 0=infinite)</label><input type="number" value={selectedBlock.waitInputTimeout || 0} onChange={e => updateBlock(selectedBlock.id, { waitInputTimeout: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">On Timeout</label><select value={selectedBlock.waitInputTimeoutAction || 'continue'} onChange={e => updateBlock(selectedBlock.id, { waitInputTimeoutAction: e.target.value as any })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm"><option value="continue">Continue</option><option value="stop">Stop Workflow</option><option value="skip">Skip to Next Column</option></select></div>
+            : selectedBlock.waitInputType === 'input' ? <div><label className="text-xs text-hv-text-3 block mb-1">Input</label><select value={selectedBlock.waitInputId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{inputs.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
+            : <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.waitInputDoorId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputDoorId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>}
+            <div><label className="text-xs text-hv-text-3 block mb-1">Wait For State</label><div className="grid grid-cols-3 gap-1">{['high','low','any_change'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { waitInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.waitInputState === state ? 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{state === 'any_change' ? 'Change' : state.toUpperCase()}</button>)}</div></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Timeout (ms, 0=infinite)</label><input type="number" value={selectedBlock.waitInputTimeout || 0} onChange={e => updateBlock(selectedBlock.id, { waitInputTimeout: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">On Timeout</label><select value={selectedBlock.waitInputTimeoutAction || 'continue'} onChange={e => updateBlock(selectedBlock.id, { waitInputTimeoutAction: e.target.value as any })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="continue">Continue</option><option value="stop">Stop Workflow</option><option value="skip">Skip to Next Column</option></select></div>
           </>
         )}
 
         {selectedBlock.type === 'log' && (
           <>
-            <div><label className="text-xs text-[#786D60] block mb-1">Type</label><div className="grid grid-cols-2 gap-1"><button onClick={() => updateBlock(selectedBlock.id, { assertCondition: false })} className={`px-2 py-1.5 rounded text-xs ${!selectedBlock.assertCondition ? 'bg-[#322A22]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>📝 Log/Marker</button><button onClick={() => updateBlock(selectedBlock.id, { assertCondition: true })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.assertCondition ? 'bg-[#4F8B5C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>✓ Assertion</button></div></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">Message</label><input type="text" value={selectedBlock.logMessage || ''} onChange={e => updateBlock(selectedBlock.id, { logMessage: e.target.value })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" placeholder="Enter message..." /></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Type</label><div className="grid grid-cols-2 gap-1"><button onClick={() => updateBlock(selectedBlock.id, { assertCondition: false })} className={`px-2 py-1.5 rounded text-xs ${!selectedBlock.assertCondition ? 'bg-hv-box' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>📝 Log/Marker</button><button onClick={() => updateBlock(selectedBlock.id, { assertCondition: true })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.assertCondition ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>✓ Assertion</button></div></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Message</label><input type="text" value={selectedBlock.logMessage || ''} onChange={e => updateBlock(selectedBlock.id, { logMessage: e.target.value })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" placeholder="Enter message..." /></div>
             {!selectedBlock.assertCondition ? (
-              <div><label className="text-xs text-[#786D60] block mb-1">Level</label><div className="grid grid-cols-5 gap-1">{['info','success','warning','error','marker'].map(level => <button key={level} onClick={() => updateBlock(selectedBlock.id, { logLevel: level as any })} className={`px-1 py-1.5 rounded text-xs ${selectedBlock.logLevel === level ? level === 'success' ? 'bg-[#4F8B5C]' : level === 'warning' ? 'bg-[#C79A34]' : level === 'error' ? 'bg-[#C6604F]' : level === 'marker' ? 'bg-[#F0A73C]' : 'bg-[#5E86B8]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{level === 'info' ? '📝' : level === 'success' ? '✅' : level === 'warning' ? '⚠️' : level === 'error' ? '❌' : '📍'}</button>)}</div></div>
+              <div><label className="text-xs text-hv-text-3 block mb-1">Level</label><div className="grid grid-cols-5 gap-1">{['info','success','warning','error','marker'].map(level => <button key={level} onClick={() => updateBlock(selectedBlock.id, { logLevel: level as any })} className={`px-1 py-1.5 rounded text-xs ${selectedBlock.logLevel === level ? level === 'success' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : level === 'warning' ? 'bg-hv-warning-tint text-hv-warning-fg ring-1 ring-inset ring-hv-warning/40' : level === 'error' ? 'bg-hv-error-tint text-hv-error-fg ring-1 ring-inset ring-hv-error/40' : level === 'marker' ? 'bg-hv-brand-tint text-hv-brand-fg ring-1 ring-inset ring-hv-brand/40' : 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{level === 'info' ? '📝' : level === 'success' ? '✅' : level === 'warning' ? '⚠️' : level === 'error' ? '❌' : '📍'}</button>)}</div></div>
             ) : (
               <>
-                <div><label className="text-xs text-[#786D60] block mb-1">Assert Input</label><select value={selectedBlock.assertInputId || 1} onChange={e => updateBlock(selectedBlock.id, { assertInputId: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{[...inputs, ...controllerInputs, ...controllerOutputs.filter(o => o.id >= 100)].map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
-                <div><label className="text-xs text-[#786D60] block mb-1">Expected State</label><div className="grid grid-cols-2 gap-1">{['high','low'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { assertInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.assertInputState === state ? 'bg-[#4F8B5C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{state.toUpperCase()}</button>)}</div></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Assert Input</label><select value={selectedBlock.assertInputId || 1} onChange={e => updateBlock(selectedBlock.id, { assertInputId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{[...inputs, ...controllerInputs, ...controllerOutputs.filter(o => o.id >= 100)].map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Expected State</label><div className="grid grid-cols-2 gap-1">{['high','low'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { assertInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.assertInputState === state ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{state.toUpperCase()}</button>)}</div></div>
               </>
             )}
           </>
@@ -2259,29 +2279,29 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
         {selectedBlock.type === 'supervision' && (
           <>
-            <div><label className="text-xs text-[#786D60] block mb-1">Input</label><select value={selectedBlock.supervisionInputId || 1} onChange={e => updateBlock(selectedBlock.id, { supervisionInputId: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">{[...inputs, ...controllerInputs, ...controllerOutputs.filter(o => o.id >= 100)].map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">Supervision State</label><div className="grid grid-cols-2 gap-1">{(['normal','short','open','trouble'] as SupervisionState[]).map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { supervisionState: state })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.supervisionState === state ? state === 'normal' ? 'bg-[#4F8B5C]' : 'bg-[#F0A73C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{state === 'normal' ? '✓ Normal' : state === 'short' ? '⚡ Short' : state === 'open' ? '✂️ Open' : '⚠️ Trouble'}</button>)}</div></div>
-            <div><label className="text-xs text-[#786D60] block mb-1">Duration (ms, 0=permanent)</label><input type="number" value={selectedBlock.supervisionDuration || 0} onChange={e => updateBlock(selectedBlock.id, { supervisionDuration: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Input</label><select value={selectedBlock.supervisionInputId || 1} onChange={e => updateBlock(selectedBlock.id, { supervisionInputId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{[...inputs, ...controllerInputs, ...controllerOutputs.filter(o => o.id >= 100)].map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Supervision State</label><div className="grid grid-cols-2 gap-1">{(['normal','short','open','trouble'] as SupervisionState[]).map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { supervisionState: state })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.supervisionState === state ? state === 'normal' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-brand-tint text-hv-brand-fg ring-1 ring-inset ring-hv-brand/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{state === 'normal' ? '✓ Normal' : state === 'short' ? '⚡ Short' : state === 'open' ? '✂️ Open' : '⚠️ Trouble'}</button>)}</div></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Duration (ms, 0=permanent)</label><input type="number" value={selectedBlock.supervisionDuration || 0} onChange={e => updateBlock(selectedBlock.id, { supervisionDuration: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
           </>
         )}
 
         {selectedBlock.type === 'scenario' && (
           <>
             {/* ── Scenario selector ── */}
-            <div><label className="text-xs text-[#786D60] block mb-1">Scenario Type</label>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Scenario Type</label>
               <div className="space-y-1">{(Object.entries(SCENARIO_TEMPLATES) as [ScenarioType, typeof SCENARIO_TEMPLATES[ScenarioType]][]).map(([type, info]) => (
                 <button key={type} onClick={() => updateBlock(selectedBlock.id, { scenarioType: type })}
-                  className={`w-full px-3 py-2 rounded text-left text-xs ${selectedBlock.scenarioType === type ? 'bg-[#4E9E74]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>
+                  className={`w-full px-3 py-2 rounded text-left text-xs ${selectedBlock.scenarioType === type ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>
                   <div className="flex items-center gap-2">{info.icon}<span className="font-medium">{info.name}</span></div>
-                  <div className="text-[#786D60] mt-0.5 pl-6">{info.description}</div>
+                  <div className="text-hv-text-3 mt-0.5 pl-6">{info.description}</div>
                 </button>
               ))}</div>
             </div>
 
             {/* ── Common I/O ── */}
-            <div className="pt-2 border-t border-[#38302A]">
-              <div className="text-[10px] text-[#786D60] uppercase tracking-wider mb-2">Card / Reader</div>
-              <div><label className="text-xs text-[#786D60] block mb-1">Reader</label>
+            <div className="pt-2 border-t border-hv-line">
+              <div className="text-[10px] text-hv-text-3 uppercase tracking-wider mb-2">Card / Reader</div>
+              <div><label className="text-xs text-hv-text-3 block mb-1">Reader</label>
 {(() => {
                   const emuR = readerPool.filter(r => r.type === 'controller-emulator');
                   const otherR = readerPool.filter(r => r.type !== 'controller-emulator');
@@ -2292,12 +2312,12 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   const onTop = (v) => { if (v.startsWith('emu:')) { const a = parseInt(v.slice(4),10); const f = emuR.filter(r=>r.address===a).sort((x,y)=>(x.port??0)-(y.port??0))[0]; if (f) updateBlock(selectedBlock.id, { scenarioReaderId: f.id }); } else updateBlock(selectedBlock.id, { scenarioReaderId: v }); };
                   const ports = selEmu ? emuR.filter(r=>r.address===sel?.address).sort((x,y)=>(x.port??0)-(y.port??0)) : [];
                   return (<>
-                    <select value={topV} onChange={e=>onTop(e.target.value)} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">
+                    <select value={topV} onChange={e=>onTop(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
                       {otherR.length>0 && <optgroup label="Physical / OSDP">{otherR.map(r=><option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}</optgroup>}
                       {boards.length>0 && <optgroup label="Emulated Controllers">{boards.map(b=><option key={`emu:${b.address}`} value={`emu:${b.address}`}>#{b.address} {b.model}</option>)}</optgroup>}
                     </select>
                     {selEmu && ports.length>0 && (
-                      <select value={selectedBlock.scenarioReaderId || ''} onChange={e=>updateBlock(selectedBlock.id,{ scenarioReaderId: e.target.value })} className="w-full mt-1.5 bg-[#15110B] border border-[#F0A73C]/40 rounded px-3 py-2 text-sm">
+                      <select value={selectedBlock.scenarioReaderId || ''} onChange={e=>updateBlock(selectedBlock.id,{ scenarioReaderId: e.target.value })} className="w-full mt-1.5 bg-hv-surface border border-hv-brand/40 rounded px-3 py-2 text-sm">
                         {ports.map(r=><option key={r.id} value={r.id}>Reader {r.port}</option>)}
                       </select>
                     )}
@@ -2305,29 +2325,29 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 })()}
               </div>
               <div className="grid grid-cols-2 gap-2 mt-2">
-                <div><label className="text-xs text-[#786D60] block mb-1">Facility Code</label>
-                  <input type="number" value={selectedBlock.scenarioFacilityCode ?? 100} onChange={e => updateBlock(selectedBlock.id, { scenarioFacilityCode: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                <div><label className="text-xs text-hv-text-3 block mb-1">Facility Code</label>
+                  <input type="number" value={selectedBlock.scenarioFacilityCode ?? 100} onChange={e => updateBlock(selectedBlock.id, { scenarioFacilityCode: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                 </div>
-                <div><label className="text-xs text-[#786D60] block mb-1">Card Number</label>
-                  <input type="number" value={selectedBlock.scenarioCardNumber ?? 1234} onChange={e => updateBlock(selectedBlock.id, { scenarioCardNumber: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                <div><label className="text-xs text-hv-text-3 block mb-1">Card Number</label>
+                  <input type="number" value={selectedBlock.scenarioCardNumber ?? 1234} onChange={e => updateBlock(selectedBlock.id, { scenarioCardNumber: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                 </div>
               </div>
             </div>
 
-            <div className="pt-2 border-t border-[#38302A]">
-              <div className="text-[10px] text-[#786D60] uppercase tracking-wider mb-1">I/O Mapping</div>
-              <div className="text-[10px] text-[#5E5449] mb-2">
-                <span className="text-[#5FB7B0]">◀ Inputs</span> = Triggers from ACS Panel &nbsp;|&nbsp;
-                <span className="text-[#D9B24E]">▶ Outputs</span> = Triggers TO ACS Panel
+            <div className="pt-2 border-t border-hv-line">
+              <div className="text-[10px] text-hv-text-3 uppercase tracking-wider mb-1">I/O Mapping</div>
+              <div className="text-[10px] text-hv-text-3 mb-2">
+                <span className="text-hv-info-fg">◀ Inputs</span> = Triggers from ACS Panel &nbsp;|&nbsp;
+                <span className="text-hv-warning-fg">▶ Outputs</span> = Triggers TO ACS Panel
               </div>
 
               {/* I/O Source toggle — physical GPIO rig OR emulated controller */}
               <div className="mb-2">
-                <label className="text-xs text-[#786D60] block mb-1">I/O Source</label>
+                <label className="text-xs text-hv-text-3 block mb-1">I/O Source</label>
                 <div className="grid grid-cols-2 gap-1">
                   {(['physical','emulated'] as const).map(src => (
                     <button key={src} onClick={() => updateBlock(selectedBlock.id, { scenarioIoSource: src })}
-                      className={`px-2 py-1.5 rounded text-xs ${ (selectedBlock.scenarioIoSource || 'physical') === src ? 'bg-[#4E9E74]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>
+                      className={`px-2 py-1.5 rounded text-xs ${ (selectedBlock.scenarioIoSource || 'physical') === src ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>
                       {src === 'physical' ? 'Physical GPIO rig' : 'Emulated controller'}
                     </button>
                   ))}
@@ -2335,10 +2355,10 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               </div>
 
               {(selectedBlock.scenarioIoSource || 'physical') === 'emulated' && (
-                <div className="bg-[#4E9E74]/15 border border-[#4E9E74]/40 rounded p-2 mb-2">
-                  <div className="text-[10px] text-[#63B98F] mb-1.5">Emulated board — channels map to that board\'s inputs (drive) / outputs (read)</div>
-                  <div><label className="text-xs text-[#786D60] block mb-1">Board</label>
-                    <select value={selectedBlock.scenarioEmuBoard ?? ''} onChange={e => updateBlock(selectedBlock.id, { scenarioEmuBoard: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#4E9E74]/60 rounded px-2 py-1.5 text-xs">
+                <div className="bg-hv-success-strong/15 border border-hv-success-strong/40 rounded p-2 mb-2">
+                  <div className="text-[10px] text-hv-success-text mb-1.5">Emulated board — channels map to that board\'s inputs (drive) / outputs (read)</div>
+                  <div><label className="text-xs text-hv-text-3 block mb-1">Board</label>
+                    <select value={selectedBlock.scenarioEmuBoard ?? ''} onChange={e => updateBlock(selectedBlock.id, { scenarioEmuBoard: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-success-strong/60 rounded px-2 py-1.5 text-xs">
                       {controllerBoards.length === 0 && <option value="">— no boards (start Controller Emulator) —</option>}
                       {controllerBoards.length > 0 && <option value="">— pick a board —</option>}
                       {controllerBoards.map(b => <option key={b.address} value={b.address}>{b.label}</option>)}
@@ -2368,35 +2388,35 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 const noDrive = emu && addr && driveOpts.length === 0;
                 return (
                   <>
-                    <div className="bg-[#4F9E97]/15 border border-[#4F9E97]/40 rounded p-2 mb-2">
-                      <div className="text-[10px] text-[#5FB7B0] mb-1.5">◀ READS FROM PANEL ({emu ? `board Outputs${addr ? ` · ${readOpts.length} available` : ''}` : 'Opto Inputs'})</div>
-                      {noBoard ? <div className="text-[11px] text-[#F0A73C]">Select an emulated board above first.</div>
-                       : noRead ? <div className="text-[11px] text-[#F0A73C]">This board has no outputs.</div>
+                    <div className="bg-hv-info-strong/15 border border-hv-info-strong/40 rounded p-2 mb-2">
+                      <div className="text-[10px] text-hv-info-fg mb-1.5">◀ READS FROM PANEL ({emu ? `board Outputs${addr ? ` · ${readOpts.length} available` : ''}` : 'Opto Inputs'})</div>
+                      {noBoard ? <div className="text-[11px] text-hv-brand-fg">Select an emulated board above first.</div>
+                       : noRead ? <div className="text-[11px] text-hv-brand-fg">This board has no outputs.</div>
                        : <div className="grid grid-cols-2 gap-2">
-                          <div><label className="text-xs text-[#786D60] block mb-1">Lock Signal</label>
-                            <select value={selectedBlock.scenarioLockInput ?? readOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioLockInput: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#4F9E97]/60 rounded px-2 py-1.5 text-xs">
+                          <div><label className="text-xs text-hv-text-3 block mb-1">Lock Signal</label>
+                            <select value={selectedBlock.scenarioLockInput ?? readOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioLockInput: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-info-strong/60 rounded px-2 py-1.5 text-xs">
                               {readOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                             </select>
                           </div>
-                          <div><label className="text-xs text-[#786D60] block mb-1">Alarm Signal</label>
-                            <select value={selectedBlock.scenarioAlarmInput ?? readOpts[1]?.v ?? readOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioAlarmInput: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#4F9E97]/60 rounded px-2 py-1.5 text-xs">
+                          <div><label className="text-xs text-hv-text-3 block mb-1">Alarm Signal</label>
+                            <select value={selectedBlock.scenarioAlarmInput ?? readOpts[1]?.v ?? readOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioAlarmInput: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-info-strong/60 rounded px-2 py-1.5 text-xs">
                               {readOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                             </select>
                           </div>
                         </div>}
                     </div>
-                    <div className="bg-[#C79A34]/15 border border-[#C79A34]/40 rounded p-2 mb-2">
-                      <div className="text-[10px] text-[#D9B24E] mb-1.5">▶ DRIVES TO PANEL ({emu ? `board Inputs${addr ? ` · ${driveOpts.length} available` : ''}` : 'Relay Outputs'})</div>
-                      {noBoard ? <div className="text-[11px] text-[#F0A73C]">Select an emulated board above first.</div>
-                       : noDrive ? <div className="text-[11px] text-[#F0A73C]">This board has no inputs.</div>
+                    <div className="bg-hv-brand-hover/15 border border-hv-brand-hover/40 rounded p-2 mb-2">
+                      <div className="text-[10px] text-hv-warning-fg mb-1.5">▶ DRIVES TO PANEL ({emu ? `board Inputs${addr ? ` · ${driveOpts.length} available` : ''}` : 'Relay Outputs'})</div>
+                      {noBoard ? <div className="text-[11px] text-hv-brand-fg">Select an emulated board above first.</div>
+                       : noDrive ? <div className="text-[11px] text-hv-brand-fg">This board has no inputs.</div>
                        : <div className="grid grid-cols-2 gap-2">
-                          <div><label className="text-xs text-[#786D60] block mb-1">DPS Contact</label>
-                            <select value={selectedBlock.scenarioDpsRelay ?? driveOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioDpsRelay: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#C79A34]/60 rounded px-2 py-1.5 text-xs">
+                          <div><label className="text-xs text-hv-text-3 block mb-1">DPS Contact</label>
+                            <select value={selectedBlock.scenarioDpsRelay ?? driveOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioDpsRelay: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-brand-hover/60 rounded px-2 py-1.5 text-xs">
                               {driveOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                             </select>
                           </div>
-                          <div><label className="text-xs text-[#786D60] block mb-1">REX Contact</label>
-                            <select value={selectedBlock.scenarioRexRelay ?? driveOpts[1]?.v ?? driveOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioRexRelay: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#C79A34]/60 rounded px-2 py-1.5 text-xs">
+                          <div><label className="text-xs text-hv-text-3 block mb-1">REX Contact</label>
+                            <select value={selectedBlock.scenarioRexRelay ?? driveOpts[1]?.v ?? driveOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioRexRelay: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-brand-hover/60 rounded px-2 py-1.5 text-xs">
                               {driveOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                             </select>
                           </div>
@@ -2406,21 +2426,21 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 );
               })()}
 
-              <div><label className="text-xs text-[#786D60] block mb-1">Panel Response Timeout (ms)</label>
-                <input type="number" value={selectedBlock.scenarioVerifyTimeoutMs ?? 3000} onChange={e => updateBlock(selectedBlock.id, { scenarioVerifyTimeoutMs: parseInt(e.target.value) || 3000 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+              <div><label className="text-xs text-hv-text-3 block mb-1">Panel Response Timeout (ms)</label>
+                <input type="number" value={selectedBlock.scenarioVerifyTimeoutMs ?? 3000} onChange={e => updateBlock(selectedBlock.id, { scenarioVerifyTimeoutMs: parseInt(e.target.value) || 3000 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
               </div>
             </div>
 
             {/* ── Denied access: bad card config ── */}
             {(selectedBlock.scenarioType === 'denied_access') && (
-              <div className="pt-2 border-t border-[#38302A]">
-                <div className="text-[10px] text-[#786D60] uppercase tracking-wider mb-2">Invalid Card</div>
+              <div className="pt-2 border-t border-hv-line">
+                <div className="text-[10px] text-hv-text-3 uppercase tracking-wider mb-2">Invalid Card</div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs text-[#786D60] block mb-1">Bad FC</label>
-                    <input type="number" value={selectedBlock.scenarioBadFacilityCode ?? 999} onChange={e => updateBlock(selectedBlock.id, { scenarioBadFacilityCode: parseInt(e.target.value) || 999 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                  <div><label className="text-xs text-hv-text-3 block mb-1">Bad FC</label>
+                    <input type="number" value={selectedBlock.scenarioBadFacilityCode ?? 999} onChange={e => updateBlock(selectedBlock.id, { scenarioBadFacilityCode: parseInt(e.target.value) || 999 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                   </div>
-                  <div><label className="text-xs text-[#786D60] block mb-1">Bad CN</label>
-                    <input type="number" value={selectedBlock.scenarioBadCardNumber ?? 99999} onChange={e => updateBlock(selectedBlock.id, { scenarioBadCardNumber: parseInt(e.target.value) || 99999 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                  <div><label className="text-xs text-hv-text-3 block mb-1">Bad CN</label>
+                    <input type="number" value={selectedBlock.scenarioBadCardNumber ?? 99999} onChange={e => updateBlock(selectedBlock.id, { scenarioBadCardNumber: parseInt(e.target.value) || 99999 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                   </div>
                 </div>
               </div>
@@ -2428,9 +2448,9 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
             {/* Held door: additional held time config */}
             {selectedBlock.scenarioType === 'held_door' && (
-              <div className="pt-2 border-t border-[#38302A]">
-                <div><label className="text-xs text-[#786D60] block mb-1">Held Time (ms)</label>
-                  <input type="number" value={selectedBlock.scenarioHeldTime || 31000} onChange={e => updateBlock(selectedBlock.id, { scenarioHeldTime: parseInt(e.target.value) || 31000 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+              <div className="pt-2 border-t border-hv-line">
+                <div><label className="text-xs text-hv-text-3 block mb-1">Held Time (ms)</label>
+                  <input type="number" value={selectedBlock.scenarioHeldTime || 31000} onChange={e => updateBlock(selectedBlock.id, { scenarioHeldTime: parseInt(e.target.value) || 31000 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                 </div>
               </div>
             )}
@@ -2443,35 +2463,35 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               const setCreds = (next: { fc: number; cn: number }[]) =>
                 updateBlock(selectedBlock.id, { scenarioCredentials: next });
               return (
-                <div className="pt-2 border-t border-[#38302A]">
+                <div className="pt-2 border-t border-hv-line">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] text-[#786D60] uppercase tracking-wider">Credentials ({creds.length}/5)</span>
+                    <span className="text-[10px] text-hv-text-3 uppercase tracking-wider">Credentials ({creds.length}/5)</span>
                     {creds.length < 5 && (
                       <button onClick={() => setCreds([...creds, { fc: 100, cn: 1000 + creds.length }])}
-                        className="text-[11px] px-2 py-0.5 bg-[#3E7E5C]/50 hover:bg-[#4E9E74]/60 rounded">+ Add</button>
+                        className="text-[11px] px-2 py-0.5 bg-hv-success-strong/50 hover:bg-hv-success-strong/60 rounded">+ Add</button>
                     )}
                   </div>
                   <div className="space-y-1.5">
                     {creds.map((cr, i) => (
                       <div key={i} className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-[#786D60] w-4">{i + 1}</span>
+                        <span className="text-[10px] text-hv-text-3 w-4">{i + 1}</span>
                         <input type="number" value={cr.fc} placeholder="FC"
                           onChange={e => { const n = creds.slice(); n[i] = { ...n[i], fc: parseInt(e.target.value) || 0 }; setCreds(n); }}
-                          className="flex-1 bg-[#15110B] border border-[#38302A] rounded px-2 py-1 text-xs" />
+                          className="flex-1 bg-hv-surface border border-hv-line rounded px-2 py-1 text-xs" />
                         <input type="number" value={cr.cn} placeholder="CN"
                           onChange={e => { const n = creds.slice(); n[i] = { ...n[i], cn: parseInt(e.target.value) || 0 }; setCreds(n); }}
-                          className="flex-1 bg-[#15110B] border border-[#38302A] rounded px-2 py-1 text-xs" />
+                          className="flex-1 bg-hv-surface border border-hv-line rounded px-2 py-1 text-xs" />
                         {creds.length > 1 && (
                           <button onClick={() => setCreds(creds.filter((_, j) => j !== i))}
-                            className="px-1.5 py-1 text-[#786D60] hover:text-[#F07A6C] hover:bg-[#C6604F]/15 rounded" title="Remove">
+                            className="px-1.5 py-1 text-hv-text-3 hover:text-hv-error-text hover:bg-hv-error-strong/15 rounded" title="Remove">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         )}
                       </div>
                     ))}
                   </div>
-                  <div className="mt-2"><label className="text-xs text-[#786D60] block mb-1">Delay Between Presentations (ms)</label>
-                    <input type="number" value={selectedBlock.scenarioTailgateDelay || 2000} onChange={e => updateBlock(selectedBlock.id, { scenarioTailgateDelay: parseInt(e.target.value) || 2000 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                  <div className="mt-2"><label className="text-xs text-hv-text-3 block mb-1">Delay Between Presentations (ms)</label>
+                    <input type="number" value={selectedBlock.scenarioTailgateDelay || 2000} onChange={e => updateBlock(selectedBlock.id, { scenarioTailgateDelay: parseInt(e.target.value) || 2000 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                   </div>
                 </div>
               );
@@ -2479,19 +2499,19 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
             {/* ── Anti-passback: second card ── */}
             {selectedBlock.scenarioType === 'anti_passback' && (
-              <div className="pt-2 border-t border-[#38302A]">
-                <div className="text-[10px] text-[#F0A73C] mb-2">⚠️ Anti-passback must be enabled on the panel</div>
-                <div><label className="text-xs text-[#786D60] block mb-1">Delay Between Presentations (ms)</label>
-                  <input type="number" value={selectedBlock.scenarioApbDelay ?? 3000} onChange={e => updateBlock(selectedBlock.id, { scenarioApbDelay: parseInt(e.target.value) || 3000 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+              <div className="pt-2 border-t border-hv-line">
+                <div className="text-[10px] text-hv-brand-fg mb-2">⚠️ Anti-passback must be enabled on the panel</div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Delay Between Presentations (ms)</label>
+                  <input type="number" value={selectedBlock.scenarioApbDelay ?? 3000} onChange={e => updateBlock(selectedBlock.id, { scenarioApbDelay: parseInt(e.target.value) || 3000 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
                 </div>
               </div>
             )}
 
             {/* ── Interlock: second door/reader ── */}
             {selectedBlock.scenarioType === 'interlock' && (
-              <div className="pt-2 border-t border-[#38302A]">
-                <div className="text-[10px] text-[#786D60] uppercase tracking-wider mb-2">Door 2 Config</div>
-                <div><label className="text-xs text-[#786D60] block mb-1">Reader 2</label>
+              <div className="pt-2 border-t border-hv-line">
+                <div className="text-[10px] text-hv-text-3 uppercase tracking-wider mb-2">Door 2 Config</div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Reader 2</label>
 {(() => {
                   const emuR = readerPool.filter(r => r.type === 'controller-emulator');
                   const otherR = readerPool.filter(r => r.type !== 'controller-emulator');
@@ -2502,12 +2522,12 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   const onTop = (v) => { if (v.startsWith('emu:')) { const a = parseInt(v.slice(4),10); const f = emuR.filter(r=>r.address===a).sort((x,y)=>(x.port??0)-(y.port??0))[0]; if (f) updateBlock(selectedBlock.id, { scenarioReader2Id: f.id }); } else updateBlock(selectedBlock.id, { scenarioReader2Id: v }); };
                   const ports = selEmu ? emuR.filter(r=>r.address===sel?.address).sort((x,y)=>(x.port??0)-(y.port??0)) : [];
                   return (<>
-                    <select value={topV} onChange={e=>onTop(e.target.value)} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm">
+                    <select value={topV} onChange={e=>onTop(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
                       {otherR.length>0 && <optgroup label="Physical / OSDP">{otherR.map(r=><option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}</optgroup>}
                       {boards.length>0 && <optgroup label="Emulated Controllers">{boards.map(b=><option key={`emu:${b.address}`} value={`emu:${b.address}`}>#{b.address} {b.model}</option>)}</optgroup>}
                     </select>
                     {selEmu && ports.length>0 && (
-                      <select value={selectedBlock.scenarioReader2Id || ''} onChange={e=>updateBlock(selectedBlock.id,{ scenarioReader2Id: e.target.value })} className="w-full mt-1.5 bg-[#15110B] border border-[#F0A73C]/40 rounded px-3 py-2 text-sm">
+                      <select value={selectedBlock.scenarioReader2Id || ''} onChange={e=>updateBlock(selectedBlock.id,{ scenarioReader2Id: e.target.value })} className="w-full mt-1.5 bg-hv-surface border border-hv-brand/40 rounded px-3 py-2 text-sm">
                         {ports.map(r=><option key={r.id} value={r.id}>Reader {r.port}</option>)}
                       </select>
                     )}
@@ -2527,16 +2547,16 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                     <>
                       {emu && (
                         <div className="mt-2">
-                          <label className="text-xs text-[#786D60] block mb-1">Door 2 Board <span className="text-[#786D60]">(default: same as Door 1)</span></label>
-                          <select value={selectedBlock.scenarioDoor2Board ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioDoor2Board: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-2 py-1.5 text-xs">
+                          <label className="text-xs text-hv-text-3 block mb-1">Door 2 Board <span className="text-hv-text-3">(default: same as Door 1)</span></label>
+                          <select value={selectedBlock.scenarioDoor2Board ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioDoor2Board: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-2 py-1.5 text-xs">
                             <option value={0}>Same as Door 1 (#{d1Board || '?'})</option>
                             {controllerBoards.map(b => <option key={b.address} value={b.address}>{b.label}</option>)}
                           </select>
                         </div>
                       )}
                       <div className="mt-2">
-                        <label className="text-xs text-[#6FC7C0] block mb-1">◀ Door 2 Lock {emu ? `Output (#${effBoard || '?'})` : 'Signal (Opto)'}</label>
-                        <select value={selectedBlock.scenarioLock2Input ?? lockOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioLock2Input: parseInt(e.target.value) })} className="w-full bg-[#15110B] border border-[#4F9E97]/60 rounded px-2 py-1.5 text-xs">
+                        <label className="text-xs text-hv-info-text block mb-1">◀ Door 2 Lock {emu ? `Output (#${effBoard || '?'})` : 'Signal (Opto)'}</label>
+                        <select value={selectedBlock.scenarioLock2Input ?? lockOpts[0]?.v ?? 0} onChange={e => updateBlock(selectedBlock.id, { scenarioLock2Input: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-info-strong/60 rounded px-2 py-1.5 text-xs">
                           {lockOpts.length === 0 && <option value="">— no outputs on this board —</option>}
                           {lockOpts.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
                         </select>
@@ -2545,15 +2565,15 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   );
                 })()}
                 <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div><label className="text-xs text-[#786D60] block mb-1">Settle Delay (ms)</label>
-                    <input type="number" value={selectedBlock.scenarioInterlockSettleMs ?? 1000} onChange={e => updateBlock(selectedBlock.id, { scenarioInterlockSettleMs: parseInt(e.target.value) || 0 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-2 py-1.5 text-xs" />
+                  <div><label className="text-xs text-hv-text-3 block mb-1">Settle Delay (ms)</label>
+                    <input type="number" value={selectedBlock.scenarioInterlockSettleMs ?? 1000} onChange={e => updateBlock(selectedBlock.id, { scenarioInterlockSettleMs: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-2 py-1.5 text-xs" />
                   </div>
-                  <div><label className="text-xs text-[#786D60] block mb-1">Door 2 Timeout (ms)</label>
-                    <input type="number" value={selectedBlock.scenarioInterlockTimeoutMs ?? 3000} onChange={e => updateBlock(selectedBlock.id, { scenarioInterlockTimeoutMs: parseInt(e.target.value) || 3000 })} className="w-full bg-[#15110B] border border-[#38302A] rounded px-2 py-1.5 text-xs" />
+                  <div><label className="text-xs text-hv-text-3 block mb-1">Door 2 Timeout (ms)</label>
+                    <input type="number" value={selectedBlock.scenarioInterlockTimeoutMs ?? 3000} onChange={e => updateBlock(selectedBlock.id, { scenarioInterlockTimeoutMs: parseInt(e.target.value) || 3000 })} className="w-full bg-hv-surface border border-hv-line rounded px-2 py-1.5 text-xs" />
                   </div>
                 </div>
-                <div className="text-[10px] text-[#786D60] mt-1">Settle = pause after Door 1 unlock/relock before each Door 2 attempt. Timeout = how long to wait confirming Door 2 grant/deny.</div>
-                <div className="text-[10px] text-[#F0A73C] mt-2">⚠️ Interlock logic must be configured on the panel</div>
+                <div className="text-[10px] text-hv-text-3 mt-1">Settle = pause after Door 1 unlock/relock before each Door 2 attempt. Timeout = how long to wait confirming Door 2 grant/deny.</div>
+                <div className="text-[10px] text-hv-brand-fg mt-2">⚠️ Interlock logic must be configured on the panel</div>
               </div>
             )}
           </>
@@ -2565,224 +2585,224 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   const filteredBlocks = Object.entries(BLOCK_CONFIG).filter(([_, config]) => paletteCategory === 'all' || config.category === paletteCategory);
 
   return (
-    <div className="h-full flex flex-col text-[#F3ECE3]" style={{ fontFamily: "'Space Grotesk', ui-sans-serif, system-ui, sans-serif", background: 'radial-gradient(900px 520px at 88% -8%, rgba(240,167,60,.10) 0%, transparent 60%), radial-gradient(700px 500px at 6% 2%, rgba(240,167,60,.045) 0%, transparent 55%), #1B1613' }}>
-      <div className="flex-shrink-0 bg-gradient-to-r from-[#241E19] to-[#1B1613] border-b border-[#38302A] px-6 py-4">
+    <div className="h-full flex flex-col text-hv-text" style={{ fontFamily: "'Space Grotesk', ui-sans-serif, system-ui, sans-serif", background: 'radial-gradient(900px 520px at 88% -8%, rgb(var(--hv-brand) / .10) 0%, transparent 60%), radial-gradient(700px 500px at 6% 2%, rgb(var(--hv-brand) / .045) 0%, transparent 55%), rgb(var(--hv-widget-panel))' }}>
+      <div className="flex-shrink-0 bg-gradient-to-r from-hv-widget to-hv-widget-panel border-b border-hv-line px-6 py-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3"><Database className="w-7 h-7 text-[#F0A73C]" /><div><h2 className="text-xl font-bold">Workflow Builder V2</h2><p className="text-xs text-[#786D60]">9 block types • Horizontal = Sequential • Vertical = Simultaneous</p></div></div>
+          <div className="flex items-center gap-3"><Database className="w-7 h-7 text-hv-brand-fg" /><div><h2 className="text-xl font-bold">Workflow Builder V2</h2><p className="text-xs text-hv-text-3">9 block types • Horizontal = Sequential • Vertical = Simultaneous</p></div></div>
           <div className="flex items-center gap-3">
-            {(testResults.passed > 0 || testResults.failed > 0) && <div className="flex items-center gap-2 px-3 py-1.5 bg-[#15110B] border border-[#38302A] rounded text-sm"><CheckCircle className="w-4 h-4 text-[#6FBF7E]" /><span className="text-[#7BD497]">{testResults.passed}</span><XCircle className="w-4 h-4 text-[#E0705F] ml-2" /><span className="text-[#F07A6C]">{testResults.failed}</span></div>}
-            <div className="flex items-center gap-2 text-sm text-[#786D60]">{loadingReaders ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radio className="w-4 h-4 text-[#6FBF7E]" />}{readerPool.length} readers<button onClick={loadReadersFromBackend} className="p-1 hover:bg-[#2A231C] rounded"><RefreshCw className="w-3 h-3" /></button></div>
-            <button onClick={() => setShowSettings(!showSettings)} className={`p-2 rounded ${showSettings ? 'bg-[#F0A73C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}><Settings className="w-4 h-4" /></button>
-            <button onClick={() => setShowSaveDialog(true)} disabled={workflow.length === 0} className="px-3 py-1.5 bg-[#4F8B5C] hover:bg-[#3E6E48] disabled:opacity-50 rounded text-sm flex items-center gap-1"><Save className="w-4 h-4" /> Save</button>
-            <button onClick={() => setShowLoadDialog(true)} className="px-3 py-1.5 bg-[#5E86B8] hover:bg-[#4E719C] rounded text-sm flex items-center gap-1"><FolderOpen className="w-4 h-4" /> Load</button>
-            <button onClick={() => { setIoError(''); setIoWizardTab(workflow.length > 0 ? 'export' : 'import'); setShowIoWizard(true); }} className="px-3 py-1.5 bg-[#241E19] hover:bg-[#322A22] rounded text-sm flex items-center gap-1" title="Import / Export workflow file"><Download className="w-4 h-4" /> File</button>
+            {(testResults.passed > 0 || testResults.failed > 0) && <div className="flex items-center gap-2 px-3 py-1.5 bg-hv-surface border border-hv-line rounded text-sm"><CheckCircle className="w-4 h-4 text-hv-success-fg" /><span className="text-hv-success-text">{testResults.passed}</span><XCircle className="w-4 h-4 text-hv-error-fg ml-2" /><span className="text-hv-error-text">{testResults.failed}</span></div>}
+            <div className="flex items-center gap-2 text-sm text-hv-text-3">{loadingReaders ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radio className="w-4 h-4 text-hv-success-fg" />}{readerPool.length} readers<button onClick={loadReadersFromBackend} className="p-1 hover:bg-hv-popup-panel rounded"><RefreshCw className="w-3 h-3" /></button></div>
+            <button onClick={() => setShowSettings(!showSettings)} className={`p-2 rounded ${showSettings ? 'bg-hv-brand' : 'bg-hv-popup-panel hover:bg-hv-box'}`}><Settings className="w-4 h-4" /></button>
+            <button onClick={() => setShowSaveDialog(true)} disabled={workflow.length === 0} className="px-3 py-1.5 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong disabled:opacity-50 rounded text-sm flex items-center gap-1"><Save className="w-4 h-4" /> Save</button>
+            <button onClick={() => setShowLoadDialog(true)} className="px-3 py-1.5 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong rounded text-sm flex items-center gap-1"><FolderOpen className="w-4 h-4" /> Load</button>
+            <button onClick={() => { setIoError(''); setIoWizardTab(workflow.length > 0 ? 'export' : 'import'); setShowIoWizard(true); }} className="px-3 py-1.5 bg-hv-widget hover:bg-hv-box rounded text-sm flex items-center gap-1" title="Import / Export workflow file"><Download className="w-4 h-4" /> File</button>
             {restoreAvailable && workflow.length === 0 && (
-              <button onClick={restoreLastWorkflow} className="px-3 py-1.5 bg-[#F0A73C] hover:bg-[#C9862E] rounded text-sm flex items-center gap-1" title="Restore your last unsaved workflow"><RotateCw className="w-4 h-4" /> Restore Last</button>
+              <button onClick={restoreLastWorkflow} className="px-3 py-1.5 bg-hv-brand hover:bg-hv-brand-hover rounded text-sm flex items-center gap-1" title="Restore your last unsaved workflow"><RotateCw className="w-4 h-4" /> Restore Last</button>
             )}
-            {isEmulating && <div className="flex items-center gap-2 px-3 py-1.5 bg-[#4F8B5C]/20 border border-[#6FBF7E] rounded"><div className="w-2 h-2 bg-[#6FBF7E] rounded-full animate-pulse" /><span className="text-sm text-[#7BD497]">Column {currentColumnIndex + 1}/{workflow.length}</span></div>}
+            {isEmulating && <div className="flex items-center gap-2 px-3 py-1.5 bg-hv-success-strong/20 border border-hv-success rounded"><div className="w-2 h-2 bg-hv-success rounded-full animate-pulse" /><span className="text-sm text-hv-success-text">Column {currentColumnIndex + 1}/{workflow.length}</span></div>}
           </div>
         </div>
         {isEmulating && (
-          <div className="mt-3 px-4 py-2.5 bg-[#F0A73C]/15 border border-[#F0A73C]/60 rounded-lg flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-[#F0A73C] flex-shrink-0 mt-0.5" />
+          <div className="mt-3 px-4 py-2.5 bg-hv-brand/15 border border-hv-brand/60 rounded-lg flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-hv-brand-fg flex-shrink-0 mt-0.5" />
             <div className="text-sm">
-              <span className="font-semibold text-[#FFC66E]">Workflow running — do not leave this page.</span>
-              <span className="text-[#FFD9A0]/90"> Execution runs in this browser tab. If you switch pages, refresh, or close the tab, the workflow will continue its current step but the run is lost — you cannot reattach or monitor it again. Click </span>
-              <span className="font-semibold text-[#FFE8C8]">Stop</span>
-              <span className="text-[#FFD9A0]/90"> before navigating away if you need to leave.</span>
+              <span className="font-semibold text-hv-brand-text">Workflow running — do not leave this page.</span>
+              <span className="text-hv-brand-text/90"> Execution runs in this browser tab. If you switch pages, refresh, or close the tab, the workflow will continue its current step but the run is lost — you cannot reattach or monitor it again. Click </span>
+              <span className="font-semibold text-hv-brand-text">Stop</span>
+              <span className="text-hv-brand-text/90"> before navigating away if you need to leave.</span>
             </div>
           </div>
         )}
-        {showSettings && <div className="mt-4 p-4 bg-black/50 rounded-lg border border-[#38302A] flex items-center gap-6"><div className="flex-1"><label className="text-xs text-[#786D60] block mb-1">Delay Between Columns (ms)</label><input type="number" value={globalDelay} onChange={e => setGlobalDelay(Math.max(0, parseInt(e.target.value) || 0))} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" /></div><div className="text-xs text-[#786D60]"><p>💡 Delay added between each column.</p><p>Use <span className="text-[#F0A73C]">Repeat</span> for multiple runs.</p></div></div>}
+        {showSettings && <div className="mt-4 p-4 bg-hv-surface/50 rounded-lg border border-hv-line flex items-center gap-6"><div className="flex-1"><label className="text-xs text-hv-text-3 block mb-1">Delay Between Columns (ms)</label><input type="number" value={globalDelay} onChange={e => setGlobalDelay(Math.max(0, parseInt(e.target.value) || 0))} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div><div className="text-xs text-hv-text-3"><p>💡 Delay added between each column.</p><p>Use <span className="text-hv-brand-fg">Repeat</span> for multiple runs.</p></div></div>}
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-52 flex-shrink-0 bg-black/50 border-r border-[#38302A] p-4 overflow-y-auto">
-          <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-[#786D60] uppercase tracking-wider">Blocks</h3></div>
-          <div className="flex flex-wrap gap-1 mb-3">{(['all','basic','advanced','test'] as const).map(cat => <button key={cat} onClick={() => setPaletteCategory(cat)} className={`px-2 py-1 rounded text-xs capitalize ${paletteCategory === cat ? 'bg-[#F0A73C]' : 'bg-[#2A231C] hover:bg-[#322A22]'}`}>{cat}</button>)}</div>
-          <div className="space-y-2">{filteredBlocks.map(([type, config]) => <div key={type} draggable onDragStart={(e) => handleDragStart(e, type as BlockType)} onDragEnd={handleDragEnd} className={`${config.bgColor} rounded-lg p-2.5 cursor-grab active:cursor-grabbing flex items-center gap-2 hover:brightness-110 transition-all shadow-lg`}><div className="bg-[#15110B] rounded p-1">{config.icon}</div><div><span className="font-medium text-sm block">{config.label}</span><span className="text-[10px] opacity-60 capitalize">{config.category}</span></div></div>)}</div>
-          <div className="pt-4 border-t border-[#38302A] mt-4"><div className="text-xs text-[#786D60] space-y-1"><p>📌 Drag blocks to canvas</p><p>→ Horizontal = Sequential</p><p>↓ Vertical = Simultaneous</p></div></div>
+        <div className="w-52 flex-shrink-0 bg-hv-surface/50 border-r border-hv-line p-4 overflow-y-auto">
+          <div className="flex items-center justify-between mb-3"><h3 className="text-sm font-semibold text-hv-text-3 uppercase tracking-wider">Blocks</h3></div>
+          <div className="flex flex-wrap gap-1 mb-3">{(['all','basic','advanced','test'] as const).map(cat => <button key={cat} onClick={() => setPaletteCategory(cat)} className={`px-2 py-1 rounded text-xs capitalize ${paletteCategory === cat ? 'bg-hv-brand' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{cat}</button>)}</div>
+          <div className="space-y-2">{filteredBlocks.map(([type, config]) => <div key={type} draggable onDragStart={(e) => handleDragStart(e, type as BlockType)} onDragEnd={handleDragEnd} className={`${config.bgColor} rounded-lg p-2.5 cursor-grab active:cursor-grabbing flex items-center gap-2 hover:brightness-110 transition-all shadow-lg`}><div className="bg-hv-surface rounded p-1">{config.icon}</div><div><span className="font-medium text-sm block">{config.label}</span><span className="text-[10px] opacity-60 capitalize">{config.category}</span></div></div>)}</div>
+          <div className="pt-4 border-t border-hv-line mt-4"><div className="text-xs text-hv-text-3 space-y-1"><p>📌 Drag blocks to canvas</p><p>→ Horizontal = Sequential</p><p>↓ Vertical = Simultaneous</p></div></div>
         </div>
 
         <div className="flex-1 overflow-auto bg-transparent p-6" ref={canvasRef} onClick={() => setQuickAddPosition(null)}>
           <div className="flex items-start gap-1 min-h-full">
             {workflow.length > 0 && (
               <div className="flex flex-col items-center self-stretch justify-center min-h-[200px] relative">
-                <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, 'new-0', 'before')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropNewColumn(e, 0)} className={`w-16 flex-1 rounded-lg border-2 border-dashed flex items-center justify-center transition-all ${dropTarget?.columnId === 'new-0' ? 'bg-[#F0A73C]/30 border-[#F0A73C] w-32' : 'border-[#38302A] hover:border-[#F0A73C]/50 hover:bg-[#15110B]'}`}>
-                  <button onClick={(e) => { e.stopPropagation(); setQuickAddPosition(quickAddPosition === 0 ? null : 0); }} className={`p-2 rounded-lg transition-all ${quickAddPosition === 0 ? 'bg-[#F0A73C] text-[#F3ECE3]' : 'text-[#786D60] hover:text-[#F0A73C] hover:bg-[#F0A73C]/20'}`}><Plus className="w-5 h-5" /></button>
+                <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, 'new-0', 'before')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropNewColumn(e, 0)} className={`w-16 flex-1 rounded-lg border-2 border-dashed flex items-center justify-center transition-all ${dropTarget?.columnId === 'new-0' ? 'bg-hv-brand/30 border-hv-brand w-32' : 'border-hv-line hover:border-hv-brand/50 hover:bg-hv-surface'}`}>
+                  <button onClick={(e) => { e.stopPropagation(); setQuickAddPosition(quickAddPosition === 0 ? null : 0); }} className={`p-2 rounded-lg transition-all ${quickAddPosition === 0 ? 'bg-hv-brand text-[#FFFFFF]' : 'text-hv-text-3 hover:text-hv-brand hover:bg-hv-brand/20'}`}><Plus className="w-5 h-5" /></button>
                 </div>
-                {quickAddPosition === 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 bg-[#15110B] border border-[#38302A] rounded-lg p-2 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="text-xs text-[#786D60] mb-2 text-center">Add Column</div><div className="grid grid-cols-5 gap-1">{filteredBlocks.map(([type, config]) => <button key={type} onClick={() => { addColumnWithBlock(type as BlockType, 0); setQuickAddPosition(null); }} className={`${config.bgColor} rounded p-2 hover:brightness-125`} title={config.label}>{React.cloneElement(config.icon as React.ReactElement, { className: 'w-4 h-4' })}</button>)}</div></div>}
+                {quickAddPosition === 0 && <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 bg-hv-surface border border-hv-line rounded-lg p-2 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="text-xs text-hv-text-3 mb-2 text-center">Add Column</div><div className="grid grid-cols-5 gap-1">{filteredBlocks.map(([type, config]) => <button key={type} onClick={() => { addColumnWithBlock(type as BlockType, 0); setQuickAddPosition(null); }} className={`${config.bgColor} rounded p-2 hover:brightness-125`} title={config.label}>{React.cloneElement(config.icon as React.ReactElement, { className: 'w-4 h-4' })}</button>)}</div></div>}
               </div>
             )}
 
             {workflow.map((column, colIdx) => (
               <React.Fragment key={column.id}>
-                <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, column.id, 'into')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropOnColumn(e, column.id)} className={`relative flex flex-col gap-2 p-3 rounded-xl border-2 transition-all min-w-[200px] max-w-[280px] ${currentColumnIndex === colIdx ? 'border-[#6FBF7E] bg-[#7BD497]/10 shadow-lg shadow-[#7BD497]/20' : dropTarget?.columnId === column.id && dropTarget.position === 'into' ? 'border-[#F0A73C] bg-[#F0A73C]/15' : selectedColumnId === column.id ? 'border-[#F0A73C]/50 bg-black/50' : 'border-[#38302A] bg-[#15110B] hover:border-[#38302A]'}`}>
+                <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, column.id, 'into')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropOnColumn(e, column.id)} className={`relative flex flex-col gap-2 p-3 rounded-xl border-2 transition-all min-w-[200px] max-w-[280px] ${currentColumnIndex === colIdx ? 'border-hv-success bg-hv-success-text/10 shadow-lg shadow-hv-success-text/20' : dropTarget?.columnId === column.id && dropTarget.position === 'into' ? 'border-hv-brand bg-hv-brand/15' : selectedColumnId === column.id ? 'border-hv-brand/50 bg-hv-surface/50' : 'border-hv-line bg-hv-surface hover:border-hv-line'}`}>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <span className="bg-[#2A231C] text-[#ADA294] text-xs font-bold px-2 py-0.5 rounded">{colIdx + 1}</span>
-                      {column.blocks.length > 1 && <span className="bg-[#F0A73C] text-[#F3ECE3] text-[10px] px-1.5 py-0.5 rounded font-bold">SYNC ×{column.blocks.length}</span>}
+                      <span className="bg-hv-popup-panel text-hv-text-2 text-xs font-bold px-2 py-0.5 rounded">{colIdx + 1}</span>
+                      {column.blocks.length > 1 && <span className="bg-hv-brand text-[#FFFFFF] text-[10px] px-1.5 py-0.5 rounded font-bold">SYNC ×{column.blocks.length}</span>}
                     </div>
-                    <button onClick={() => deleteColumn(column.id)} className="p-1 text-[#E0705F] hover:text-[#F07A6C] hover:bg-[#E0705F]/20 rounded"><X className="w-3 h-3" /></button>
+                    <button onClick={() => deleteColumn(column.id)} className="p-1 text-hv-error-fg hover:text-hv-error-text hover:bg-hv-error/20 rounded"><X className="w-3 h-3" /></button>
                   </div>
                   {column.blocks.map((block) => {
                     const config = getBlockConfig(block.type);
                     const isExecuting = executingBlockIds.has(block.id);
                     const isSelected = selectedBlockId === block.id;
                     return (
-                      <div key={block.id} draggable onDragStart={(e) => handleDragStart(e, block.type, column.id, block.id)} onDragEnd={handleDragEnd} onClick={(e) => { e.stopPropagation(); setSelectedBlockId(block.id); setSelectedColumnId(column.id); }} className={`${config.bgColor} rounded-lg p-3 cursor-pointer transition-all ${isExecuting ? 'ring-2 ring-[#7BD497] animate-pulse' : ''} ${isSelected ? 'ring-2 ring-[#F3ECE3] shadow-lg' : ''} hover:brightness-110`}>
+                      <div key={block.id} draggable onDragStart={(e) => handleDragStart(e, block.type, column.id, block.id)} onDragEnd={handleDragEnd} onClick={(e) => { e.stopPropagation(); setSelectedBlockId(block.id); setSelectedColumnId(column.id); }} className={`${config.bgColor} rounded-lg p-3 cursor-pointer transition-all ${isExecuting ? 'ring-2 ring-hv-success-text animate-pulse' : ''} ${isSelected ? 'ring-2 ring-hv-text shadow-lg' : ''} hover:brightness-110`}>
                         <div className="flex items-center gap-2 mb-1"><GripVertical className="w-3 h-3 opacity-50 cursor-grab active:cursor-grabbing" />{config.icon}<span className="font-semibold text-sm">{config.label}</span></div>
                         <div className="text-xs opacity-80 truncate pl-5">{getBlockDescription(block)}</div>
-                        <div className="flex items-center gap-1 mt-2 pt-2 border-t border-[#F3ECE3]/20">
-                          <button onClick={(e) => { e.stopPropagation(); duplicateBlock(column.id, block); }} className="p-1 hover:bg-[#F3ECE3]/20 rounded text-[#F3ECE3]/70 hover:text-[#F3ECE3]"><Copy className="w-3 h-3" /></button>
-                          <button onClick={(e) => { e.stopPropagation(); deleteBlock(column.id, block.id); }} className="p-1 hover:bg-[#E0705F]/50 rounded text-[#F3ECE3]/70 hover:text-[#F3ECE3]"><Trash2 className="w-3 h-3" /></button>
+                        <div className="flex items-center gap-1 mt-2 pt-2 border-t border-hv-text/20">
+                          <button onClick={(e) => { e.stopPropagation(); duplicateBlock(column.id, block); }} className="p-1 hover:bg-hv-text/20 rounded text-hv-text/70 hover:text-hv-text"><Copy className="w-3 h-3" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); deleteBlock(column.id, block.id); }} className="p-1 hover:bg-hv-error/50 rounded text-hv-text/70 hover:text-hv-text"><Trash2 className="w-3 h-3" /></button>
                         </div>
                       </div>
                     );
                   })}
-                  <div className="mt-1 p-1 border-2 border-dashed border-[#38302A] rounded-lg hover:border-[#F0A73C]">
-                    <div className="text-[10px] text-[#786D60] text-center mb-1">+ Simultaneous</div>
+                  <div className="mt-1 p-1 border-2 border-dashed border-hv-line rounded-lg hover:border-hv-brand">
+                    <div className="text-[10px] text-hv-text-3 text-center mb-1">+ Simultaneous</div>
                     <div className="flex flex-wrap gap-1 justify-center">{filteredBlocks.slice(0, 5).map(([type, config]) => <button key={type} onClick={() => addBlockToColumn(column.id, type as BlockType)} className={`${config.bgColor} rounded p-1.5 hover:brightness-125 transition-all`} title={`Add ${config.label}`}>{React.cloneElement(config.icon as React.ReactElement, { className: 'w-3 h-3' })}</button>)}</div>
                   </div>
                 </div>
                 <div className="flex flex-col items-center self-stretch justify-center min-h-[200px] relative">
-                  <ChevronRight className="w-6 h-6 text-[#F0A73C] mb-1" />
-                  <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, `new-${colIdx + 1}`, 'after')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropNewColumn(e, colIdx + 1)} className={`w-16 flex-1 rounded-lg border-2 border-dashed flex items-center justify-center transition-all ${dropTarget?.columnId === `new-${colIdx + 1}` ? 'bg-[#F0A73C]/30 border-[#F0A73C] w-32' : 'border-[#38302A] hover:border-[#F0A73C]/50 hover:bg-[#15110B]'}`}>
-                    <button onClick={(e) => { e.stopPropagation(); setQuickAddPosition(quickAddPosition === colIdx + 1 ? null : colIdx + 1); }} className={`p-2 rounded-lg transition-all ${quickAddPosition === colIdx + 1 ? 'bg-[#F0A73C] text-[#F3ECE3]' : 'text-[#786D60] hover:text-[#F0A73C] hover:bg-[#F0A73C]/20'}`}><Plus className="w-5 h-5" /></button>
+                  <ChevronRight className="w-6 h-6 text-hv-brand-fg mb-1" />
+                  <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, `new-${colIdx + 1}`, 'after')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropNewColumn(e, colIdx + 1)} className={`w-16 flex-1 rounded-lg border-2 border-dashed flex items-center justify-center transition-all ${dropTarget?.columnId === `new-${colIdx + 1}` ? 'bg-hv-brand/30 border-hv-brand w-32' : 'border-hv-line hover:border-hv-brand/50 hover:bg-hv-surface'}`}>
+                    <button onClick={(e) => { e.stopPropagation(); setQuickAddPosition(quickAddPosition === colIdx + 1 ? null : colIdx + 1); }} className={`p-2 rounded-lg transition-all ${quickAddPosition === colIdx + 1 ? 'bg-hv-brand text-[#FFFFFF]' : 'text-hv-text-3 hover:text-hv-brand hover:bg-hv-brand/20'}`}><Plus className="w-5 h-5" /></button>
                   </div>
-                  {quickAddPosition === colIdx + 1 && <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 bg-[#15110B] border border-[#38302A] rounded-lg p-2 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="text-xs text-[#786D60] mb-2 text-center">Add Column</div><div className="grid grid-cols-5 gap-1">{filteredBlocks.map(([type, config]) => <button key={type} onClick={() => { addColumnWithBlock(type as BlockType, colIdx + 1); setQuickAddPosition(null); }} className={`${config.bgColor} rounded p-2 hover:brightness-125`} title={config.label}>{React.cloneElement(config.icon as React.ReactElement, { className: 'w-4 h-4' })}</button>)}</div></div>}
+                  {quickAddPosition === colIdx + 1 && <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 bg-hv-surface border border-hv-line rounded-lg p-2 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="text-xs text-hv-text-3 mb-2 text-center">Add Column</div><div className="grid grid-cols-5 gap-1">{filteredBlocks.map(([type, config]) => <button key={type} onClick={() => { addColumnWithBlock(type as BlockType, colIdx + 1); setQuickAddPosition(null); }} className={`${config.bgColor} rounded p-2 hover:brightness-125`} title={config.label}>{React.cloneElement(config.icon as React.ReactElement, { className: 'w-4 h-4' })}</button>)}</div></div>}
                 </div>
               </React.Fragment>
             ))}
 
             {workflow.length === 0 && (
-              <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, 'new-0', 'into')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropNewColumn(e, 0)} className={`flex-1 min-h-[400px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center transition-all ${dropTarget ? 'border-[#F0A73C] bg-[#F0A73C]/15' : 'border-[#38302A] hover:border-[#38302A]'}`}>
-                <Database className="w-16 h-16 text-[#5E5449] mb-4" />
-                <p className="text-[#786D60] text-lg mb-2">Drag blocks here to start</p>
-                <p className="text-[#5E5449] text-sm mb-6">or click a block type below</p>
+              <div data-drop-zone onDragOver={handleDragOver} onDragEnter={(e) => handleDragEnterColumn(e, 'new-0', 'into')} onDragLeave={handleDragLeave} onDrop={(e) => handleDropNewColumn(e, 0)} className={`flex-1 min-h-[400px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center transition-all ${dropTarget ? 'border-hv-brand bg-hv-brand/15' : 'border-hv-line hover:border-hv-line'}`}>
+                <Database className="w-16 h-16 text-hv-text-3 mb-4" />
+                <p className="text-hv-text-3 text-lg mb-2">Drag blocks here to start</p>
+                <p className="text-hv-text-3 text-sm mb-6">or click a block type below</p>
                 <div className="flex flex-wrap gap-2 justify-center max-w-lg">{filteredBlocks.map(([type, config]) => <button key={type} onClick={() => addColumnWithBlock(type as BlockType)} className={`${config.bgColor} rounded-lg p-3 hover:brightness-110 flex flex-col items-center gap-1 min-w-[70px]`}>{config.icon}<span className="text-xs font-medium">{config.label}</span></button>)}</div>
-                <div className="mt-8 text-xs text-[#5E5449] max-w-md text-center"><p className="mb-2">💡 Horizontal = <span className="text-[#F0A73C]">sequential</span> • Vertical = <span className="text-[#F0A73C]">simultaneous</span></p></div>
+                <div className="mt-8 text-xs text-hv-text-3 max-w-md text-center"><p className="mb-2">💡 Horizontal = <span className="text-hv-brand-fg">sequential</span> • Vertical = <span className="text-hv-brand-fg">simultaneous</span></p></div>
               </div>
             )}
           </div>
         </div>
 
-        <div className="w-72 flex-shrink-0 bg-black/50 border-l border-[#38302A] overflow-y-auto">
+        <div className="w-72 flex-shrink-0 bg-hv-surface/50 border-l border-hv-line overflow-y-auto">
           {selectedBlock ? (
             <div className="p-4">
-              <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-[#ADA294] uppercase tracking-wider">{getBlockConfig(selectedBlock.type).label}</h3><button onClick={() => { setSelectedBlockId(null); setSelectedColumnId(null); }} className="p-1 hover:bg-[#2A231C] rounded"><X className="w-4 h-4" /></button></div>
+              <div className="flex items-center justify-between mb-4"><h3 className="text-sm font-semibold text-hv-text-2 uppercase tracking-wider">{getBlockConfig(selectedBlock.type).label}</h3><button onClick={() => { setSelectedBlockId(null); setSelectedColumnId(null); }} className="p-1 hover:bg-hv-popup-panel rounded"><X className="w-4 h-4" /></button></div>
               <div className={`${getBlockConfig(selectedBlock.type).bgColor} rounded-lg p-2 mb-4 flex items-center gap-2`}>{getBlockConfig(selectedBlock.type).icon}<span className="font-medium">{getBlockConfig(selectedBlock.type).label}</span></div>
               {renderBlockEditor()}
-              {selectedColumn && <div className="mt-4 pt-4 border-t border-[#38302A]"><button onClick={() => deleteBlock(selectedColumn.id, selectedBlock.id)} className="w-full px-3 py-2 bg-[#C6604F] hover:bg-[#A84E3F] rounded text-sm flex items-center justify-center gap-2"><Trash2 className="w-4 h-4" /> Delete Block</button></div>}
+              {selectedColumn && <div className="mt-4 pt-4 border-t border-hv-line"><button onClick={() => deleteBlock(selectedColumn.id, selectedBlock.id)} className="w-full px-3 py-2 bg-hv-error-strong hover:bg-hv-error-hover rounded text-sm flex items-center justify-center gap-2"><Trash2 className="w-4 h-4" /> Delete Block</button></div>}
             </div>
-          ) : <div className="p-4 text-center text-[#786D60]"><Settings className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>Select a block to edit</p></div>}
+          ) : <div className="p-4 text-center text-hv-text-3"><Settings className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>Select a block to edit</p></div>}
         </div>
       </div>
 
-      <div className="flex-shrink-0 bg-black/80 border-t border-[#38302A]">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-[#38302A]">
-          <div className="flex items-center gap-2"><ScrollText className="w-4 h-4 text-[#5FB7B0]" /><span className="text-sm font-semibold">Execution Log</span><span className="text-xs text-[#786D60]">({emulationLog.length})</span></div>
-          <div className="flex items-center gap-2"><button onClick={() => setShowLog(!showLog)} className="text-xs text-[#786D60] hover:text-[#F3ECE3]">{showLog ? 'Hide' : 'Show'}</button>{emulationLog.length > 0 && <button onClick={() => setEmulationLog([])} className="text-xs text-[#F07A6C] hover:text-[#F5988A]">Clear</button>}</div>
+      <div className="flex-shrink-0 bg-hv-surface/80 border-t border-hv-line">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-hv-line">
+          <div className="flex items-center gap-2"><ScrollText className="w-4 h-4 text-hv-info-fg" /><span className="text-sm font-semibold">Execution Log</span><span className="text-xs text-hv-text-3">({emulationLog.length})</span></div>
+          <div className="flex items-center gap-2"><button onClick={() => setShowLog(!showLog)} className="text-xs text-hv-text-3 hover:text-hv-text">{showLog ? 'Hide' : 'Show'}</button>{emulationLog.length > 0 && <button onClick={() => setEmulationLog([])} className="text-xs text-hv-error-text hover:text-hv-error-text">Clear</button>}</div>
         </div>
-        {showLog && <div className="h-32 overflow-y-auto p-2 font-mono text-xs space-y-0.5">{emulationLog.length === 0 ? <div className="text-[#786D60] text-center py-4">No log entries</div> : emulationLog.map((entry, idx) => <div key={idx} className={`flex gap-2 ${entry.type === 'success' ? 'text-[#7BD497]' : entry.type === 'error' ? 'text-[#F07A6C]' : entry.type === 'warning' ? 'text-[#E6C766]' : entry.type === 'marker' ? 'text-[#F0A73C] font-bold' : 'text-[#ADA294]'}`}><span className="text-[#786D60]">[{entry.timestamp}]</span>{entry.column > 0 && <span className="text-[#786D60]">Col {entry.column}:</span>}<span>{entry.message}</span></div>)}</div>}
+        {showLog && <div className="h-32 overflow-y-auto p-2 font-mono text-xs space-y-0.5">{emulationLog.length === 0 ? <div className="text-hv-text-3 text-center py-4">No log entries</div> : emulationLog.map((entry, idx) => <div key={idx} className={`flex gap-2 ${entry.type === 'success' ? 'text-hv-success-text' : entry.type === 'error' ? 'text-hv-error-text' : entry.type === 'warning' ? 'text-hv-warning-fg' : entry.type === 'marker' ? 'text-hv-brand-fg font-bold' : 'text-hv-text-2'}`}><span className="text-hv-text-3">[{entry.timestamp}]</span>{entry.column > 0 && <span className="text-hv-text-3">Col {entry.column}:</span>}<span>{entry.message}</span></div>)}</div>}
       </div>
 
-      <div className="flex-shrink-0 bg-[#15110B] border-t border-[#38302A] px-6 py-4">
+      <div className="flex-shrink-0 bg-hv-surface border-t border-hv-line px-6 py-4">
         <div className="flex items-center justify-center gap-4 flex-wrap">
           {!isEmulating && scheduledRunAt === null && (
             <>
-              <button onClick={runWorkflow} disabled={!connected || workflow.length === 0} className="px-8 py-3 bg-gradient-to-r from-[#FFC66E] to-[#F0A73C] text-[#241503] hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold text-lg flex items-center gap-3 shadow-[0_8px_22px_-8px_rgba(240,167,60,.65)]"><Play className="w-6 h-6" />Run Workflow</button>
-              <button onClick={openScheduleDialog} disabled={!connected || workflow.length === 0} className="px-6 py-3 bg-[#2A231C] hover:bg-[#322A22] text-[#F3ECE3] border border-[#38302A] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2"><CalendarClock className="w-5 h-5" />Schedule Run</button>
-              <div className="flex items-center bg-[#15110B] rounded-lg border border-[#38302A] overflow-hidden">
-                <div className="px-3 py-2 bg-[#2A231C] flex items-center gap-2 border-r border-[#38302A]"><Repeat className="w-5 h-5 text-[#F0A73C]" /><span className="text-sm font-medium text-[#ADA294]">Repeat</span></div>
-                <button onClick={() => setRepeatCount(Math.max(0, repeatCount - 1))} className="px-3 py-2 hover:bg-[#2A231C] text-[#786D60] hover:text-[#F3ECE3] transition-colors">-</button>
-                <div className="px-4 py-2 min-w-[60px] text-center"><span className="text-xl font-bold text-[#F0A73C]">{repeatCount}</span></div>
-                <button onClick={() => setRepeatCount(repeatCount + 1)} className="px-3 py-2 hover:bg-[#2A231C] text-[#786D60] hover:text-[#F3ECE3] transition-colors">+</button>
-                <div className="px-3 py-2 border-l border-[#38302A] text-xs text-[#786D60]">{repeatCount === 0 ? '1 run' : `${repeatCount + 1} runs`}</div>
+              <button onClick={runWorkflow} disabled={!connected || workflow.length === 0} className="px-8 py-3 bg-gradient-to-r from-hv-brand-text to-hv-brand text-[#101011] hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold text-lg flex items-center gap-3 shadow-[0_8px_22px_-8px_rgb(var(--hv-brand) / .65)]"><Play className="w-6 h-6" />Run Workflow</button>
+              <button onClick={openScheduleDialog} disabled={!connected || workflow.length === 0} className="px-6 py-3 bg-hv-popup-panel hover:bg-hv-box text-hv-text border border-hv-line disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2"><CalendarClock className="w-5 h-5" />Schedule Run</button>
+              <div className="flex items-center bg-hv-surface rounded-lg border border-hv-line overflow-hidden">
+                <div className="px-3 py-2 bg-hv-popup-panel flex items-center gap-2 border-r border-hv-line"><Repeat className="w-5 h-5 text-hv-brand-fg" /><span className="text-sm font-medium text-hv-text-2">Repeat</span></div>
+                <button onClick={() => setRepeatCount(Math.max(0, repeatCount - 1))} className="px-3 py-2 hover:bg-hv-popup-panel text-hv-text-3 hover:text-hv-text transition-colors">-</button>
+                <div className="px-4 py-2 min-w-[60px] text-center"><span className="text-xl font-bold text-hv-brand-fg">{repeatCount}</span></div>
+                <button onClick={() => setRepeatCount(repeatCount + 1)} className="px-3 py-2 hover:bg-hv-popup-panel text-hv-text-3 hover:text-hv-text transition-colors">+</button>
+                <div className="px-3 py-2 border-l border-hv-line text-xs text-hv-text-3">{repeatCount === 0 ? '1 run' : `${repeatCount + 1} runs`}</div>
               </div>
             </>
           )}
           {!isEmulating && scheduledRunAt !== null && (
             <>
-              <div className="flex items-center gap-3 px-4 py-2 bg-[#F0A73C]/20 border border-[#F0A73C] rounded-lg">
-                <CalendarClock className="w-5 h-5 text-[#F0A73C] animate-pulse" />
+              <div className="flex items-center gap-3 px-4 py-2 bg-hv-brand/20 border border-hv-brand rounded-lg">
+                <CalendarClock className="w-5 h-5 text-hv-brand-fg animate-pulse" />
                 <div className="flex flex-col">
-                  <span className="text-[#F3ECE3] font-medium text-sm">Scheduled: {new Date(scheduledRunAt).toLocaleString()}</span>
-                  <span className="text-[#F0A73C] text-xs">Starts in <span className="font-bold text-[#F3ECE3]">{formatCountdown(scheduledRunAt)}</span></span>
+                  <span className="text-hv-text font-medium text-sm">Scheduled: {new Date(scheduledRunAt).toLocaleString()}</span>
+                  <span className="text-hv-brand-fg text-xs">Starts in <span className="font-bold text-hv-text">{formatCountdown(scheduledRunAt)}</span></span>
                 </div>
               </div>
-              <button onClick={() => { cancelScheduledRun(); runWorkflow(); }} className="px-5 py-3 bg-[#4F8B5C] hover:bg-[#3E6E48] rounded-lg font-bold flex items-center gap-2"><Play className="w-5 h-5" />Run Now</button>
-              <button onClick={cancelScheduledRun} className="px-5 py-3 bg-[#C6604F] hover:bg-[#A84E3F] rounded-lg font-bold flex items-center gap-2"><X className="w-5 h-5" />Cancel</button>
+              <button onClick={() => { cancelScheduledRun(); runWorkflow(); }} className="px-5 py-3 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong rounded-lg font-bold flex items-center gap-2"><Play className="w-5 h-5" />Run Now</button>
+              <button onClick={cancelScheduledRun} className="px-5 py-3 bg-hv-error-strong hover:bg-hv-error-hover rounded-lg font-bold flex items-center gap-2"><X className="w-5 h-5" />Cancel</button>
             </>
           )}
           {isEmulating && (
             <>
-              <div className="flex items-center gap-3 px-4 py-2 bg-[#4F8B5C]/15 border border-[#4F8B5C] rounded-lg"><div className="w-3 h-3 bg-[#6FBF7E] rounded-full animate-pulse" /><span className="text-[#7BD497] font-medium">Running: Column {currentColumnIndex + 1}/{workflow.length}{repeatCount > 0 && ` (${repeatCount + 1} total runs)`}</span></div>
-              <button onClick={() => { setIsPaused(!isPaused); executionControlRef.current.isPaused = !isPaused; }} className="px-6 py-3 bg-[#C79A34] hover:bg-[#A9812A] rounded-lg font-bold flex items-center gap-2">{isPaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}{isPaused ? 'Resume' : 'Pause'}</button>
-              <button onClick={stopWorkflow} className="px-6 py-3 bg-[#C6604F] hover:bg-[#A84E3F] rounded-lg font-bold flex items-center gap-2"><StopCircle className="w-5 h-5" />Stop</button>
+              <div className="flex items-center gap-3 px-4 py-2 bg-hv-success-strong/15 border border-hv-success-strong rounded-lg"><div className="w-3 h-3 bg-hv-success rounded-full animate-pulse" /><span className="text-hv-success-text font-medium">Running: Column {currentColumnIndex + 1}/{workflow.length}{repeatCount > 0 && ` (${repeatCount + 1} total runs)`}</span></div>
+              <button onClick={() => { setIsPaused(!isPaused); executionControlRef.current.isPaused = !isPaused; }} className="px-6 py-3 bg-hv-brand hover:bg-hv-brand-hover text-[#FFFFFF] rounded-lg font-bold flex items-center gap-2">{isPaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}{isPaused ? 'Resume' : 'Pause'}</button>
+              <button onClick={stopWorkflow} className="px-6 py-3 bg-hv-error-strong hover:bg-hv-error-hover rounded-lg font-bold flex items-center gap-2"><StopCircle className="w-5 h-5" />Stop</button>
             </>
           )}
-          {!connected && <span className="text-sm text-[#F07A6C]">⚠️ Not connected</span>}
+          {!connected && <span className="text-sm text-hv-error-text">⚠️ Not connected</span>}
         </div>
       </div>
 
       {showScheduleDialog && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#15110B] rounded-xl p-6 w-[420px] border border-[#38302A]">
-            <h3 className="text-lg font-bold mb-1 flex items-center gap-2"><CalendarClock className="w-5 h-5 text-[#F0A73C]" />Schedule Workflow Run</h3>
-            <p className="text-xs text-[#786D60] mb-4">Workflow will start automatically at the selected time.</p>
+          <div className="bg-hv-surface rounded-xl p-6 w-[420px] border border-hv-line">
+            <h3 className="text-lg font-bold mb-1 flex items-center gap-2"><CalendarClock className="w-5 h-5 text-hv-brand-fg" />Schedule Workflow Run</h3>
+            <p className="text-xs text-hv-text-3 mb-4">Workflow will start automatically at the selected time.</p>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
-                <label className="text-xs text-[#786D60] block mb-1">Time (24h)</label>
-                <input type="time" value={scheduleDialogTime} onChange={e => setScheduleDialogTime(e.target.value)} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" autoFocus />
+                <label className="text-xs text-hv-text-3 block mb-1">Time (24h)</label>
+                <input type="time" value={scheduleDialogTime} onChange={e => setScheduleDialogTime(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" autoFocus />
               </div>
               <div>
-                <label className="text-xs text-[#786D60] block mb-1">Date (optional)</label>
-                <input type="date" value={scheduleDialogDate} onChange={e => setScheduleDialogDate(e.target.value)} className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" />
+                <label className="text-xs text-hv-text-3 block mb-1">Date (optional)</label>
+                <input type="date" value={scheduleDialogDate} onChange={e => setScheduleDialogDate(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" />
               </div>
             </div>
-            <p className="text-[10px] text-[#786D60] mb-4">Leave date blank for next occurrence (today if not passed, tomorrow if passed).</p>
+            <p className="text-[10px] text-hv-text-3 mb-4">Leave date blank for next occurrence (today if not passed, tomorrow if passed).</p>
             {scheduleDialogTime && (() => {
               const previewMs = computeMsUntilTime(scheduleDialogTime, scheduleDialogDate || undefined);
-              if (previewMs <= 0) return <div className="text-xs text-[#F07A6C] mb-3">⚠️ Invalid or past time</div>;
+              if (previewMs <= 0) return <div className="text-xs text-hv-error-text mb-3">⚠️ Invalid or past time</div>;
               const previewTarget = new Date(Date.now() + previewMs);
-              return <div className="bg-[#F0A73C]/15 border border-[#F0A73C]/40 rounded p-2 mb-4 text-xs text-[#F3ECE3]">Will start at <span className="font-bold">{previewTarget.toLocaleString()}</span> — in {formatCountdown(Date.now() + previewMs)}</div>;
+              return <div className="bg-hv-brand/15 border border-hv-brand/40 rounded p-2 mb-4 text-xs text-hv-text">Will start at <span className="font-bold">{previewTarget.toLocaleString()}</span> — in {formatCountdown(Date.now() + previewMs)}</div>;
             })()}
             <div className="flex gap-3">
-              <button onClick={() => setShowScheduleDialog(false)} className="flex-1 px-4 py-2 bg-[#2A231C] hover:bg-[#322A22] rounded">Cancel</button>
-              <button onClick={() => scheduleRunAt(scheduleDialogTime, scheduleDialogDate || undefined)} disabled={!scheduleDialogTime || computeMsUntilTime(scheduleDialogTime, scheduleDialogDate || undefined) <= 0} className="flex-1 px-4 py-2 bg-[#F0A73C] hover:bg-[#8FB488] disabled:opacity-50 disabled:cursor-not-allowed rounded font-semibold">Schedule</button>
+              <button onClick={() => setShowScheduleDialog(false)} className="flex-1 px-4 py-2 bg-hv-popup-panel hover:bg-hv-box rounded">Cancel</button>
+              <button onClick={() => scheduleRunAt(scheduleDialogTime, scheduleDialogDate || undefined)} disabled={!scheduleDialogTime || computeMsUntilTime(scheduleDialogTime, scheduleDialogDate || undefined) <= 0} className="flex-1 px-4 py-2 bg-hv-brand hover:bg-hv-brand-hover disabled:opacity-50 disabled:cursor-not-allowed rounded font-semibold">Schedule</button>
             </div>
           </div>
         </div>
       )}
 
-      {showSaveDialog && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"><div className="bg-[#15110B] rounded-xl p-6 w-96 border border-[#38302A]"><h3 className="text-lg font-bold mb-4">Save Workflow</h3><input type="text" value={workflowName} onChange={e => setWorkflowName(e.target.value)} placeholder="Workflow name..." className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 mb-4" autoFocus /><div className="flex gap-3"><button onClick={() => setShowSaveDialog(false)} className="flex-1 px-4 py-2 bg-[#2A231C] hover:bg-[#322A22] rounded">Cancel</button><button onClick={saveWorkflow} className="flex-1 px-4 py-2 bg-[#4F8B5C] hover:bg-[#3E6E48] rounded">Save</button></div></div></div>}
+      {showSaveDialog && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"><div className="bg-hv-surface rounded-xl p-6 w-96 border border-hv-line"><h3 className="text-lg font-bold mb-4">Save Workflow</h3><input type="text" value={workflowName} onChange={e => setWorkflowName(e.target.value)} placeholder="Workflow name..." className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 mb-4" autoFocus /><div className="flex gap-3"><button onClick={() => setShowSaveDialog(false)} className="flex-1 px-4 py-2 bg-hv-popup-panel hover:bg-hv-box rounded">Cancel</button><button onClick={saveWorkflow} className="flex-1 px-4 py-2 bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40 hover:bg-hv-success-tint-strong rounded">Save</button></div></div></div>}
       {showIoWizard && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#15110B] rounded-xl p-6 w-[440px] border border-[#38302A]">
+          <div className="bg-hv-surface rounded-xl p-6 w-[440px] border border-hv-line">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold">Workflow File</h3>
-              <button onClick={() => setShowIoWizard(false)} className="p-1 hover:bg-[#241E19] rounded"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowIoWizard(false)} className="p-1 hover:bg-hv-widget rounded"><X className="w-4 h-4" /></button>
             </div>
-            <div className="grid grid-cols-2 gap-1 mb-4 bg-[#15110B] p-1 rounded">
-              <button onClick={() => { setIoWizardTab('export'); setIoError(''); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${ioWizardTab === 'export' ? 'bg-[#F0A73C] text-[#241503]' : 'hover:bg-[#2A231C]'}`}><Download className="w-4 h-4" /> Export</button>
-              <button onClick={() => { setIoWizardTab('import'); setIoError(''); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${ioWizardTab === 'import' ? 'bg-[#F0A73C] text-[#241503]' : 'hover:bg-[#2A231C]'}`}><Upload className="w-4 h-4" /> Import</button>
+            <div className="grid grid-cols-2 gap-1 mb-4 bg-hv-surface p-1 rounded">
+              <button onClick={() => { setIoWizardTab('export'); setIoError(''); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${ioWizardTab === 'export' ? 'bg-hv-brand text-[#101011]' : 'hover:bg-hv-popup-panel'}`}><Download className="w-4 h-4" /> Export</button>
+              <button onClick={() => { setIoWizardTab('import'); setIoError(''); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${ioWizardTab === 'import' ? 'bg-hv-brand text-[#101011]' : 'hover:bg-hv-popup-panel'}`}><Upload className="w-4 h-4" /> Import</button>
             </div>
 
             {ioWizardTab === 'export' ? (
               <div className="space-y-3">
-                <p className="text-sm text-[#786D60]">Download the current workflow as a <code className="text-[#ADA294]">.aether-workflow.json</code> file you can keep on this machine and re-import later.</p>
-                <div className="bg-[#15110B] rounded p-3 text-xs text-[#786D60] space-y-1">
-                  <div>Name: <span className="text-[#F3ECE3]">{workflowName || '(unnamed)'}</span></div>
-                  <div>Columns: <span className="text-[#F3ECE3]">{workflow.length}</span></div>
-                  <div>Blocks: <span className="text-[#F3ECE3]">{workflow.reduce((n, col) => n + col.blocks.length, 0)}</span></div>
+                <p className="text-sm text-hv-text-3">Download the current workflow as a <code className="text-hv-text-2">.aether-workflow.json</code> file you can keep on this machine and re-import later.</p>
+                <div className="bg-hv-surface rounded p-3 text-xs text-hv-text-3 space-y-1">
+                  <div>Name: <span className="text-hv-text">{workflowName || '(unnamed)'}</span></div>
+                  <div>Columns: <span className="text-hv-text">{workflow.length}</span></div>
+                  <div>Blocks: <span className="text-hv-text">{workflow.reduce((n, col) => n + col.blocks.length, 0)}</span></div>
                 </div>
-                <button onClick={exportWorkflowFile} disabled={workflow.length === 0} className="w-full px-4 py-2 bg-[#F0A73C] hover:bg-[#8FB488] disabled:opacity-50 disabled:cursor-not-allowed text-[#241503] font-semibold rounded flex items-center justify-center gap-2"><Download className="w-4 h-4" /> Download Workflow File</button>
-                {workflow.length === 0 && <p className="text-xs text-[#F0A73C]">Nothing to export — the canvas is empty.</p>}
+                <button onClick={exportWorkflowFile} disabled={workflow.length === 0} className="w-full px-4 py-2 bg-hv-brand hover:bg-hv-brand-hover disabled:opacity-50 disabled:cursor-not-allowed text-[#101011] font-semibold rounded flex items-center justify-center gap-2"><Download className="w-4 h-4" /> Download Workflow File</button>
+                {workflow.length === 0 && <p className="text-xs text-hv-brand-fg">Nothing to export — the canvas is empty.</p>}
               </div>
             ) : (
               <div className="space-y-3">
-                <p className="text-sm text-[#786D60]">Select a previously exported <code className="text-[#ADA294]">.json</code> workflow file. It is validated before loading — a bad file shows an error here instead of breaking the page.</p>
+                <p className="text-sm text-hv-text-3">Select a previously exported <code className="text-hv-text-2">.json</code> workflow file. It is validated before loading — a bad file shows an error here instead of breaking the page.</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -2790,13 +2810,13 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) importWorkflowFile(f); e.currentTarget.value = ''; }}
                 />
-                <button onClick={() => fileInputRef.current?.click()} className="w-full px-4 py-2 bg-[#F0A73C] hover:bg-[#8FB488] text-[#241503] font-semibold rounded flex items-center justify-center gap-2"><Upload className="w-4 h-4" /> Choose Workflow File…</button>
-                <p className="text-xs text-[#786D60]">Importing replaces the current canvas. Export first if you want to keep it.</p>
+                <button onClick={() => fileInputRef.current?.click()} className="w-full px-4 py-2 bg-hv-brand hover:bg-hv-brand-hover text-[#101011] font-semibold rounded flex items-center justify-center gap-2"><Upload className="w-4 h-4" /> Choose Workflow File…</button>
+                <p className="text-xs text-hv-text-3">Importing replaces the current canvas. Export first if you want to keep it.</p>
               </div>
             )}
 
             {ioError && (
-              <div className="mt-4 px-3 py-2 bg-[#C6604F]/20 border border-[#E0705F]/50 rounded text-xs text-[#F5988A] flex items-start gap-2">
+              <div className="mt-4 px-3 py-2 bg-hv-error-strong/20 border border-hv-error/50 rounded text-xs text-hv-error-text flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>{ioError}</span>
               </div>
@@ -2805,70 +2825,70 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         </div>
       )}
       {/* ── Bottom Scenario Bar ─────────────────────────────────────────── */}
-      <div className="flex-shrink-0 border-t border-[#38302A] bg-[#1B1613] px-6 py-2.5 flex items-center gap-3">
-        <span className="text-xs text-[#786D60] uppercase tracking-wider">Scenarios</span>
+      <div className="flex-shrink-0 border-t border-hv-line bg-hv-widget-panel px-6 py-2.5 flex items-center gap-3">
+        <span className="text-xs text-hv-text-3 uppercase tracking-wider">Scenarios</span>
         <button
           onClick={() => { setScenarioWizError(''); setScenarioName(workflowName || ''); setScenarioWizTab('save'); setShowScenarioWizard(true); }}
-          className="px-3 py-1.5 bg-[#3E7E5C]/60 hover:bg-[#4E9E74]/70 rounded text-sm flex items-center gap-1.5"
+          className="px-3 py-1.5 bg-hv-success-strong/60 hover:bg-hv-success-strong/70 rounded text-sm flex items-center gap-1.5"
           title="Save the current canvas as a reusable scenario">
           <Save className="w-4 h-4" /> Save as Scenario
         </button>
         <button
           onClick={() => { setScenarioWizError(''); loadCustomScenarios(); setScenarioWizTab('manage'); setShowScenarioWizard(true); }}
-          className="px-3 py-1.5 bg-[#241E19] hover:bg-[#322A22] rounded text-sm flex items-center gap-1.5"
+          className="px-3 py-1.5 bg-hv-widget hover:bg-hv-box rounded text-sm flex items-center gap-1.5"
           title="Load, rename, or delete saved scenarios">
           <FolderOpen className="w-4 h-4" /> Manage Scenarios
         </button>
-        <span className="text-[11px] text-[#5E5449] ml-auto">{customScenarios.length} saved · persists across reloads</span>
+        <span className="text-[11px] text-hv-text-3 ml-auto">{customScenarios.length} saved · persists across reloads</span>
       </div>
 
       {/* ── Scenario Wizard ─────────────────────────────────────────────── */}
       {showScenarioWizard && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#15110B] rounded-xl p-6 w-[460px] border border-[#38302A]">
+          <div className="bg-hv-surface rounded-xl p-6 w-[460px] border border-hv-line">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold">Scenarios</h3>
-              <button onClick={() => setShowScenarioWizard(false)} className="p-1 hover:bg-[#241E19] rounded"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowScenarioWizard(false)} className="p-1 hover:bg-hv-widget rounded"><X className="w-4 h-4" /></button>
             </div>
-            <div className="grid grid-cols-2 gap-1 mb-4 bg-[#15110B] p-1 rounded">
-              <button onClick={() => { setScenarioWizTab('save'); setScenarioWizError(''); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${scenarioWizTab === 'save' ? 'bg-[#F0A73C] text-[#241503]' : 'hover:bg-[#2A231C]'}`}><Save className="w-4 h-4" /> Save as Scenario</button>
-              <button onClick={() => { setScenarioWizTab('manage'); setScenarioWizError(''); loadCustomScenarios(); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${scenarioWizTab === 'manage' ? 'bg-[#F0A73C] text-[#241503]' : 'hover:bg-[#2A231C]'}`}><FolderOpen className="w-4 h-4" /> Manage</button>
+            <div className="grid grid-cols-2 gap-1 mb-4 bg-hv-surface p-1 rounded">
+              <button onClick={() => { setScenarioWizTab('save'); setScenarioWizError(''); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${scenarioWizTab === 'save' ? 'bg-hv-brand text-[#101011]' : 'hover:bg-hv-popup-panel'}`}><Save className="w-4 h-4" /> Save as Scenario</button>
+              <button onClick={() => { setScenarioWizTab('manage'); setScenarioWizError(''); loadCustomScenarios(); }} className={`px-3 py-1.5 rounded text-sm flex items-center justify-center gap-1.5 ${scenarioWizTab === 'manage' ? 'bg-hv-brand text-[#101011]' : 'hover:bg-hv-popup-panel'}`}><FolderOpen className="w-4 h-4" /> Manage</button>
             </div>
 
             {scenarioWizTab === 'save' ? (
               <div className="space-y-3">
-                <p className="text-sm text-[#786D60]">Save the current canvas ({workflow.length} column{workflow.length === 1 ? '' : 's'}, {workflow.reduce((n, col) => n + col.blocks.length, 0)} block{workflow.reduce((n, col) => n + col.blocks.length, 0) === 1 ? '' : 's'}) as a reusable scenario. It persists across reloads and can be loaded back onto the canvas any time.</p>
+                <p className="text-sm text-hv-text-3">Save the current canvas ({workflow.length} column{workflow.length === 1 ? '' : 's'}, {workflow.reduce((n, col) => n + col.blocks.length, 0)} block{workflow.reduce((n, col) => n + col.blocks.length, 0) === 1 ? '' : 's'}) as a reusable scenario. It persists across reloads and can be loaded back onto the canvas any time.</p>
                 <div>
-                  <label className="text-xs text-[#786D60] block mb-1">Scenario name</label>
-                  <input type="text" value={scenarioName} onChange={e => setScenarioName(e.target.value)} placeholder="e.g. Interlock — Door1/Door2 cross-board" className="w-full bg-[#15110B] border border-[#38302A] rounded px-3 py-2 text-sm" autoFocus />
+                  <label className="text-xs text-hv-text-3 block mb-1">Scenario name</label>
+                  <input type="text" value={scenarioName} onChange={e => setScenarioName(e.target.value)} placeholder="e.g. Interlock — Door1/Door2 cross-board" className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" autoFocus />
                 </div>
-                <button onClick={saveAsScenario} disabled={workflow.length === 0} className="w-full px-4 py-2 bg-[#F0A73C] hover:bg-[#8FB488] disabled:opacity-50 disabled:cursor-not-allowed text-[#241503] font-semibold rounded flex items-center justify-center gap-2"><Save className="w-4 h-4" /> Save Scenario</button>
-                {workflow.length === 0 && <p className="text-xs text-[#F0A73C]">Canvas is empty — build a sequence first.</p>}
+                <button onClick={saveAsScenario} disabled={workflow.length === 0} className="w-full px-4 py-2 bg-hv-brand hover:bg-hv-brand-hover disabled:opacity-50 disabled:cursor-not-allowed text-[#101011] font-semibold rounded flex items-center justify-center gap-2"><Save className="w-4 h-4" /> Save Scenario</button>
+                {workflow.length === 0 && <p className="text-xs text-hv-brand-fg">Canvas is empty — build a sequence first.</p>}
               </div>
             ) : (
               <div className="space-y-2">
                 {customScenarios.length === 0 ? (
-                  <p className="text-[#786D60] text-center py-6 text-sm">No saved scenarios yet. Build a sequence and use "Save as Scenario".</p>
+                  <p className="text-hv-text-3 text-center py-6 text-sm">No saved scenarios yet. Build a sequence and use "Save as Scenario".</p>
                 ) : (
                   <div className="max-h-80 overflow-y-auto space-y-1.5">
                     {customScenarios.slice().sort((a, b) => b.savedAt - a.savedAt).map(s => (
                       <div key={s.id} className="flex items-stretch gap-1">
-                        <button onClick={() => applyScenario(s.id)} className="flex-1 px-3 py-2.5 bg-[#2A231C] hover:bg-[#322A22] rounded text-left min-w-0" title="Load onto canvas">
+                        <button onClick={() => applyScenario(s.id)} className="flex-1 px-3 py-2.5 bg-hv-popup-panel hover:bg-hv-box rounded text-left min-w-0" title="Load onto canvas">
                           <div className="font-semibold truncate">{s.name}</div>
-                          <div className="text-[11px] text-[#786D60]">{Array.isArray(s.steps) ? s.steps.length : 0} cols · {new Date(s.savedAt).toLocaleString()}</div>
+                          <div className="text-[11px] text-hv-text-3">{Array.isArray(s.steps) ? s.steps.length : 0} cols · {new Date(s.savedAt).toLocaleString()}</div>
                         </button>
-                        <button onClick={() => renameScenario(s.id, s.name)} title="Rename" className="px-2.5 bg-[#2A231C] hover:bg-[#322A22] rounded flex items-center text-[#786D60] hover:text-[#F3ECE3]"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => deleteScenario(s.id, s.name)} title="Delete" className="px-2.5 bg-[#2A231C] hover:bg-[#A84E3F]/70 rounded flex items-center text-[#786D60] hover:text-[#F3ECE3]"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => renameScenario(s.id, s.name)} title="Rename" className="px-2.5 bg-hv-popup-panel hover:bg-hv-box rounded flex items-center text-hv-text-3 hover:text-hv-text"><Pencil className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => deleteScenario(s.id, s.name)} title="Delete" className="px-2.5 bg-hv-popup-panel hover:bg-hv-error-hover/70 rounded flex items-center text-hv-text-3 hover:text-hv-text"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     ))}
                   </div>
                 )}
-                <p className="text-[11px] text-[#786D60] pt-1">Loading a scenario replaces the current canvas. Save the current one first if needed.</p>
+                <p className="text-[11px] text-hv-text-3 pt-1">Loading a scenario replaces the current canvas. Save the current one first if needed.</p>
               </div>
             )}
 
             {scenarioWizError && (
-              <div className="mt-4 px-3 py-2 bg-[#C6604F]/20 border border-[#E0705F]/50 rounded text-xs text-[#F5988A] flex items-start gap-2">
+              <div className="mt-4 px-3 py-2 bg-hv-error-strong/20 border border-hv-error/50 rounded text-xs text-hv-error-text flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>{scenarioWizError}</span>
               </div>
@@ -2876,7 +2896,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           </div>
         </div>
       )}
-      {showLoadDialog && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"><div className="bg-[#15110B] rounded-xl p-6 w-96 border border-[#38302A]"><h3 className="text-lg font-bold mb-4">Load Workflow</h3><div className="max-h-80 overflow-y-auto space-y-2 mb-4">{savedWorkflows.length === 0 ? <p className="text-[#786D60] text-center py-4">No saved workflows</p> : savedWorkflows.map(w => <div key={w.id} className="flex items-stretch gap-1 group"><button onClick={() => loadWorkflow(w.id)} className="flex-1 px-4 py-3 bg-[#2A231C] hover:bg-[#322A22] rounded text-left min-w-0"><div className="font-semibold truncate">{w.name}</div><div className="text-xs text-[#786D60]">{new Date(w.created || w.createdAt).toLocaleDateString()}</div></button><button onClick={() => deleteWorkflow(w.id, w.name)} title={`Delete "${w.name}"`} className="px-3 bg-[#2A231C] hover:bg-[#A84E3F]/70 rounded flex items-center justify-center text-[#786D60] hover:text-[#F3ECE3] transition-colors"><Trash2 className="w-4 h-4" /></button></div>)}</div><button onClick={() => setShowLoadDialog(false)} className="w-full px-4 py-2 bg-[#2A231C] hover:bg-[#322A22] rounded">Close</button></div></div>}
+      {showLoadDialog && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"><div className="bg-hv-surface rounded-xl p-6 w-96 border border-hv-line"><h3 className="text-lg font-bold mb-4">Load Workflow</h3><div className="max-h-80 overflow-y-auto space-y-2 mb-4">{savedWorkflows.length === 0 ? <p className="text-hv-text-3 text-center py-4">No saved workflows</p> : savedWorkflows.map(w => <div key={w.id} className="flex items-stretch gap-1 group"><button onClick={() => loadWorkflow(w.id)} className="flex-1 px-4 py-3 bg-hv-popup-panel hover:bg-hv-box rounded text-left min-w-0"><div className="font-semibold truncate">{w.name}</div><div className="text-xs text-hv-text-3">{new Date(w.created || w.createdAt).toLocaleDateString()}</div></button><button onClick={() => deleteWorkflow(w.id, w.name)} title={`Delete "${w.name}"`} className="px-3 bg-hv-popup-panel hover:bg-hv-error-hover/70 rounded flex items-center justify-center text-hv-text-3 hover:text-hv-text transition-colors"><Trash2 className="w-4 h-4" /></button></div>)}</div><button onClick={() => setShowLoadDialog(false)} className="w-full px-4 py-2 bg-hv-popup-panel hover:bg-hv-box rounded">Close</button></div></div>}
     </div>
   );
 };

@@ -171,15 +171,15 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
   });
 
   const getPinColor = (pin: PinConfig): string => {
-    if (pin.type === 'power') return 'from-[#C6604F] to-[#A84E3F]';
-    if (pin.type === 'ground') return 'from-[#38302A] to-[#241E19]';
+    if (pin.type === 'power') return 'from-red-600 to-red-700';
+    if (pin.type === 'ground') return 'from-slate-700 to-slate-800';
     
     switch (pin.category) {
-      case 'hardware-reserved': return 'from-[#D98A3D] to-[#C6604F]';
-      case 'wiegand-reserved': return 'from-[#8FB488] to-[#F0A73C]';
-      case 'door-io': return 'from-[#5FB7B0] to-[#4E9E98]';
-      case 'system-io': return 'from-[#4F8B5C] to-[#4F8B5C]';
-      default: return 'from-[#4A3F36] to-[#38302A]';
+      case 'hardware-reserved': return 'from-orange-600 to-red-600';
+      case 'wiegand-reserved': return 'from-purple-600 to-indigo-600';
+      case 'door-io': return 'from-blue-600 to-cyan-600';
+      case 'system-io': return 'from-green-600 to-emerald-600';
+      default: return 'from-slate-600 to-slate-700';
     }
   };
 
@@ -201,20 +201,20 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-br from-[#2E2410]/30 to-[#26301F]/30 rounded-xl p-6 border border-[#C9862E]/50">
+      <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 rounded-xl p-6 border border-indigo-700/50">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-2xl font-bold flex items-center gap-3">
-              <Cpu className="w-8 h-8 text-[#F0A73C]" />
+              <Cpu className="w-8 h-8 text-indigo-400" />
               GPIO Pinout Diagram
             </h3>
-            <p className="text-[#ADA294] mt-1">
+            <p className="text-slate-400 mt-1">
               Raspberry Pi 40-pin GPIO header with current pin assignments
             </p>
           </div>
           <button
             onClick={() => setShowLegend(!showLegend)}
-            className="px-4 py-2 bg-[#F0A73C] hover:bg-[#C9862E] rounded-lg font-semibold text-white transition-all flex items-center gap-2"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold text-white transition-all flex items-center gap-2"
           >
             <Info size={16} />
             {showLegend ? 'Hide' : 'Show'} Legend
@@ -223,49 +223,49 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
 
         {/* Legend */}
         {showLegend && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4 p-4 bg-[#1B1613]/50 rounded-lg border border-[#38302A]">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mt-4 p-4 bg-slate-900/50 rounded-lg border border-slate-700">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-r from-[#C6604F] to-[#A84E3F] flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-gradient-to-r from-red-600 to-red-700 flex items-center justify-center">
                 <Zap size={14} className="text-white" />
               </div>
-              <span className="text-xs font-semibold text-[#C4B9AB]">Power</span>
+              <span className="text-xs font-semibold text-slate-300">Power</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-r from-[#38302A] to-[#241E19] flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-gradient-to-r from-slate-700 to-slate-800 flex items-center justify-center">
                 <div className="w-3 h-0.5 bg-white" />
               </div>
-              <span className="text-xs font-semibold text-[#C4B9AB]">Ground</span>
+              <span className="text-xs font-semibold text-slate-300">Ground</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-r from-[#D98A3D] to-[#C6604F] flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-gradient-to-r from-orange-600 to-red-600 flex items-center justify-center">
                 <AlertCircle size={14} className="text-white" />
               </div>
-              <span className="text-xs font-semibold text-[#C4B9AB]">HW Reserved</span>
+              <span className="text-xs font-semibold text-slate-300">HW Reserved</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-r from-[#8FB488] to-[#F0A73C] flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-gradient-to-r from-purple-600 to-indigo-600 flex items-center justify-center">
                 <Radio size={14} className="text-white" />
               </div>
-              <span className="text-xs font-semibold text-[#C4B9AB]">Wiegand</span>
+              <span className="text-xs font-semibold text-slate-300">Wiegand</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-r from-[#5FB7B0] to-[#4E9E98] flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-gradient-to-r from-blue-600 to-cyan-600 flex items-center justify-center">
                 <Lock size={14} className="text-white" />
               </div>
-              <span className="text-xs font-semibold text-[#C4B9AB]">Door I/O</span>
+              <span className="text-xs font-semibold text-slate-300">Door I/O</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-gradient-to-r from-[#4F8B5C] to-[#4F8B5C] flex items-center justify-center">
+              <div className="w-6 h-6 rounded bg-gradient-to-r from-green-600 to-emerald-600 flex items-center justify-center">
                 <Zap size={14} className="text-white" />
               </div>
-              <span className="text-xs font-semibold text-[#C4B9AB]">System I/O</span>
+              <span className="text-xs font-semibold text-slate-300">System I/O</span>
             </div>
           </div>
         )}
       </div>
 
       {/* Pinout Diagram */}
-      <div className="bg-[#1B1613]/50 rounded-xl p-6 border border-[#38302A]">
+      <div className="bg-slate-900/50 rounded-xl p-6 border border-slate-700">
         <div className="flex justify-center">
           <div className="relative">
             {/* Board representation */}
@@ -280,7 +280,7 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
                     className={`w-16 h-10 rounded-lg bg-gradient-to-r ${getPinColor(pin)} flex items-center justify-center cursor-pointer transition-all transform hover:scale-110 hover:shadow-lg relative group`}
                   >
                     {getPinIcon(pin)}
-                    <div className="absolute -left-20 top-1/2 transform -translate-y-1/2 text-xs font-mono text-[#ADA294] text-right w-16">
+                    <div className="absolute -left-20 top-1/2 transform -translate-y-1/2 text-xs font-mono text-slate-400 text-right w-16">
                       {pin.physical}
                     </div>
                   </div>
@@ -290,7 +290,7 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
               {/* Center - Raspberry Pi label */}
               <div className="flex items-center justify-center px-4">
                 <div className="writing-mode-vertical text-center">
-                  <div className="bg-gradient-to-b from-[#4F8B5C] to-[#3E6E48] px-4 py-8 rounded-lg">
+                  <div className="bg-gradient-to-b from-green-600 to-green-700 px-4 py-8 rounded-lg">
                     <div className="transform rotate-180" style={{ writingMode: 'vertical-rl' }}>
                       <span className="text-white font-bold text-lg">RASPBERRY PI</span>
                     </div>
@@ -308,7 +308,7 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
                     className={`w-16 h-10 rounded-lg bg-gradient-to-r ${getPinColor(pin)} flex items-center justify-center cursor-pointer transition-all transform hover:scale-110 hover:shadow-lg relative group`}
                   >
                     {getPinIcon(pin)}
-                    <div className="absolute -right-20 top-1/2 transform -translate-y-1/2 text-xs font-mono text-[#ADA294] w-16">
+                    <div className="absolute -right-20 top-1/2 transform -translate-y-1/2 text-xs font-mono text-slate-400 w-16">
                       {pin.physical}
                     </div>
                   </div>
@@ -318,24 +318,24 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
 
             {/* Pin numbering labels */}
             <div className="absolute -top-6 left-0 right-0 flex justify-between px-2">
-              <span className="text-xs font-bold text-[#786D60]">ODD</span>
-              <span className="text-xs font-bold text-[#786D60]">EVEN</span>
+              <span className="text-xs font-bold text-slate-500">ODD</span>
+              <span className="text-xs font-bold text-slate-500">EVEN</span>
             </div>
           </div>
         </div>
 
         {/* Hover info card */}
         {hoveredPinData && (
-          <div className="mt-6 p-6 bg-gradient-to-br from-[#241E19] to-[#1B1613] rounded-xl border-2 border-[#F0A73C]/50 shadow-2xl">
+          <div className="mt-6 p-6 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl border-2 border-indigo-500/50 shadow-2xl">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-3xl font-bold text-white">Pin {hoveredPinData.physical}</span>
                   {hoveredPinData.gpio !== null && (
-                    <span className="text-xl font-mono text-[#8FD3CD]">GPIO {hoveredPinData.gpio}</span>
+                    <span className="text-xl font-mono text-cyan-400">GPIO {hoveredPinData.gpio}</span>
                   )}
                 </div>
-                <div className="text-lg font-semibold text-[#C4B9AB]">{hoveredPinData.name}</div>
+                <div className="text-lg font-semibold text-slate-300">{hoveredPinData.name}</div>
               </div>
               <div className={`w-16 h-16 rounded-xl bg-gradient-to-br ${getPinColor(hoveredPinData)} flex items-center justify-center shadow-lg`}>
                 {React.cloneElement(getPinIcon(hoveredPinData) as React.ReactElement, { 
@@ -347,35 +347,35 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
             <div className="space-y-3">
               {hoveredPinData.purpose && (
                 <div>
-                  <div className="text-sm font-semibold text-[#786D60] mb-1">Purpose</div>
+                  <div className="text-sm font-semibold text-slate-500 mb-1">Purpose</div>
                   <div className="text-base text-white font-semibold">{hoveredPinData.purpose}</div>
                 </div>
               )}
 
               {hoveredPinData.association && (
                 <div>
-                  <div className="text-sm font-semibold text-[#786D60] mb-1">Current Assignment</div>
-                  <div className="text-base text-[#8FD3CD] font-semibold">{hoveredPinData.association}</div>
+                  <div className="text-sm font-semibold text-slate-500 mb-1">Current Assignment</div>
+                  <div className="text-base text-cyan-400 font-semibold">{hoveredPinData.association}</div>
                 </div>
               )}
 
               {hoveredPinData.details && (
                 <div>
-                  <div className="text-sm font-semibold text-[#786D60] mb-1">Details</div>
-                  <div className="text-sm text-[#C4B9AB]">{hoveredPinData.details}</div>
+                  <div className="text-sm font-semibold text-slate-500 mb-1">Details</div>
+                  <div className="text-sm text-slate-300">{hoveredPinData.details}</div>
                 </div>
               )}
 
               {/* Category badge */}
-              <div className="pt-3 border-t border-[#38302A]">
+              <div className="pt-3 border-t border-slate-700">
                 <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
-                  hoveredPinData.category === 'hardware-reserved' ? 'bg-[#D98A3D]/20 text-[#E6A24C] border border-[#D98A3D]/30' :
-                  hoveredPinData.category === 'wiegand-reserved' ? 'bg-[#8FB488]/20 text-[#8FB488] border border-[#8FB488]/30' :
-                  hoveredPinData.category === 'door-io' ? 'bg-[#5FB7B0]/20 text-[#5FB7B0] border border-[#5FB7B0]/30' :
-                  hoveredPinData.category === 'system-io' ? 'bg-[#6FBF7E]/20 text-[#7BD497] border border-[#6FBF7E]/30' :
-                  hoveredPinData.type === 'power' ? 'bg-[#C6604F]/20 text-[#E0705F] border border-[#C6604F]/30' :
-                  hoveredPinData.type === 'ground' ? 'bg-[#786D60]/20 text-[#ADA294] border border-[#786D60]/30' :
-                  'bg-[#786D60]/20 text-[#ADA294] border border-[#786D60]/30'
+                  hoveredPinData.category === 'hardware-reserved' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                  hoveredPinData.category === 'wiegand-reserved' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                  hoveredPinData.category === 'door-io' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                  hoveredPinData.category === 'system-io' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                  hoveredPinData.type === 'power' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                  hoveredPinData.type === 'ground' ? 'bg-slate-500/20 text-slate-400 border border-slate-500/30' :
+                  'bg-slate-500/20 text-slate-400 border border-slate-500/30'
                 }`}>
                   {hoveredPinData.category === 'hardware-reserved' ? '⚠️ HARDWARE RESERVED' :
                    hoveredPinData.category === 'wiegand-reserved' ? '📡 WIEGAND PROTOCOL' :
@@ -391,8 +391,8 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
         )}
 
         {!hoveredPinData && (
-          <div className="mt-6 p-4 bg-[#241E19]/50 rounded-lg border border-[#38302A] text-center">
-            <p className="text-[#ADA294] text-sm">
+          <div className="mt-6 p-4 bg-slate-800/50 rounded-lg border border-slate-700 text-center">
+            <p className="text-slate-400 text-sm">
               <Info size={16} className="inline mr-2" />
               Hover over any pin to see its purpose and current assignment
             </p>
@@ -402,24 +402,24 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
 
       {/* Statistics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-[#1B1613]/50 rounded-lg p-4 border border-[#38302A]">
-          <div className="text-sm text-[#ADA294] mb-1">Total Pins</div>
+        <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+          <div className="text-sm text-slate-400 mb-1">Total Pins</div>
           <div className="text-2xl font-bold text-white">40</div>
         </div>
-        <div className="bg-[#2E2410]/20 rounded-lg p-4 border border-[#A96F22]/50">
-          <div className="text-sm text-[#E6A24C] mb-1">HW Reserved</div>
+        <div className="bg-orange-900/20 rounded-lg p-4 border border-orange-700/50">
+          <div className="text-sm text-orange-400 mb-1">HW Reserved</div>
           <div className="text-2xl font-bold text-white">
             {pinout.filter(p => p.category === 'hardware-reserved').length}
           </div>
         </div>
-        <div className="bg-[#173B38]/20 rounded-lg p-4 border border-[#4E9E98]/50">
-          <div className="text-sm text-[#5FB7B0] mb-1">Door I/O</div>
+        <div className="bg-blue-900/20 rounded-lg p-4 border border-blue-700/50">
+          <div className="text-sm text-blue-400 mb-1">Door I/O</div>
           <div className="text-2xl font-bold text-white">
             {pinout.filter(p => p.category === 'door-io').length}
           </div>
         </div>
-        <div className="bg-[#26301F]/20 rounded-lg p-4 border border-[#6F9A68]/50">
-          <div className="text-sm text-[#8FB488] mb-1">Wiegand</div>
+        <div className="bg-purple-900/20 rounded-lg p-4 border border-purple-700/50">
+          <div className="text-sm text-purple-400 mb-1">Wiegand</div>
           <div className="text-2xl font-bold text-white">
             {pinout.filter(p => p.category === 'wiegand-reserved').length}
           </div>
@@ -430,4 +430,3 @@ export const GPIOPinoutDiagram: React.FC<GPIOPinoutDiagramProps> = ({
 };
 
 export default GPIOPinoutDiagram;
-

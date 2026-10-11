@@ -219,6 +219,8 @@ class OSDPManager extends EventEmitter {
         cmd: command, cmdName: this._cmdName(command, isReply),
         length: buffer.length, dataHex: hex, fullHex: hex,
       });
+      // Raw bytes for the trace hub, which does its own framing + full decode.
+      this.emit('wire-raw', { direction, portPath, bytes: buffer, ts: Date.now() });
     } catch (e) { /* never let trace tap break the I/O path */ }
   }
 
@@ -1794,9 +1796,11 @@ class OSDPManager extends EventEmitter {
       cardData.facilityCode != null ? Number(cardData.facilityCode) :
       cardData.facility     != null ? Number(cardData.facility)     : 0;
 
+    // Card numbers can exceed 2^53 on long formats, so keep them as text
     const card =
-      cardData.cardNumber != null ? Number(cardData.cardNumber) :
-      cardData.card       != null ? Number(cardData.card)       : 0;
+      cardData.cardNumber != null ? String(cardData.cardNumber) :
+      cardData.card       != null ? String(cardData.card)       : '0';
+    const issueLevel = Number(cardData.issueLevel ?? cardData.issue ?? 0) || 0;
 
     let bitCount = Number(cardData.bitCount);
 
@@ -1825,10 +1829,15 @@ class OSDPManager extends EventEmitter {
       throw new Error(`Unknown/unsupported OSDP format '${formatId}'. Define it in custom-formats.json or use a built-in id.`);
     }
 
+    // Encode now so a bad value is reported to the caller instead of failing at the next poll
+    if (formatService && formatService.getFormatById(formatId)) {
+      formatService.encodeCredential(formatId, facility, card, issueLevel);
+    }
+
     console.log(`[OSDP] Format: ${formatId}, Facility: ${facility}, Card: ${card}, Bits: ${bitCount}`);
 
     reader.lastCard = {
-      facility, card, bitCount,
+      facility, card, bitCount, issueLevel,
       format: String(formatId).toLowerCase(),
       timestamp: Date.now(),
       reported: false

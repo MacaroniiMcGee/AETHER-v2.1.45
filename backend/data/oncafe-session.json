@@ -1,0 +1,28 @@
+{
+  "qa.oncafe.hanwhavision.cloud": {
+    "user": "w.vallera@hanwha.com",
+    "refresh": "eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJjZmIxMzU1MC0zMmVjLTQxZjktODliNi03ZjQ0MjYxMzRkNzYifQ.eyJleHAiOjE3OTE3NDE0MjUsImlhdCI6MTc5MTU2ODYyNSwianRpIjoiODMxMDcxZGYtNjU1MC00Zjg1LTlhYzctNDQwMDc1YmQ0MTJjIiwiaXNzIjoiaHR0cHM6Ly9hdXRoLnFhLnBsYXRmb3JtLmhhbndoYXZpc2lvbi5jbG91ZC9yZWFsbXMvaHZhIiwiYXVkIjoiaHR0cHM6Ly9hdXRoLnFhLnBsYXRmb3JtLmhhbndoYXZpc2lvbi5jbG91ZC9yZWFsbXMvaHZhIiwic3ViIjoiNGJkYzA3NmYtMmJkMS00MzIyLWFjY2ItOTAyYTJiZGFlZWNlIiwidHlwIjoiUmVmcmVzaCIsImF6cCI6ImFjcy13ZWItYXBwIiwic2lkIjoiYjE5ZDI1MzktMzlkZC00MTgzLTg0N2EtMzgzM2Y5YmQ3MjJjIiwic2NvcGUiOiJvcGVuaWQgd2ViLW9yaWdpbnMgYWNyIHJvbGVzIE9rdGFfSWRQX0V4dGVybmFsX0lEX0NsYWltX01hcHBlciBwcm9maWxlIGVtYWlsIGJhc2ljIn0.bQn1UIhHIDkjoCWYJSvo3DS0M2iWJqTuaV-dtPD9wnNQigPP9Mp_NvEKm4pjFoCVwz0SxlBkBQh2193IGwbiVQ",
+    "refreshExp": 1791741425149,
+    "at": "2026-10-09T17:57:05.149Z",
+    "orgs": [
+      {
+        "id": "7d905888-5071-4eb6-93cc-ef923aacd15a",
+        "name": "oncafe200"
+      },
+      {
+        "id": "a4b07a33-9722-4e79-9471-7b57d37aa95a",
+        "name": "Lab 120"
+      },
+      {
+        "id": "cd158198-b879-4ecf-b4ee-0e4e6a64c3c0",
+        "name": "Lab120Throwaway"
+      },
+      {
+        "id": "ee69f97e-737d-4ba5-9bfe-bf15a153c36e",
+        "name": "HVA Tech Support QA"
+      }
+    ],
+    "org": "a4b07a33-9722-4e79-9471-7b57d37aa95a",
+    "name": "William Vallera"
+  }
+}

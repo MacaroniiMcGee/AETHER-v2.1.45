@@ -63,6 +63,11 @@ interface InteractiveWiegandReaderProps {
   onCardTap?:    () => void;
   onCardSent?:   (card: PocketCard) => void;
   defaultFormat?: number;
+  // When given, the reader hands sending to the page (exact format encoder and
+  // PIN burst routes) and keeps only the look: LED, card tap, keypad, recent list.
+  onSendCard?:   () => Promise<void>;
+  onSendPin?:    (pin: string) => Promise<void>;
+  pinModeLabel?: string;
 }
 
 interface RecentEntry {
@@ -95,6 +100,9 @@ export default function InteractiveWiegandReader({
   onCardTap,
   onCardSent,
   defaultFormat = 26,
+  onSendCard,
+  onSendPin,
+  pinModeLabel,
 }: InteractiveWiegandReaderProps) {
   // ===== State =====
   const [ledState, setLedState]   = useState<LedState>('idle');
@@ -202,6 +210,23 @@ export default function InteractiveWiegandReader({
     setLedState('sending');
     flashTxIndicator(800);
 
+    if (onSendCard) {
+      try {
+        await onSendCard();
+        flashCardStatus('ok', `✓ Sent ${cardReadout}`);
+        flashLed('ok', 600);
+        pushRecent({ time: new Date().toLocaleTimeString(), type: 'CARD', description: `${cardReadout} · ${pocketCard!.format ?? ''} → ${reader.name}` });
+        onCardSent?.(pocketCard!);
+      } catch (err: any) {
+        flashCardStatus('err', `✗ ${err?.message || 'Send failed'}`);
+        flashLed('err', 800);
+        pushRecent({ time: new Date().toLocaleTimeString(), type: 'ERR', description: err?.message || 'Send failed' });
+      } finally {
+        cardSendingRef.current = false;
+      }
+      return;
+    }
+
     try {
       const res = await fetch(`${backendUrl}/api/wiegand/transmit`, {
         method: 'POST',
@@ -284,7 +309,10 @@ export default function InteractiveWiegandReader({
     const pulseWidth = reader.pulseWidth ?? 50;
 
     try {
-      if (fmtDef.transmission === 'single') {
+      if (onSendPin) {
+        await onSendPin(pin);
+        pushRecent({ time: new Date().toLocaleTimeString(), type: 'PIN', description: `${maskPin ? '•'.repeat(pin.length) : pin} · ${pinModeLabel || 'PIN'} → ${reader.name}` });
+      } else if (fmtDef.transmission === 'single') {
         const pinNum = parseInt(pin, 10);
         if (!Number.isFinite(pinNum)) throw new Error('Invalid PIN');
 

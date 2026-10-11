@@ -21,16 +21,16 @@ type Props = {
 };
 
 const COLORS: Record<string, string> = {
-  POLL: '#475569', ACK: '#475569',
-  KEYPAD: '#fbbf24', RAW: '#22c55e',
-  LED: '#cbd5e1', BUZ: '#a78bfa',
-  NAK: '#ef4444',
-  PDID: '#8b5cf6', PDCAP: '#8b5cf6',
-  ID: '#94a3b8', CAP: '#94a3b8',
-  LSTAT: '#94a3b8', LSTATR: '#94a3b8',
-  ISTAT: '#94a3b8', ISTATR: '#94a3b8',
-  OSTAT: '#94a3b8', OSTATR: '#94a3b8',
-  RSTAT: '#94a3b8', RSTATR: '#94a3b8',
+  POLL: 'rgb(var(--hv-line-strong))', ACK: 'rgb(var(--hv-line-strong))',
+  KEYPAD: 'rgb(var(--hv-warning))', RAW: 'rgb(var(--hv-success))',
+  LED: 'rgb(var(--hv-text))', BUZ: 'rgb(var(--hv-purple-text))',
+  NAK: 'rgb(var(--hv-error))',
+  PDID: 'rgb(var(--hv-purple))', PDCAP: 'rgb(var(--hv-purple))',
+  ID: 'rgb(var(--hv-text-2))', CAP: 'rgb(var(--hv-text-2))',
+  LSTAT: 'rgb(var(--hv-text-2))', LSTATR: 'rgb(var(--hv-text-2))',
+  ISTAT: 'rgb(var(--hv-text-2))', ISTATR: 'rgb(var(--hv-text-2))',
+  OSTAT: 'rgb(var(--hv-text-2))', OSTATR: 'rgb(var(--hv-text-2))',
+  RSTAT: 'rgb(var(--hv-text-2))', RSTATR: 'rgb(var(--hv-text-2))',
 };
 
 const OSDP_COL: Record<number, string> = { 0:'off',1:'red',2:'green',3:'amber',4:'blue',5:'magenta',6:'cyan',7:'white' };
@@ -54,7 +54,7 @@ function decodeFrame(f: WireFrame): Decoded {
   const buf = hexToBytes(f.fullHex || f.dataHex || '');
   let s = buf.indexOf(0x53); if (s < 0) s = 0;
   const d = buf.slice(s + 6, Math.max(s + 6, buf.length - 2));
-  const out: Decoded = { kind: 'other', klass: '#94a3b8', text: f.cmdName || '?', sig: '' };
+  const out: Decoded = { kind: 'other', klass: 'rgb(var(--hv-text-2))', text: f.cmdName || '?', sig: '' };
   try {
     if (cmd === 0x69) {
       const recs: string[] = [];
@@ -70,16 +70,16 @@ function decodeFrame(f: WireFrame): Decoded {
       }
       out.kind = 'led'; out.text = recs.join(' | ') || 'LED (empty)';
       out.sig = d.slice(9, 14).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      if (/steady red/.test(out.text)) out.klass = '#ef4444';
-      else if (/amber/.test(out.text)) out.klass = '#ffb13d';
-      else if (/green/.test(out.text)) out.klass = '#22c55e';
-      else if (/red/.test(out.text)) out.klass = '#ef4444';
+      if (/steady red/.test(out.text)) out.klass = 'rgb(var(--hv-error))';
+      else if (/amber/.test(out.text)) out.klass = 'rgb(var(--hv-brand-text))';
+      else if (/green/.test(out.text)) out.klass = 'rgb(var(--hv-success))';
+      else if (/red/.test(out.text)) out.klass = 'rgb(var(--hv-error))';
     } else if (cmd === 0x6A) {
       out.kind = 'buz';
       out.text = d.length >= 5
         ? 'BUZ ' + (d[1] === 0 ? 'no-op' : d[1] === 1 ? 'off(silent)' : d[1] === 2 ? 'default' : 'tone' + d[1]) + ' ' + d[2] * 100 + '/' + d[3] * 100 + 'ms x' + d[4]
         : 'BUZ (short)';
-      out.klass = '#a78bfa';
+      out.klass = 'rgb(var(--hv-purple-text))';
       out.sig = d.slice(1, 5).map(b => b.toString(16).padStart(2, '0')).join(' ');
     } else if (cmd === 0x50) {
       if (d.length >= 4) {
@@ -92,14 +92,14 @@ function decodeFrame(f: WireFrame): Decoded {
         }
         out.text = 'CARD read ' + n + '-bit' + extra;
       } else out.text = 'CARD (short)';
-      out.kind = 'card'; out.klass = '#3dd6e0';
+      out.kind = 'card'; out.klass = 'rgb(var(--hv-info))';
     } else if (cmd === 0x41) {
-      out.kind = 'nak'; out.text = 'NAK - ' + (OSDP_NAK[d[0]] || ('0x' + (d[0] || 0).toString(16))); out.klass = '#ef4444';
-    } else if (cmd === 0x76) { out.kind = 'sec'; out.text = f.isReply ? 'SEC CCRYPT (reply)' : 'SEC CHLNG'; out.klass = '#fbbf24'; }
-    else if (cmd === 0x77) { out.kind = 'sec'; out.text = 'SEC SCRYPT'; out.klass = '#fbbf24'; }
-    else if (cmd === 0x78) { out.kind = 'sec'; out.text = 'SEC RMAC (reply)'; out.klass = '#fbbf24'; }
-    else if (cmd === 0x75) { out.kind = 'sec'; out.text = 'SEC KEYSET'; out.klass = '#fbbf24'; }
-    else if (cmd === 0x79) { out.kind = 'sec'; out.text = 'SEC reply'; out.klass = '#fbbf24'; }
+      out.kind = 'nak'; out.text = 'NAK - ' + (OSDP_NAK[d[0]] || ('0x' + (d[0] || 0).toString(16))); out.klass = 'rgb(var(--hv-error))';
+    } else if (cmd === 0x76) { out.kind = 'sec'; out.text = f.isReply ? 'SEC CCRYPT (reply)' : 'SEC CHLNG'; out.klass = 'rgb(var(--hv-warning))'; }
+    else if (cmd === 0x77) { out.kind = 'sec'; out.text = 'SEC SCRYPT'; out.klass = 'rgb(var(--hv-warning))'; }
+    else if (cmd === 0x78) { out.kind = 'sec'; out.text = 'SEC RMAC (reply)'; out.klass = 'rgb(var(--hv-warning))'; }
+    else if (cmd === 0x75) { out.kind = 'sec'; out.text = 'SEC KEYSET'; out.klass = 'rgb(var(--hv-warning))'; }
+    else if (cmd === 0x79) { out.kind = 'sec'; out.text = 'SEC reply'; out.klass = 'rgb(var(--hv-warning))'; }
     else if (cmd === 0x60) out.text = 'poll';
     else if (cmd === 0x40) out.text = 'ACK';
     else if (cmd === 0x61) out.text = 'request ID';
@@ -109,11 +109,11 @@ function decodeFrame(f: WireFrame): Decoded {
 }
 
 function idleVerdict(sig: string, text: string): [string, string] {
-  if (/^01 01 01 01 01$/.test(sig) || /steady red/.test(text)) return ['OK — steady red', '#22c55e'];
-  if (/0a 0a 01 03/i.test(sig) || /red\/amber/.test(text)) return ['DEFECT — red/amber blink at idle (alarm-masking)', '#ef4444'];
-  if (/steady/.test(text)) return ['non-spec — steady but not red', '#ffb13d'];
-  if (text === '(none seen)') return ['(no idle LED captured yet)', '#475569'];
-  return ['non-spec — ' + text, '#ffb13d'];
+  if (/^01 01 01 01 01$/.test(sig) || /steady red/.test(text)) return ['OK — steady red', 'rgb(var(--hv-success))'];
+  if (/0a 0a 01 03/i.test(sig) || /red\/amber/.test(text)) return ['DEFECT — red/amber blink at idle (alarm-masking)', 'rgb(var(--hv-error))'];
+  if (/steady/.test(text)) return ['non-spec — steady but not red', 'rgb(var(--hv-brand-text))'];
+  if (text === '(none seen)') return ['(no idle LED captured yet)', 'rgb(var(--hv-line-strong))'];
+  return ['non-spec — ' + text, 'rgb(var(--hv-brand-text))'];
 }
 
 const KEYNOTES_SPEC = [
@@ -192,9 +192,9 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
   }, [bufTick]);
   const bucketKeys = useMemo(() => [...buckets.keys()].sort(), [buckets]);
 
-  const colorOf = (name: string) => COLORS[name] || '#94a3b8';
+  const colorOf = (name: string) => COLORS[name] || 'rgb(var(--hv-text-2))';
   const dirIcon = (dd?: string) => dd === 'tx' ? '↗' : dd === 'rx' ? '↙' : '·';
-  const dirColor = (dd?: string) => dd === 'tx' ? '#cbd5e1' : dd === 'rx' ? '#a78bfa' : '#475569';
+  const dirColor = (dd?: string) => dd === 'tx' ? 'rgb(var(--hv-text))' : dd === 'rx' ? 'rgb(var(--hv-purple-text))' : 'rgb(var(--hv-line-strong))';
   const stampFile = () => new Date().toISOString().split('.')[0].replace(/[:T]/g, '-');
 
   // build the keynotes header (spec + per-reader verdict + window + counts)
@@ -306,15 +306,15 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
   const renderComparison = () => {
     const a = buckets.get(cmpA), b = buckets.get(cmpB);
     if (!a || !b || cmpA === cmpB) {
-      return <div style={{ color: '#475569', padding: 12 }}>Pick two different reader sections above.</div>;
+      return <div style={{ color: 'rgb(var(--hv-text-disabled))', padding: 12 }}>Pick two different reader sections above.</div>;
     }
     const pa = profileOf(a.frames), pb = profileOf(b.frames);
     const [va, ca] = idleVerdict(pa.idleSig, pa.idle);
     const [vb, cb] = idleVerdict(pb.idleSig, pb.idle);
     const diff = (x: string, y: string) =>
-      x === y ? <span style={{ color: '#22c55e' }}>same</span> : <span style={{ color: '#ef4444', fontWeight: 'bold' }}>DIFFERS</span>;
-    const td: React.CSSProperties = { border: '1px solid #1d2a4a', padding: '6px 8px', verticalAlign: 'top' };
-    const th: React.CSSProperties = { ...td, background: 'rgba(0,0,0,0.4)', color: '#94a3b8' };
+      x === y ? <span style={{ color: 'rgb(var(--hv-success-fg))' }}>same</span> : <span style={{ color: 'rgb(var(--hv-error-fg))', fontWeight: 'bold' }}>DIFFERS</span>;
+    const td: React.CSSProperties = { border: '1px solid rgb(var(--hv-info-tint))', padding: '6px 8px', verticalAlign: 'top' };
+    const th: React.CSSProperties = { ...td, background: 'rgb(var(--hv-surface) / 0.4)', color: 'rgb(var(--hv-text-2))' };
     const nameA = a.port + ' addr 0x' + (a.addr ?? 0).toString(16).padStart(2, '0');
     const nameB = b.port + ' addr 0x' + (b.addr ?? 0).toString(16).padStart(2, '0');
     return (
@@ -332,16 +332,16 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
   };
 
   return (
-    <div style={{ border: '1px solid #3a3a5a', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.4)', marginTop: 16, overflow: 'hidden' }}>
+    <div style={{ border: '1px solid rgb(var(--hv-line-strong))', borderRadius: 8, backgroundColor: 'rgb(var(--hv-surface) / 0.4)', marginTop: 16, overflow: 'hidden' }}>
       <div
         onClick={() => setCollapsed(!collapsed)}
         style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-          backgroundColor: 'rgba(0,0,0,0.4)', borderBottom: collapsed ? 'none' : '1px solid #3a3a5a', userSelect: 'none' }}
+          backgroundColor: 'rgb(var(--hv-surface) / 0.4)', borderBottom: collapsed ? 'none' : '1px solid rgb(var(--hv-line-strong))', userSelect: 'none' }}
       >
-        <span style={{ color: '#cbd5e1', fontFamily: 'monospace' }}>{collapsed ? '▶' : '▼'}</span>
-        <span style={{ color: '#cbd5e1', fontWeight: 'bold' }}>Trace</span>
-        <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, backgroundColor: '#1a5a1a', color: '#4ade80' }}>● Passive · always live</span>
-        <span style={{ color: '#888', fontSize: 12, marginLeft: 'auto' }}>
+        <span style={{ color: 'rgb(var(--hv-text))', fontFamily: 'monospace' }}>{collapsed ? '▶' : '▼'}</span>
+        <span style={{ color: 'rgb(var(--hv-text))', fontWeight: 'bold' }}>Trace</span>
+        <span style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, backgroundColor: 'rgb(var(--hv-success-tint-strong))', color: 'rgb(var(--hv-success-text))' }}>● Passive · always live</span>
+        <span style={{ color: 'rgb(var(--hv-text-3))', fontSize: 12, marginLeft: 'auto' }}>
           {filtered.length} live · {bufRef.current.length} retained
         </span>
       </div>
@@ -349,17 +349,17 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
       {!collapsed && (
         <div style={{ padding: 12 }}>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', border: '1px solid #3a3a5a', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', border: '1px solid rgb(var(--hv-line-strong))', borderRadius: 4, overflow: 'hidden' }}>
               <button onClick={(e) => { e.stopPropagation(); setView('flat'); }}
-                style={{ ...btn(view === 'flat' ? '#1d4ed8' : 'rgba(0,0,0,0.35)'), borderRadius: 0 }}>Flat list</button>
+                style={{ ...btn(view === 'flat' ? 'rgb(var(--hv-info-strong))' : 'rgba(0,0,0,0.35)'), borderRadius: 0 }}>Flat list</button>
               <button onClick={(e) => { e.stopPropagation(); setView('sections'); }}
-                style={{ ...btn(view === 'sections' ? '#1d4ed8' : 'rgba(0,0,0,0.35)'), borderRadius: 0 }}>Per-reader + compare</button>
+                style={{ ...btn(view === 'sections' ? 'rgb(var(--hv-info-strong))' : 'rgba(0,0,0,0.35)'), borderRadius: 0 }}>Per-reader + compare</button>
             </div>
             <button onClick={(e) => { e.stopPropagation(); copyTrace(); }} style={btn('rgba(0,0,0,0.35)')} title="Copy retained buffer + keynotes"> Copy</button>
             <button onClick={(e) => { e.stopPropagation(); downloadCsv(); }} style={btn('rgba(0,0,0,0.35)')} title="Export retained buffer (keynotes header) as CSV">CSV</button>
             <button onClick={(e) => { e.stopPropagation(); downloadJson(); }} style={btn('rgba(0,0,0,0.35)')} title="Export retained buffer (keynotes) as JSON">JSON</button>
             <button onClick={(e) => { e.stopPropagation(); onClear(); }} style={btn('rgba(0,0,0,0.4)')} title="Clear live frame list">🗑️ live</button>
-            <button onClick={(e) => { e.stopPropagation(); resetBuffer(); }} style={btn('rgba(80,0,0,0.5)')} title="Reset retained evidence buffer">⟲ buffer</button>
+            <button onClick={(e) => { e.stopPropagation(); resetBuffer(); }} style={btn('rgb(var(--hv-error-tint) / 0.5)')} title="Reset retained evidence buffer">⟲ buffer</button>
             <label style={lbl}>
               <input type="checkbox" checked={hideAcks} onChange={e => setHideAcks(e.target.checked)} />
               Hide ACK/POLL
@@ -370,27 +370,27 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
                 Only addr 0x{selectedReaderAddress.toString(16).padStart(2, '0')}
               </label>
             )}
-            <span style={{ marginLeft: 'auto', fontSize: 10, color: '#475569' }}>
-              <span style={{ color: '#cbd5e1' }}>↗ TX</span> = we send to ACS &nbsp;
-              <span style={{ color: '#a78bfa' }}>↙ RX</span> = ACS sends to us
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: 'rgb(var(--hv-text-disabled))' }}>
+              <span style={{ color: 'rgb(var(--hv-text))' }}>↗ TX</span> = we send to ACS &nbsp;
+              <span style={{ color: 'rgb(var(--hv-purple-text))' }}>↙ RX</span> = ACS sends to us
             </span>
           </div>
 
           {view === 'flat' && (
-            <div style={{ maxHeight: 240, overflowY: 'auto', backgroundColor: 'rgba(0,0,0,0.45)',
-              border: '1px solid #1d2a4a', borderRadius: 4, padding: 8, fontFamily: '"Courier New", monospace', fontSize: 11 }}>
+            <div style={{ maxHeight: 240, overflowY: 'auto', backgroundColor: 'rgb(var(--hv-surface) / 0.45)',
+              border: '1px solid rgb(var(--hv-info-tint))', borderRadius: 4, padding: 8, fontFamily: '"Courier New", monospace', fontSize: 11 }}>
               {filtered.length === 0 ? (
-                <div style={{ color: '#475569', textAlign: 'center', padding: 20 }}>Waiting for OSDP traffic…</div>
+                <div style={{ color: 'rgb(var(--hv-text-disabled))', textAlign: 'center', padding: 20 }}>Waiting for OSDP traffic…</div>
               ) : (
                 filtered.slice(0, 100).map((f, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, padding: '2px 0', borderBottom: '1px solid rgba(0,0,0,0.4)', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: '#64748b', minWidth: 70 }}>{new Date(f.ts).toLocaleTimeString()}</span>
+                    <span style={{ color: 'rgb(var(--hv-text-3))', minWidth: 70 }}>{new Date(f.ts).toLocaleTimeString()}</span>
                     <span style={{ color: dirColor(f.direction), minWidth: 18, textAlign: 'center', fontWeight: 'bold' }}>{dirIcon(f.direction)}</span>
                     <span style={{ color: colorOf(f.cmdName), minWidth: 64, fontWeight: 'bold' }}>{f.cmdName}</span>
-                    <span style={{ color: '#94a3b8', minWidth: 50 }}>
+                    <span style={{ color: 'rgb(var(--hv-text-2))', minWidth: 50 }}>
                       {f.address !== null && f.address !== undefined ? '0x' + f.address.toString(16).padStart(2, '0') : '----'}
                     </span>
-                    <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.dataHex || '—'}</span>
+                    <span style={{ color: 'rgb(var(--hv-text))', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.dataHex || '—'}</span>
                   </div>
                 ))
               )}
@@ -400,7 +400,7 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
           {view === 'sections' && (
             <div>
               {bucketKeys.length === 0 ? (
-                <div style={{ color: '#475569', textAlign: 'center', padding: 20 }}>
+                <div style={{ color: 'rgb(var(--hv-text-disabled))', textAlign: 'center', padding: 20 }}>
                   No evidentiary frames retained yet — exercise a reader (LED/BUZ/card). POLL/ACK/vendor are not retained.
                 </div>
               ) : (
@@ -409,17 +409,17 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
                     const b = buckets.get(k)!;
                     const recent = [...b.frames].slice(-80).reverse();
                     return (
-                      <div key={k} style={{ flex: '1 1 420px', minWidth: 340, border: '1px solid #1d2a4a', borderRadius: 6, overflow: 'hidden' }}>
-                        <div style={{ padding: '8px 12px', background: 'rgba(0,0,0,0.4)', borderBottom: '1px solid #1d2a4a', fontSize: 12, color: '#cbd5e1' }}>
+                      <div key={k} style={{ flex: '1 1 420px', minWidth: 340, border: '1px solid rgb(var(--hv-info-tint))', borderRadius: 6, overflow: 'hidden' }}>
+                        <div style={{ padding: '8px 12px', background: 'rgb(var(--hv-surface) / 0.4)', borderBottom: '1px solid rgb(var(--hv-info-tint))', fontSize: 12, color: 'rgb(var(--hv-text))' }}>
                           <b>{b.port}</b> · addr 0x{(b.addr ?? 0).toString(16).padStart(2, '0')}
-                          <span style={{ color: '#475569', float: 'right' }}>{b.frames.length} frames</span>
+                          <span style={{ color: 'rgb(var(--hv-text-disabled))', float: 'right' }}>{b.frames.length} frames</span>
                         </div>
                         <div style={{ maxHeight: 220, overflowY: 'auto', padding: 6, fontFamily: '"Courier New", monospace', fontSize: 11 }}>
                           {recent.map((f, i) => {
                             const dec = decodeFrame(f);
                             return (
                               <div key={i} style={{ padding: '2px 4px', borderBottom: '1px solid rgba(0,0,0,0.35)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                <span style={{ color: '#64748b' }}>{new Date(f.ts).toLocaleTimeString()}</span>{' '}
+                                <span style={{ color: 'rgb(var(--hv-text-3))' }}>{new Date(f.ts).toLocaleTimeString()}</span>{' '}
                                 <span style={{ color: dirColor(f.direction), fontWeight: 'bold' }}>{f.direction === 'tx' ? 'TX' : 'RX'}</span>{' '}
                                 <span style={{ color: dec.klass }}>{dec.text}</span>
                               </div>
@@ -432,8 +432,8 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
                 </div>
               )}
 
-              <div style={{ marginTop: 14, border: '1px solid #1d2a4a', borderRadius: 6, padding: 12 }}>
-                <div style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 'bold', marginBottom: 8 }}>
+              <div style={{ marginTop: 14, border: '1px solid rgb(var(--hv-info-tint))', borderRadius: 6, padding: 12 }}>
+                <div style={{ fontSize: 12, color: 'rgb(var(--hv-text))', fontWeight: 'bold', marginBottom: 8 }}>
                   Comparison — idle-state defect &amp; command differences
                 </div>
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -451,7 +451,7 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
                   </label>
                 </div>
                 {renderComparison()}
-                <div style={{ fontSize: 10, color: '#475569', marginTop: 10, lineHeight: 1.5 }}>
+                <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-disabled))', marginTop: 10, lineHeight: 1.5 }}>
                   Spec: idle = steady red; grant = green; held/forced = red/amber (alarm-only).
                   Flagged defect: red/amber blink at idle (LED bytes <code>… 01 0A 0A 01 03</code>) instead of
                   steady red (<code>… 01 01 01 01 01</code>) — makes idle indistinguishable from a forced/held alarm.
@@ -461,7 +461,7 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
             </div>
           )}
 
-          <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>
+          <div style={{ fontSize: 10, color: 'rgb(var(--hv-text-disabled))', marginTop: 6 }}>
             Live tap on OSDPManager TX/RX. Retained buffer keeps LED/BUZ/CARD/NAK/secure-channel
             (clears on reload or ⟲ buffer); exports lead with a keynotes header.
           </div>
@@ -473,12 +473,12 @@ export default function OsdpTraceTool({ frames, onClear, selectedReaderAddress }
 
 const btn = (bg: string): React.CSSProperties => ({
   padding: '5px 12px', border: 'none', borderRadius: 4,
-  backgroundColor: bg, color: '#fff', cursor: 'pointer', fontSize: 12,
+  backgroundColor: bg, color: 'rgb(var(--hv-text))', cursor: 'pointer', fontSize: 12,
 });
 const lbl: React.CSSProperties = {
-  color: '#aaa', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+  color: 'rgb(var(--hv-text-2))', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer',
 };
 const sel: React.CSSProperties = {
-  background: 'rgba(0,0,0,0.4)', color: '#cbd5e1', border: '1px solid #3a3a5a',
+  background: 'rgb(var(--hv-surface) / 0.4)', color: 'rgb(var(--hv-text))', border: '1px solid rgb(var(--hv-line-strong))',
   borderRadius: 4, padding: '4px 8px', fontSize: 12,
 };

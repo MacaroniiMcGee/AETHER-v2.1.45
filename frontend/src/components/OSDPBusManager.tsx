@@ -554,7 +554,7 @@ function BusCard(props: {
       {/* Header */}
       <button
         onClick={props.onToggleCollapse}
-        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 text-left"
+        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-hv-contrast/5 text-left"
       >
         {collapsed ? <ChevronRight size={16} className="text-gray-500"/> : <ChevronDown size={16} className="text-gray-500"/>}
         <Icon size={18} className={iface.online ? 'text-emerald-400' : 'text-gray-500'} />
@@ -578,7 +578,7 @@ function BusCard(props: {
       {!collapsed && (
         <div className="border-t border-gray-800">
           {/* Baud control strip */}
-          <div className="px-4 py-2.5 bg-black/20 border-b border-gray-800 flex items-center gap-3 text-xs">
+          <div className="px-4 py-2.5 bg-hv-surface/20 border-b border-gray-800 flex items-center gap-3 text-xs">
             <span className="text-gray-400">Baud</span>
             <select
               value={draftBaud}
@@ -749,7 +749,7 @@ function EditReaderForm({ reader, otherAddresses, onCancel, onSave }: {
         </div>
       </div>
 
-      <div className="rounded border border-gray-800 bg-black/20 p-3">
+      <div className="rounded border border-gray-800 bg-hv-surface/20 p-3">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-sm text-gray-200">
             <Lock size={13}/> Secure channel key (SCBK)

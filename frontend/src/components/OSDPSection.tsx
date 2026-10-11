@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import CredentialComposer, { CardValues } from './readers/CredentialComposer';
+import { useFormatLibrary, Fmt } from './readers/formatLib';
 import { io, Socket } from 'socket.io-client';
 import { useCardFormats, isValidFacilityCode, isValidCardNumber } from '../hooks/useCardFormats';
 import InteractiveReader from './InteractiveReader';
@@ -8,6 +10,7 @@ import OSDPFirmwareWizard from './OSDPFirmwareWizard';
 import OSDPBusManager from './OSDPBusManager';
 import CollapsibleSection from './CollapsibleSection';
 import OSDPSnifferTool from './OSDPSnifferTool';
+import OsdpEnroll from './readers/OsdpEnroll';   // AETHER-GNB-2DEPTH
 
 type OSDPReader = {
   id: string;
@@ -86,12 +89,12 @@ const FORMAT_CATEGORIES = [
 
 // v5.0 Parity type display info
 const PARITY_INFO: Record<string, { label: string; color: string; warning?: string }> = {
-  'std': { label: 'Standard', color: '#6FBF7E' },
-  'none': { label: 'No Parity', color: '#786D60' },
-  'interleaved': { label: 'Interleaved', color: '#E6C766', warning: 'Complex parity - verify with real cards' },
-  'multi-row': { label: 'Multi-Row', color: '#C6604F', warning: 'Multi-row parity - complex encoding' },
-  'xor': { label: 'XOR Checksum', color: '#5FB7B0', warning: 'XOR byte checksum - not traditional parity' },
-  'scrambled': { label: 'Scrambled', color: '#D98A3D', warning: 'Scrambled bit positions - lookup tables required' }
+  'std': { label: 'Standard', color: 'rgb(var(--hv-success-fg))' },
+  'none': { label: 'No Parity', color: 'rgb(var(--hv-text-3))' },
+  'interleaved': { label: 'Interleaved', color: 'rgb(var(--hv-warning-fg))', warning: 'Complex parity - verify with real cards' },
+  'multi-row': { label: 'Multi-Row', color: 'rgb(var(--hv-error-strong))', warning: 'Multi-row parity - complex encoding' },
+  'xor': { label: 'XOR Checksum', color: 'rgb(var(--hv-info-fg))', warning: 'XOR byte checksum - not traditional parity' },
+  'scrambled': { label: 'Scrambled', color: 'rgb(var(--hv-brand-fg))', warning: 'Scrambled bit positions - lookup tables required' }
 };
 
 const styles = {
@@ -101,49 +104,49 @@ const styles = {
     margin: '0 auto',
     backgroundColor: 'transparent',
     minHeight: '100vh',
-    color: '#EDE6DB'
+    color: 'rgb(var(--hv-text))'
   } as React.CSSProperties,
   card: {
-    border: '1px solid rgba(74, 63, 54, 0.6)',
+    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
     borderRadius: '8px',
     padding: '20px',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    color: '#EDE6DB',
+    backgroundColor: 'rgb(var(--hv-surface) / 0.35)',
+    color: 'rgb(var(--hv-text))',
     marginBottom: '20px'
   } as React.CSSProperties,
   configPanel: {
-    border: '1px solid rgba(74, 63, 54, 0.6)',
+    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
     borderRadius: '8px',
     padding: '20px',
     marginBottom: '20px',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    color: '#EDE6DB'
+    backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+    color: 'rgb(var(--hv-text))'
   } as React.CSSProperties,
   input: {
     width: '100%',
     padding: '10px 12px',
-    border: '1px solid rgba(74, 63, 54, 0.6)',
+    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
     borderRadius: '6px',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    color: '#EDE6DB',
+    backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+    color: 'rgb(var(--hv-text))',
     fontSize: '14px'
   } as React.CSSProperties,
   select: {
     width: '100%',
     padding: '10px 12px',
-    border: '1px solid rgba(74, 63, 54, 0.6)',
+    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
     borderRadius: '6px',
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    color: '#EDE6DB',
+    backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+    color: 'rgb(var(--hv-text))',
     fontSize: '14px',
     cursor: 'pointer'
   } as React.CSSProperties,
   button: {
     padding: '10px 20px',
-    border: '1px solid rgba(74, 63, 54, 0.6)',
+    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
     borderRadius: '6px',
-    backgroundColor: 'rgba(42, 35, 28, 0.6)',
-    color: '#fff',
+    backgroundColor: 'rgb(var(--hv-popup-panel) / 0.6)',
+    color: 'rgb(var(--hv-text))',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: 500
@@ -152,7 +155,7 @@ const styles = {
     padding: '12px 24px',
     border: 'none',
     borderRadius: '6px',
-    backgroundColor: '#F0A73C',
+    backgroundColor: 'rgb(var(--hv-brand))',
     color: '#000',
     cursor: 'pointer',
     fontSize: '16px',
@@ -162,8 +165,8 @@ const styles = {
     padding: '10px 20px',
     border: 'none',
     borderRadius: '6px',
-    backgroundColor: '#C6604F',
-    color: '#fff',
+    backgroundColor: 'rgb(var(--hv-error-strong))',
+    color: 'rgb(var(--hv-text))',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: 500
@@ -172,8 +175,8 @@ const styles = {
     padding: '10px 20px',
     border: 'none',
     borderRadius: '6px',
-    backgroundColor: '#4F8B5C',
-    color: '#fff',
+    backgroundColor: 'rgb(var(--hv-success-strong))',
+    color: 'rgb(var(--hv-text))',
     cursor: 'pointer',
     fontSize: '14px',
     fontWeight: 500
@@ -182,7 +185,7 @@ const styles = {
     padding: '10px 20px',
     border: 'none',
     borderRadius: '6px',
-    backgroundColor: '#E6C766',
+    backgroundColor: 'rgb(var(--hv-warning))',
     color: '#000',
     cursor: 'pointer',
     fontSize: '14px',
@@ -191,12 +194,12 @@ const styles = {
   tabActive: {
     padding: '12px 24px',
     border: 'none',
-    borderBottom: '3px solid #F0A73C',
+    borderBottom: '3px solid rgb(var(--hv-brand))',
     backgroundColor: 'transparent',
     cursor: 'pointer',
     fontWeight: 'bold',
     fontSize: '14px',
-    color: '#ffffff'
+    color: 'rgb(var(--hv-text))'
   } as React.CSSProperties,
   tabInactive: {
     padding: '12px 24px',
@@ -205,7 +208,7 @@ const styles = {
     backgroundColor: 'transparent',
     cursor: 'pointer',
     fontSize: '14px',
-    color: '#A79C8C'
+    color: 'rgb(var(--hv-text-2))'
   } as React.CSSProperties,
   badge: {
     padding: '4px 10px',
@@ -216,15 +219,15 @@ const styles = {
   tableHeader: {
     padding: '12px',
     textAlign: 'left' as const,
-    borderBottom: '2px solid rgba(74, 63, 54, 0.6)',
-    color: '#ffffff',
+    borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)',
+    color: 'rgb(var(--hv-text))',
     fontSize: '12px',
     fontWeight: 'bold'
   },
   tableCell: {
     padding: '12px',
-    borderBottom: '1px solid rgba(74, 63, 54, 0.6)',
-    color: '#EDE6DB',
+    borderBottom: '1px solid rgb(var(--hv-line-strong) / 0.6)',
+    color: 'rgb(var(--hv-text))',
     fontSize: '13px'
   },
   warningBadge: {
@@ -238,11 +241,11 @@ const styles = {
   } as React.CSSProperties,
   // ===== New styles for the consolidated layout =====
   emulateSubpanel: {
-    border: '1px solid rgba(74, 63, 54, 0.6)',
+    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
     borderRadius: '8px',
     padding: '16px',
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    color: '#EDE6DB',
+    backgroundColor: 'rgb(var(--hv-surface) / 0.35)',
+    color: 'rgb(var(--hv-text))',
     display: 'flex',
     flexDirection: 'column' as const,
     gap: '12px',
@@ -250,13 +253,13 @@ const styles = {
   } as React.CSSProperties,
   subpanelHeader: {
     margin: 0,
-    color: '#ffffff',
+    color: 'rgb(var(--hv-text))',
     fontSize: '15px',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
     paddingBottom: '8px',
-    borderBottom: '1px solid rgba(74, 63, 54, 0.6)',
+    borderBottom: '1px solid rgb(var(--hv-line-strong) / 0.6)',
   } as React.CSSProperties,
 };
 
@@ -286,7 +289,13 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
   // ============================================================
   // CONSOLIDATED 6→3 TABS (was: card/keypad/led/transfer/config/history)
   // ============================================================
-  const [mode, setMode] = useState<'emulate' | 'maintain' | 'history' | 'sniff'>('emulate');
+  // AETHER-GNB-2DEPTH: Enrollment / Firmware / Bus & readers moved here from Readers → Tools
+  type OsdpMode = 'emulate' | 'maintain' | 'history' | 'sniff' | 'enroll' | 'firmware' | 'bus';
+  const [mode, setModeRaw] = useState<OsdpMode>(() => {
+    try { const m = sessionStorage.getItem('aether.osdp.mode'); if (m === 'history' || m === 'enroll' || m === 'firmware' || m === 'bus') return m; } catch { /* */ }
+    return 'emulate';
+  });
+  const setMode = (m: OsdpMode) => { setModeRaw(m); try { sessionStorage.setItem('aether.osdp.mode', m); } catch { /* */ } };
 
   // Socket.IO connection — used by InteractiveReader to mirror osdp_LED / osdp_BUZ
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -379,6 +388,7 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
   };
 
   // SHARED reader picker — used by Card composer, Keypad sender, AND visual reader mirror
+  const formatLib = useFormatLibrary(apiUrl);
   const [selectedReaderId, setSelectedReaderId] = useState<string>('');
   const [facility, setFacility] = useState<number>(123);
   const [cardNumber, setCardNumber] = useState<number>(45678);
@@ -736,6 +746,17 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
     setSending(null);
   };
 
+  // Shared composer sender (credential values arrive as text so long card numbers survive)
+  const sendComposed = async (v: CardValues, f: Fmt) => {
+    const r = await fetch(`${apiUrl}/api/osdp/card-read`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ readerId: selectedReaderId, facility: v.facility || 0, card: v.card || '0', format: f.id, issueLevel: v.issue || 0 }),
+    });
+    const data = await r.json();
+    if (!data.success) { addHistory(`✗ ${data.error}`); throw new Error(data.error || 'Send failed'); }
+    addHistory(`✓ Card sent: ${f.bits}-bit ${f.id}${f.facilityBits ? ` FC=${v.facility}` : ''}${f.issueLevel ? ` IL=${v.issue}` : ''} Card=${v.card}`);
+  };
+
   const toggleReaderEnabled = async (id: string, current: boolean) => {
     setLoading(true);
     try {
@@ -1045,12 +1066,12 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
-          <h2 style={{ margin: 0, color: '#ffffff', fontSize: '28px', fontWeight: 800 }}> OSDP Reader Emulator v1.1.0</h2>
-          <p style={{ margin: '5px 0 0 0', color: '#786D60' }}>
+          <h2 style={{ margin: 0, color: 'rgb(var(--hv-text))', fontSize: '28px', fontWeight: 800 }}> OSDP Reader Emulator v1.1.0</h2>
+          <p style={{ margin: '5px 0 0 0', color: 'rgb(var(--hv-text-3))' }}>
             {status?.initialized ? `${readers.filter(r => r.enabled).length}/${readers.length} readers active` : '⚠ Not initialized'}
             {stats && ` • ${stats.messagesSent || 0} messages`}
             {!formatsLoading && formats && ` • ${formats.length} formats loaded`}
-            {socket?.connected && <span style={{ color: '#6FBF7E' }}> • ● Live</span>}
+            {socket?.connected && <span style={{ color: 'rgb(var(--hv-success-fg))' }}> • ● Live</span>}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -1064,12 +1085,12 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
       {/* Connection Warning */}
       {!connected && (
         <div style={{
-          backgroundColor: '#2E2410',
-          border: '1px solid #E6C766',
+          backgroundColor: 'rgb(var(--hv-brand-tint))',
+          border: '1px solid rgb(var(--hv-warning))',
           borderRadius: '8px',
           padding: '15px',
           marginBottom: '20px',
-          color: '#F0C674'
+          color: 'rgb(var(--hv-brand-text))'
         }}>
           ⚠️ Not connected to OSDP backend. Please check connection to {ipAddress}:3001
         </div>
@@ -1081,13 +1102,15 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
         gap: '5px',
         marginBottom: '20px',
         flexWrap: 'wrap',
-        borderBottom: '2px solid rgba(74, 63, 54, 0.6)',
+        borderBottom: '2px solid rgb(var(--hv-line-strong) / 0.6)',
         paddingBottom: '0'
       }}>
         {[
           { id: 'emulate',  label: 'Emulate' },
-          { id: 'maintain', label: 'Maintain' },
-          { id: 'history',  label: 'History' }
+          { id: 'history',  label: 'History' },
+          { id: 'enroll',   label: 'Enrollment' },
+          { id: 'firmware', label: 'Firmware' },
+          { id: 'bus',      label: 'Bus & readers' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -1108,7 +1131,7 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
           {/* Shared reader picker bar */}
           <div style={{ ...styles.configPanel, marginBottom: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-              <label style={{ color: '#ffffff', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+              <label style={{ color: 'rgb(var(--hv-text))', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                  Target reader:
               </label>
               <select
@@ -1135,21 +1158,21 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
                 <>
                   <span style={{
                     ...styles.badge,
-                    backgroundColor: selectedReader.enabled ? '#1E3A24' : '#3A1E1A',
-                    color: selectedReader.enabled ? '#6FBF7E' : '#E0705F'
+                    backgroundColor: selectedReader.enabled ? 'rgb(var(--hv-success-tint))' : 'rgb(var(--hv-error-tint))',
+                    color: selectedReader.enabled ? 'rgb(var(--hv-success))' : 'rgb(var(--hv-error))'
                   }}>
                     {selectedReader.enabled ? '● ACTIVE' : '○ OFF'}
                   </span>
                   {selectedReader.secureChannel && (
                     <span style={{
                       ...styles.badge,
-                      backgroundColor: selectedReader.secureChannelEstablished ? '#1E3A24' : '#3A3418',
-                      color: selectedReader.secureChannelEstablished ? '#6FBF7E' : '#E6C766'
+                      backgroundColor: selectedReader.secureChannelEstablished ? 'rgb(var(--hv-success-tint))' : 'rgb(var(--hv-line))',
+                      color: selectedReader.secureChannelEstablished ? 'rgb(var(--hv-success))' : 'rgb(var(--hv-warning))'
                     }}>
                       🔒 {selectedReader.secureChannelEstablished ? 'SCS' : 'SC'}
                     </span>
                   )}
-                  <span style={{ fontSize: '12px', color: '#786D60', fontFamily: 'monospace' }}>
+                  <span style={{ fontSize: '12px', color: 'rgb(var(--hv-text-3))', fontFamily: 'monospace' }}>
                     {selectedReader.serialPort || '/dev/ttyACM0'}
                   </span>
                 </>
@@ -1157,13 +1180,13 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
               <span style={{
                 ...styles.badge,
                 marginLeft: 'auto',
-                backgroundColor: socket?.connected ? '#1E3A24' : '#2E2410',
-                color: socket?.connected ? '#6FBF7E' : '#E6C766'
+                backgroundColor: socket?.connected ? 'rgb(var(--hv-success-tint))' : 'rgb(var(--hv-brand-tint))',
+                color: socket?.connected ? 'rgb(var(--hv-success))' : 'rgb(var(--hv-warning))'
               }}>
                 {socket?.connected ? '● Live socket' : '○ Socket offline'}
               </span>
             </div>
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#786D60' }}>
+            <div style={{ marginTop: '8px', fontSize: '12px', color: 'rgb(var(--hv-text-3))' }}>
               All three panels below target this reader. Card composer & keypad <em>send</em> data to the ACS;
               visual mirror <em>reflects</em> commands the ACS sends back.
             </div>
@@ -1178,266 +1201,32 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
           }}>
 
             {/* ===== Column 1: Card Composer ===== */}
-            <div style={styles.emulateSubpanel}>
+            <div style={{ ...styles.emulateSubpanel, minWidth: 0 }}>
               <h3 style={styles.subpanelHeader}>Card Composer</h3>
-
-              {/* Format warnings & parity type */}
-              {selectedFormat && (parityType !== 'std' || formatWarning) && (
-                <div style={{
-                  backgroundColor: '#241E10',
-                  border: `1px solid ${parityInfo.color}`,
-                  borderRadius: '4px',
-                  padding: '8px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                    <span style={{
-                      ...styles.warningBadge,
-                      backgroundColor: parityInfo.color + '30',
-                      color: parityInfo.color,
-                      border: `1px solid ${parityInfo.color}`
-                    }}>
-                      ⚡ {parityInfo.label}
-                    </span>
-                    {isCardOnly && (
-                      <span style={{
-                        ...styles.warningBadge,
-                        backgroundColor: '#5FB7B030',
-                        color: '#5FB7B0',
-                        border: '1px solid #5FB7B0'
-                      }}>
-                        📇 Card-Only
-                      </span>
-                    )}
-                    {hasIssueLevel && (
-                      <span style={{
-                        ...styles.warningBadge,
-                        backgroundColor: '#5FB7B030',
-                        color: '#5FB7B0',
-                        border: '1px solid #5FB7B0'
-                      }}>
-                        🔢 Issue Level
-                      </span>
-                    )}
-                  </div>
-                  {(parityInfo.warning || formatWarning) && (
-                    <div style={{ marginTop: '6px', fontSize: '11px', color: '#E6C766' }}>
-                      ⚠️ {formatWarning || parityInfo.warning}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Format Selection */}
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold', color: '#ffffff', fontSize: '13px' }}>
-                  Wiegand Format {formatsLoading && <span style={{ fontSize: '11px', color: '#786D60' }}>(Loading...)</span>}
-                </label>
-
-                <div style={{ marginBottom: '8px' }}>
-                  <label style={{ fontSize: '11px', color: '#786D60', display: 'block', marginBottom: '3px' }}>Category</label>
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                    disabled={formatsLoading}
-                    style={{ ...styles.select, fontSize: '12px' }}
-                  >
-                    {FORMAT_CATEGORIES.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '8px' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', color: '#786D60', display: 'block', marginBottom: '3px' }}>Bits</label>
-                    <select
-                      value={selectedBitCount}
-                      onChange={(e) => handleBitCountChange(parseInt(e.target.value))}
-                      disabled={formatsLoading}
-                      style={{ ...styles.select, fontWeight: 'bold', fontSize: '13px', textAlign: 'center' }}
-                    >
-                      {availableBitCounts.map((bitCount: number) => (
-                        <option key={bitCount} value={bitCount}>{bitCount}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '11px', color: '#786D60', display: 'block', marginBottom: '3px' }}>
-                      Format ({formatsForSelectedBits.length})
-                    </label>
-                    <select
-                      value={selectedFormatId}
-                      onChange={(e) => handleFormatChange(e.target.value)}
-                      disabled={formatsLoading || formatsForSelectedBits.length === 0}
-                      style={{ ...styles.select, fontSize: '12px' }}
-                    >
-                      {formatsForSelectedBits.length === 0 ? (
-                        <option>No formats for {selectedBitCount}-bit</option>
-                      ) : (
-                        formatsForSelectedBits.map((f: any) => (
-                          <option key={f.id} value={f.id}>
-                            {f.name || f.id}
-                            {f.parity && f.parity !== 'std' ? ` [${PARITY_INFO[f.parity]?.label || f.parity}]` : ''}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                </div>
-
-                {selectedFormat && (
-                  <div style={{
-                    marginTop: '8px',
-                    padding: '8px',
-                    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    borderRadius: '4px',
-                    fontSize: '11px'
-                  }}>
-                    <div style={{ color: '#A79C8C', marginBottom: '4px' }}>{selectedFormat.description || selectedFormat.name}</div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ffffff', flexWrap: 'wrap', gap: '6px' }}>
-                      {hasIssueLevel && <span style={{ color: '#5FB7B0' }}>IL: 0-{maxIssueLevel}</span>}
-                      {hasFacilityCode ? (
-                        <span>{facilityLabel}: 0-{selectedFormat.maxFacility.toLocaleString()}</span>
-                      ) : (
-                        <span style={{ color: '#786D60' }}>No {facilityLabel}</span>
-                      )}
-                      <span>Card: 0-{selectedFormat.maxCard.toLocaleString()}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Credential fields */}
-              <div>
-                <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold', color: '#ffffff', fontSize: '13px' }}>
-                  Credential
-                </label>
-
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: hasIssueLevel ? '1fr 1fr 1fr' : (hasFacilityCode ? '1fr 1fr' : '1fr'),
-                  gap: '8px'
-                }}>
-                  {hasIssueLevel && (
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#5FB7B0', display: 'block', marginBottom: '3px' }}>
-                        IL <span style={{ color: '#ffffff' }}>(0-{maxIssueLevel})</span>
-                      </label>
-                      <input
-                        type="number"
-                        value={Number.isFinite(issueLevel) ? issueLevel : 0}
-                        onChange={(e) => handleIssueLevelChange(e.target.value)}
-                        min={0}
-                        max={maxIssueLevel}
-                        style={{ ...styles.input, borderColor: '#5FB7B0', fontSize: '13px' }}
-                      />
-                    </div>
-                  )}
-
-                  {hasFacilityCode && (
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#A79C8C', display: 'block', marginBottom: '3px' }}>
-                        {facilityLabel}
-                      </label>
-                      <input
-                        type="number"
-                        value={Number.isFinite(facility) ? facility : 0}
-                        onChange={(e) => handleFacilityChange(e.target.value)}
-                        min={0}
-                        max={selectedFormat?.maxFacility ?? 255}
-                        disabled={isCardOnly}
-                        style={{
-                          ...styles.input,
-                          fontSize: '13px',
-                          borderColor: selectedFormat && !isValidFacilityCode(selectedFormat, facility) ? '#C6604F' : 'rgba(74, 63, 54, 0.6)',
-                          opacity: isCardOnly ? 0.5 : 1
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  <div>
-                    <label style={{ fontSize: '11px', color: '#A79C8C', display: 'block', marginBottom: '3px' }}>
-                      Card #
-                    </label>
-                    <input
-                      type="number"
-                      value={Number.isFinite(cardNumber) ? cardNumber : 0}
-                      onChange={(e) => handleCardChange(e.target.value)}
-                      min={0}
-                      max={selectedFormat?.maxCard ?? 65535}
-                      style={{
-                        ...styles.input,
-                        fontSize: '13px',
-                        borderColor: selectedFormat && !isValidCardNumber(selectedFormat, cardNumber) ? '#C6604F' : 'rgba(74, 63, 54, 0.6)'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Actions */}
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button onClick={generateRandomCard} style={{ ...styles.button, flex: 1, fontSize: '12px', padding: '8px' }}>🎲 Random</button>
-                <button onClick={() => loadPreset('test')} style={{ ...styles.button, flex: 1, fontSize: '12px', padding: '8px' }}> Test</button>
-                <button onClick={() => loadPreset('admin')} style={{ ...styles.button, flex: 1, fontSize: '12px', padding: '8px' }}> Admin</button>
-              </div>
-
-              {/* Send button */}
-              {/* credential-quick-pills */}
-              <CredentialQuickPills
-                current={{
-                  formatId: selectedFormatId,
-                  bits: selectedBitCount,
-                  facility,
-                  cardNumber,
-                  issueLevel,
-                }}
-                hasIssueLevel={hasIssueLevel}
-                onLoad={(cred) => {
-                  if (cred.formatId !== undefined) setSelectedFormatId(cred.formatId);
-                  if (cred.bits !== undefined) setSelectedBitCount(cred.bits);
-                  if (cred.facility !== undefined) setFacility(cred.facility);
-                  if (cred.cardNumber !== undefined) setCardNumber(cred.cardNumber);
-                  if (cred.issueLevel !== undefined) setIssueLevel(cred.issueLevel);
-                }}
-                onLog={addHistory}
-              />
-              <button
-                onClick={() => sendCard(selectedReaderId)}
-                disabled={!selectedReaderId || !!sending || !selectedReader?.enabled}
-                style={{
-                  ...styles.primaryButton,
-                  width: '100%',
-                  fontSize: '14px',
-                  marginTop: 'auto',
-                  opacity: (!selectedReaderId || !!sending || !selectedReader?.enabled) ? 0.5 : 1,
-                  cursor: (!selectedReaderId || !!sending || !selectedReader?.enabled) ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {sending ? '⏳ Sending...' : ` Send Card`}
-              </button>
+              {/* Shared composer (readers/CredentialComposer): same format picker, live
+                  bit preview and encoder as the Wiegand page */}
+              <CredentialComposer api={apiUrl} formats={formatLib.formats} storageKey="aether.composer.osdp" onSend={sendComposed}
+                sendLabel="Send card" compact reload={formatLib.reload}
+                disabledReason={!selectedReaderId ? 'Pick a reader' : !selectedReader?.enabled ? 'Reader disabled' : null} />
               {/* recent-activity-below-send */}
-              <div style={{ background: 'rgba(0, 0, 0, 0.4)', border: '1px solid rgba(74, 63, 54, 0.55)', borderRadius: 4, padding: '10px 12px', marginTop: '8px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ background: 'rgb(var(--hv-surface) / 0.4)', border: '1px solid rgb(var(--hv-line-strong) / 0.55)', borderRadius: 4, padding: '10px 12px', marginTop: '8px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#786D60' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6FBF7E', display: 'inline-block' }}></span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'rgb(var(--hv-text-3))' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'rgb(var(--hv-success))', display: 'inline-block' }}></span>
                     Recent activity
                   </div>
-                  <button onClick={() => setMode('history')} style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', fontSize: '10px' }}>
+                  <button onClick={() => setMode('history')} style={{ background: 'none', border: 'none', color: 'rgb(var(--hv-text))', cursor: 'pointer', fontSize: '10px' }}>
                     View full history →
                   </button>
                 </div>
                 <div style={{ fontFamily: 'monospace', fontSize: '11px', lineHeight: 1.6, flex: 1, minHeight: 0, maxHeight: 280, overflowY: 'auto' /* SCROLL_v3 */ }}>
                   {history.length === 0 ? (
-                    <div style={{ color: '#5E5449' }}>No activity yet.</div>
+                    <div style={{ color: 'rgb(var(--hv-text-3))' }}>No activity yet.</div>
                   ) : (
                     history.slice(0, 25).map((e, i) => (
                       <div key={i} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        <span style={{ color: '#5E5449' }}>{e.time}</span>{' '}
-                        <span style={{ color: e.message.startsWith('✓') ? '#6FBF7E' : e.message.startsWith('✗') ? '#E0705F' : '#EDE6DB' }}>
+                        <span style={{ color: 'rgb(var(--hv-text-3))' }}>{e.time}</span>{' '}
+                        <span style={{ color: e.message.startsWith('✓') ? 'rgb(var(--hv-success))' : e.message.startsWith('✗') ? 'rgb(var(--hv-error))' : 'rgb(var(--hv-text))' }}>
                           {e.message}
                         </span>
                       </div>
@@ -1453,7 +1242,7 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
 
               {/* Tiny keypad format selector — applies to PIN entry inside the bezel below */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label style={{ fontSize: '11px', color: '#786D60', whiteSpace: 'nowrap' }}>
+                <label style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', whiteSpace: 'nowrap' }}>
                   Keypad format:
                 </label>
                 <select
@@ -1491,18 +1280,18 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
                   />
                 </div>
               ) : (
-                <div style={{ padding: '30px', textAlign: 'center', color: '#5E5449', fontSize: '12px' }}>
+                <div style={{ padding: '30px', textAlign: 'center', color: 'rgb(var(--hv-text-3))', fontSize: '12px' }}>
                   Pick a reader above.
                 </div>
               )}
 
               {/* Manual override block (LED + Buzzer + Quick PINs) */}
               <div style={{
-                borderTop: '1px solid rgba(74, 63, 54, 0.6)',
+                borderTop: '1px solid rgb(var(--hv-line-strong) / 0.6)',
                 paddingTop: '12px',
                 marginTop: 'auto'
               }}>
-                <div style={{ fontSize: '11px', color: '#786D60', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Manual Override
                 </div>
 
@@ -1544,10 +1333,10 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
                   style={{
                     width: '100%',
                     padding: '8px',
-                    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                    border: '1px solid rgba(74, 63, 54, 0.6)',
+                    backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+                    border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
                     borderRadius: '6px',
-                    color: '#ffffff',
+                    color: 'rgb(var(--hv-text))',
                     cursor: 'pointer',
                     fontSize: '12px',
                     marginBottom: '10px'
@@ -1558,9 +1347,9 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
 
                                 {/* Quick PINs — editable; persisted to localStorage */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '11px', color: '#786D60' }}>Quick PINs</span>
+                  <span style={{ fontSize: '11px', color: 'rgb(var(--hv-text-3))' }}>Quick PINs</span>
                   <button onClick={() => setEditingQuickPins(!editingQuickPins)}
-                    style={{ background: 'none', border: 'none', color: '#ADA294', cursor: 'pointer', fontSize: 10 }}>
+                    style={{ background: 'none', border: 'none', color: 'rgb(var(--hv-text-2))', cursor: 'pointer', fontSize: 10 }}>
                     {editingQuickPins ? '✓ done' : '✏ edit'}
                   </button>
                 </div>
@@ -1576,10 +1365,10 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
                       placeholder={'PIN ' + (i+1)}
                       style={{
                         padding: '6px',
-                        backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                        border: '1px solid rgba(74, 63, 54, 0.6)',
+                        backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+                        border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
                         borderRadius: '4px',
-                        color: '#E3D8C8',
+                        color: 'rgb(var(--hv-text))',
                         fontSize: '12px',
                         fontFamily: 'monospace',
                         textAlign: 'center',
@@ -1594,10 +1383,10 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
                       disabled={!selectedReaderId || !pin}
                       style={{
                         padding: '6px',
-                        backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                        border: '1px solid rgba(74, 63, 54, 0.6)',
+                        backgroundColor: 'rgb(var(--hv-surface) / 0.25)',
+                        border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
                         borderRadius: '4px',
-                        color: pin ? '#E3D8C8' : '#4A3F36',
+                        color: pin ? 'rgb(var(--hv-text))' : 'rgb(var(--hv-line-strong))',
                         cursor: (selectedReaderId && pin) ? 'pointer' : 'not-allowed',
                         fontSize: '12px',
                         fontFamily: 'monospace',
@@ -1632,9 +1421,9 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
             storageKey="osdp-firmware-collapsed"
             title="Firmware Upload"
             subtitle="Push firmware to readers"
-            borderClass="border-[#D98A3D]/30"
-            titleColorClass="text-[#E6A24C]"
-            bgClass="bg-[#D98A3D]/5"
+            borderClass="border-hv-brand/30"
+            titleColorClass="text-hv-brand-fg"
+            bgClass="bg-hv-brand/5"
           >
             <OSDPFirmwareWizard readers={readers} />
           </CollapsibleSection>
@@ -1644,9 +1433,9 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
             storageKey="osdp-busmgr-collapsed"
             title="Bus & Reader Manager"
             subtitle="RS485 buses and reader configuration"
-            borderClass="border-[#4A3F36]/50"
-            titleColorClass="text-[#E3D8C8]"
-            bgClass="bg-[#241E19]/30"
+            borderClass="border-hv-line-strong/50"
+            titleColorClass="text-hv-text"
+            bgClass="bg-hv-widget/30"
           >
             <OSDPBusManager apiUrl={apiUrl} onLog={addHistory} />
           </CollapsibleSection>
@@ -1657,36 +1446,40 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
             storageKey="osdp-sniffer-collapsed"
             title="OSDP Sniffer"
             subtitle="Live frame capture with anomaly detection"
-            borderClass="border-[#5FB7B0]/40"
-            titleColorClass="text-[#8FD3CD]"
-            bgClass="bg-[#5FB7B0]/5"
+            borderClass="border-hv-info/40"
+            titleColorClass="text-hv-info-text"
+            bgClass="bg-hv-info/5"
           >
             <OSDPSnifferTool apiUrl={apiUrl} onLog={addHistory} />
           </CollapsibleSection>
         </div>
       )}
+      {/* AETHER-GNB-2DEPTH: OSDP maintenance tools (same components Readers → Tools used) */}
+      {mode === 'enroll' && <OsdpEnroll api={apiUrl} formats={formatLib.formats} reload={formatLib.reload} />}
+      {mode === 'firmware' && <OSDPFirmwareWizard readers={readers as any} />}
+      {mode === 'bus' && <OSDPBusManager apiUrl={apiUrl} onLog={(m: any) => onLog?.(typeof m === 'string' ? m : String(m))} />}
       {/* History Tab — unchanged */}
       {mode === 'history' && (
         <div style={styles.card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <h3 style={{ margin: 0, color: '#ffffff' }}> Activity History</h3>
+            <h3 style={{ margin: 0, color: 'rgb(var(--hv-text))' }}> Activity History</h3>
             <button onClick={() => setHistory([])} style={styles.dangerButton}>Clear All</button>
           </div>
 
           <div style={{
             maxHeight: '600px',
             overflowY: 'auto',
-            border: '1px solid rgba(74, 63, 54, 0.6)',
+            border: '1px solid rgb(var(--hv-line-strong) / 0.6)',
             borderRadius: '8px',
-            backgroundColor: 'rgba(0, 0, 0, 0.25)'
+            backgroundColor: 'rgb(var(--hv-surface) / 0.25)'
           }}>
             {history.length === 0 ? (
-              <div style={{ padding: '60px', textAlign: 'center', color: '#5E5449' }}>
+              <div style={{ padding: '60px', textAlign: 'center', color: 'rgb(var(--hv-text-3))' }}>
                 No activity recorded yet
               </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ position: 'sticky', top: 0, backgroundColor: 'rgba(0, 0, 0, 0.35)' }}>
+                <thead style={{ position: 'sticky', top: 0, backgroundColor: 'rgb(var(--hv-surface) / 0.35)' }}>
                   <tr>
                     <th style={{ ...styles.tableHeader, width: '100px' }}>Time</th>
                     <th style={styles.tableHeader}>Event</th>
@@ -1695,10 +1488,10 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
                 <tbody>
                   {history.map((e, i) => (
                     <tr key={i}>
-                      <td style={{ ...styles.tableCell, fontFamily: 'monospace', color: '#786D60' }}>{e.time}</td>
+                      <td style={{ ...styles.tableCell, fontFamily: 'monospace', color: 'rgb(var(--hv-text-3))' }}>{e.time}</td>
                       <td style={{
                         ...styles.tableCell,
-                        color: e.message.startsWith('✓') ? '#6FBF7E' : e.message.startsWith('✗') ? '#E0705F' : '#EDE6DB'
+                        color: e.message.startsWith('✓') ? 'rgb(var(--hv-success))' : e.message.startsWith('✗') ? 'rgb(var(--hv-error))' : 'rgb(var(--hv-text))'
                       }}>
                         {e.message}
                       </td>

@@ -52,7 +52,7 @@ export default function CollapsibleSection({
       <button
         type="button"
         onClick={() => setCollapsed(c => !c)}
-        className={`w-full border ${borderClass} ${collapsed ? 'rounded-lg' : 'rounded-t-lg border-b-0'} p-3 flex items-center gap-3 text-left transition-colors hover:bg-white/5 ${collapsed ? bgClass : ''}`}
+        className={`w-full border ${borderClass} ${collapsed ? 'rounded-lg' : 'rounded-t-lg border-b-0'} p-3 flex items-center gap-3 text-left transition-colors hover:bg-hv-contrast/5 ${collapsed ? bgClass : ''}`}
         aria-expanded={!collapsed}
         aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${title}`}
       >

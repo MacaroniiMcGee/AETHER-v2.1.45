@@ -1,0 +1,3388 @@
+{
+ "meta": {
+  "title": "SIA OSDP machine-readable reference for protocol decoding",
+  "source": "78890beb-SIA-OSDP-2.2-2.docx.pdf (87 PDF pages). Cover reads 'OSDP Version 2.2.2', footer 'OSDP v2.2.2, (c)2024 Security Industry Association'.",
+  "specVersion": "2.2.2",
+  "pageConvention": "All 'page' values are the printed page numbers in the page footer ('- N -'). PDF page index = printed page + 1 (the cover is unnumbered).",
+  "byteOrder": "Multi-byte numbers are little-endian (LSB first) unless a field says otherwise (section 5.5, p.11). Exceptions stated by the spec: PIVDATA object ID (MSB first, p.31) and the Secure PIN Entry fields listed MSB-then-LSB (p.40).",
+  "offsetConvention": "Field 'offset' is counted from the first DATA byte, i.e. the byte right after the CMND/REPLY code. For record-based messages, 'record' offsets are counted within one record. size 'var' means the size depends on a length field or on the remaining DATA length.",
+  "status": "Extracted from the spec. Where the spec contradicts itself, the conflict is recorded in 'specIssues' and at the field concerned. Nothing is invented; notes that come from outside the spec are marked 'external'.",
+  "verification": "Checksum and CRC-16 (init 0x1D0F, poly 0x1021) reproduce all Annex E frame check bytes (incl. the CHLNG and RMAC_I frames); AES session keys, client/server cryptograms and RMAC_I recomputed from SCBK-D/RND.A/RND.B match Annex E exactly."
+ },
+ "packet": {
+  "ctrlBits": [
+   {
+    "bits": "0-1",
+    "mask": "0x03",
+    "name": "SQN",
+    "description": "Sequence number, used to confirm delivery and to recover from errors. See sequenceRules."
+   },
+   {
+    "bits": "2",
+    "mask": "0x04",
+    "name": "CKSUM/CRC",
+    "values": {
+     "0": "an 8-bit CHECKSUM is in the last byte of the message",
+     "1": "a 16-bit CRC is in the last 2 bytes of the message"
+    }
+   },
+   {
+    "bits": "3",
+    "mask": "0x08",
+    "name": "SCB",
+    "values": {
+     "0": "no Security Control Block",
+     "1": "a Security Control Block is present"
+    }
+   },
+   {
+    "bits": "4-7",
+    "mask": "0xF0",
+    "name": "reserved",
+    "description": "Shall be set to 0x00. A non-zero value is a protocol anomaly."
+   }
+  ],
+  "timing": {
+   "page": [
+    12,
+    13
+   ],
+   "REPLY_DELAY_max_ms": 200,
+   "REPLY_DELAY_typical_ms": 3,
+   "REPLY_DELAY_definition": "Time from receipt of the checksum character of the command to transmission of the first byte of the reply. A device shall start its reply in less than REPLY_DELAY.",
+   "interCharacterTimeout_ms": 20,
+   "interCharacterTimeoutNote": "Nominal value; may be adjusted for special channel timing. An inter-character timeout while receiving aborts the receive and the PD re-syncs on the next SOM.",
+   "lineIdleBeforeTransmit": "At least the time of two characters of idle line before a device may access the channel.",
+   "markBeforeFirstChar": "Drive the line to marking for at least one character time before the first character (for example by sending 0xFF).",
+   "releaseAfterLastChar": "Stop driving the line no later than one full character time after the stop bit of the last character.",
+   "pdOfflineAfter_s": 8,
+   "offlineRule": "The PD considers communication off-line if more than 8 seconds pass between messages it answers. Both sides then reset the connection state to off-line and start a new connect sequence.",
+   "acuNoReply": "If the ACU gets no reply within REPLY_DELAY, it moves on to the next communication cycle.",
+   "retries": "The ACU should retry a limited number of times. 2.2 recommends at most 3 attempts, then restarting the OSDP session. If the PD sends a NAK other than bad checksum, retrying should stop."
+  },
+  "securityBlock": {
+   "page": [
+    15,
+    77,
+    78,
+    79
+   ],
+   "structure": "SEC_BLK_LEN (1) | SEC_BLK_TYPE (1) | SEC_BLK_DATA (SEC_BLK_LEN-2)",
+   "handshakeBlocks": "For SCS_11..SCS_14, SEC_BLK_LEN = 3 and SEC_BLK_DATA[0] selects the key: 0x01 = SCBK, 0x00 = SCBK-D (default key). In SCS_14, SEC_BLK_DATA[0] = 0x01 means the server cryptogram was accepted and 0xFF means it was rejected (p.78-79).",
+   "sessionBlocks": "The spec gives no SEC_BLK_DATA content for SCS_15..SCS_18 and does not state their SEC_BLK_LEN explicitly (external: SEC_BLK_LEN=2, no data, in practice).",
+   "errorsFromPD": {
+    "0x05": "PD received an SB it does not support",
+    "0x06": "PD needs encryption and got a command without the right security extension"
+   },
+   "types": [
+    {
+     "name": "SCS_11",
+     "value": "0x11",
+     "direction": "ACU to PD",
+     "meaning": "Begin new Secure Connection Sequence",
+     "carriedBy": "osdp_CHLNG (0x76)",
+     "macPresent": false,
+     "dataEncrypted": false
+    },
+    {
+     "name": "SCS_12",
+     "value": "0x12",
+     "direction": "PD to ACU",
+     "meaning": "Secure Connection Sequence step 2",
+     "carriedBy": "osdp_CCRYPT (0x76)",
+     "macPresent": false,
+     "dataEncrypted": false
+    },
+    {
+     "name": "SCS_13",
+     "value": "0x13",
+     "direction": "ACU to PD",
+     "meaning": "Secure Connection Sequence step 3",
+     "carriedBy": "osdp_SCRYPT (0x77)",
+     "macPresent": false,
+     "dataEncrypted": false
+    },
+    {
+     "name": "SCS_14",
+     "value": "0x14",
+     "direction": "PD to ACU",
+     "meaning": "Secure Connection Sequence step 4",
+     "carriedBy": "osdp_RMAC_I (0x78)",
+     "macPresent": false,
+     "dataEncrypted": false
+    },
+    {
+     "name": "SCS_15",
+     "value": "0x15",
+     "direction": "ACU to PD",
+     "meaning": "Secure Session msg. w. MAC, authenticated only or with non-encrypted Data.",
+     "macPresent": true,
+     "dataEncrypted": false,
+     "usage": "Meant only for commands with no DATA field. Production implementations should reject a plaintext payload in SCS_15 (p.80)."
+    },
+    {
+     "name": "SCS_16",
+     "value": "0x16",
+     "direction": "PD to ACU",
+     "meaning": "Secure Session msg. w. MAC, authenticated only or with non-encrypted Data.",
+     "macPresent": true,
+     "dataEncrypted": false,
+     "usage": "Meant only for replies with no DATA field (p.80)."
+    },
+    {
+     "name": "SCS_17",
+     "value": "0x17",
+     "direction": "ACU to PD",
+     "meaning": "Secure Session msg. with MAC & Data Encryption",
+     "macPresent": true,
+     "dataEncrypted": true,
+     "usage": "Shall be used with every command that has a DATA field; DATA is padded and encrypted with S-ENC (p.80)."
+    },
+    {
+     "name": "SCS_18",
+     "value": "0x18",
+     "direction": "PD to ACU",
+     "meaning": "Secure Session msg. with MAC & Data Encryption",
+     "macPresent": true,
+     "dataEncrypted": true,
+     "usage": "Shall be used with every reply that has a DATA field (p.80)."
+    }
+   ]
+  }
+ },
+ "commands": [
+  {
+   "code": "0x60",
+   "name": "osdp_POLL",
+   "page": 18,
+   "section": "6.2",
+   "description": "General inquiry: asks the PD for any unreported event, input, or status change.",
+   "reply": [
+    "osdp_ACK",
+    "any reply marked as a poll response: osdp_LSTATR, osdp_ISTATR, osdp_OSTATR, osdp_RSTATR, osdp_RAW, osdp_FMT, osdp_KEYPAD, osdp_BIOREADR, osdp_BIOMATCHR, osdp_MFGREP, osdp_XRD, osdp_MFGSTATR, osdp_MFGERRR",
+    "osdp_NAK",
+    "osdp_BUSY"
+   ],
+   "fields": []
+  },
+  {
+   "code": "0x61",
+   "name": "osdp_ID",
+   "page": [
+    18,
+    19
+   ],
+   "section": "6.3",
+   "description": "Asks the PD for its identification report (vendor, model, serial, firmware).",
+   "reply": [
+    "osdp_PDID",
+    "osdp_NAK"
+   ],
+   "fields": [
+    {
+     "name": "ID request code",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Send Standard PD ID Block",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    }
+   ]
+  },
+  {
+   "code": "0x62",
+   "name": "osdp_CAP",
+   "page": 19,
+   "section": "6.4",
+   "description": "Asks the PD to list its capabilities (inputs, outputs, readers, LEDs, security, and so on).",
+   "reply": [
+    "osdp_PDCAP",
+    "osdp_NAK"
+   ],
+   "fields": [
+    {
+     "name": "Reply type",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Send Standard Reply",
+      "0x01": "Return extended capabilities response",
+      "0x02-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    }
+   ]
+  },
+  {
+   "code": "0x64",
+   "name": "osdp_LSTAT",
+   "page": 19,
+   "section": "6.5",
+   "description": "Asks the PD for its local status (enclosure tamper and power).",
+   "reply": [
+    "osdp_LSTATR",
+    "osdp_NAK"
+   ],
+   "fields": []
+  },
+  {
+   "code": "0x65",
+   "name": "osdp_ISTAT",
+   "page": [
+    19,
+    20
+   ],
+   "section": "6.6",
+   "description": "Asks the PD for the state of all its inputs.",
+   "reply": [
+    "osdp_ISTATR",
+    "osdp_NAK"
+   ],
+   "fields": []
+  },
+  {
+   "code": "0x66",
+   "name": "osdp_OSTAT",
+   "page": 20,
+   "section": "6.7",
+   "description": "Asks the PD for the state of all its outputs.",
+   "reply": [
+    "osdp_OSTATR",
+    "osdp_NAK"
+   ],
+   "fields": []
+  },
+  {
+   "code": "0x67",
+   "name": "osdp_RSTAT",
+   "page": 20,
+   "section": "6.8",
+   "description": "Asks the PD for the tamper status of its attached readers.",
+   "reply": [
+    "osdp_RSTATR",
+    "osdp_NAK"
+   ],
+   "fields": []
+  },
+  {
+   "code": "0x68",
+   "name": "osdp_OUT",
+   "page": [
+    20,
+    21,
+    22
+   ],
+   "section": "6.9",
+   "description": "Sets outputs (such as relays) on or off, permanently or for a timed pulse.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK",
+    "osdp_OSTATR"
+   ],
+   "recordSize": 4,
+   "repeating": true,
+   "recordNotes": "One or more 4-byte records; count = DATA length / 4. There must be at least one. The count should not exceed the number of outputs in PDCAP Function Code 2. An invalid output number or control code gives NAK 0x09.",
+   "record": [
+    {
+     "name": "Output Number",
+     "offset": 0,
+     "size": 1,
+     "type": "uint8",
+     "description": "0x00 = first output, 0x01 = second output, and so on."
+    },
+    {
+     "name": "Control Code",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.outputControlCode",
+     "description": "Requested output state."
+    },
+    {
+     "name": "Timer",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE",
+     "units": "100 ms",
+     "description": "16-bit timer in units of 100 ms. 0x0000 means 'forever'."
+    }
+   ],
+   "examples": [
+    {
+     "bytes": "00 01 00 00 01 01 00 00 02 02 00 00",
+     "meaning": "Turn off the first and second outputs and turn on the third (set default states)."
+    },
+    {
+     "bytes": "01 05 32 00",
+     "meaning": "Turn the second output on for 5 seconds."
+    },
+    {
+     "bytes": "01 05 32 00 01 03 00 00",
+     "meaning": "Turn the second output on for 5 s and set its permanent state to off."
+    },
+    {
+     "bytes": "02 06 01 00 02 04 00 00",
+     "meaning": "Turn the third output off for 100 ms and make its permanent state on."
+    }
+   ],
+   "notes": "The PD may answer osdp_OSTATR right away, or osdp_ACK and send osdp_OSTATR later as a poll response."
+  },
+  {
+   "code": "0x69",
+   "name": "osdp_LED",
+   "page": [
+    22,
+    23,
+    24
+   ],
+   "section": "6.10",
+   "description": "Controls reader LEDs, with a temporary (timed, flashing) setting and a permanent setting.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "recordSize": 14,
+   "repeating": true,
+   "recordNotes": "One or more 14-byte records; count = DATA length / 14. An invalid reader or LED number gives NAK 0x09. A new temporary command overrides an active one. ON time and OFF time cannot both be zero. When the temporary timer expires, the LED goes back to the last permanent state. The permanent state is lost on power cycle. The LED alternates between the ON and OFF colours; using the same colour for both gives a steady light. The 16-bit timer applies only to the temporary setting.",
+   "record": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default Reader Number value",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "LED Number",
+     "offset": 1,
+     "size": 1,
+     "type": "uint8",
+     "description": "0x00 = first LED, 0x01 = second LED, and so on."
+    },
+    {
+     "name": "Temporary Control Code",
+     "offset": 2,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.ledTemporaryControlCode",
+     "group": "Temporary Settings",
+     "description": "The mode to enter temporarily."
+    },
+    {
+     "name": "Temporary ON Time",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8",
+     "units": "100 ms",
+     "group": "Temporary Settings",
+     "description": "ON duration of the flash. 0x00 means no duration."
+    },
+    {
+     "name": "Temporary OFF Time",
+     "offset": 4,
+     "size": 1,
+     "type": "uint8",
+     "units": "100 ms",
+     "group": "Temporary Settings",
+     "description": "OFF duration of the flash. 0x00 means no duration."
+    },
+    {
+     "name": "Temporary ON Color",
+     "offset": 5,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.ledColor",
+     "group": "Temporary Settings"
+    },
+    {
+     "name": "Temporary OFF Color",
+     "offset": 6,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.ledColor",
+     "group": "Temporary Settings"
+    },
+    {
+     "name": "Temporary Timer",
+     "offset": 7,
+     "size": 2,
+     "type": "uint16 LE",
+     "units": "100 ms",
+     "group": "Temporary Settings",
+     "description": "How long the temporary setting lasts. 0x0000 means 'forever'."
+    },
+    {
+     "name": "Permanent Control Code",
+     "offset": 9,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.ledPermanentControlCode",
+     "group": "Permanent Settings",
+     "description": "The mode to return to after the timer expires."
+    },
+    {
+     "name": "Permanent ON Time",
+     "offset": 10,
+     "size": 1,
+     "type": "uint8",
+     "units": "100 ms",
+     "group": "Permanent Settings"
+    },
+    {
+     "name": "Permanent OFF Time",
+     "offset": 11,
+     "size": 1,
+     "type": "uint8",
+     "units": "100 ms",
+     "group": "Permanent Settings"
+    },
+    {
+     "name": "Permanent ON Color",
+     "offset": 12,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.ledColor",
+     "group": "Permanent Settings"
+    },
+    {
+     "name": "Permanent OFF Color",
+     "offset": 13,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.ledColor",
+     "group": "Permanent Settings"
+    }
+   ],
+   "examples": [
+    {
+     "bytes": "00 00 02 01 02 01 00 1E 00 00 00 00 00 00",
+     "meaning": "First LED on the first reader flashes red (100 ms) / black (200 ms) for 3 seconds, then returns to its current display mode."
+    },
+    {
+     "bytes": "00 01 01 00 00 00 00 00 00 01 01 01 02 02",
+     "meaning": "The reader's second LED shows steady green."
+    }
+   ]
+  },
+  {
+   "code": "0x6A",
+   "name": "osdp_BUZ",
+   "page": [
+    24,
+    25
+   ],
+   "section": "6.11",
+   "description": "Controls the reader's single-tone buzzer (tone, on/off timing, repeat count).",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "An invalid Reader Number gives NAK 0x09. The spec's table gives no reply list; ACK/NAK are the general replies (6.1).",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default Reader Number value",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "Tone Code",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.buzzerToneCode"
+    },
+    {
+     "name": "On Time",
+     "offset": 2,
+     "size": 1,
+     "type": "uint8",
+     "units": "100 ms",
+     "description": "ON duration of the sound. Must be non-zero unless the tone code is 0x01 (off)."
+    },
+    {
+     "name": "Off Time",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8",
+     "units": "100 ms",
+     "description": "OFF duration of the sound."
+    },
+    {
+     "name": "Count",
+     "offset": 4,
+     "size": 1,
+     "type": "uint8",
+     "description": "Number of times to repeat the ON/OFF cycle. 0x00 means the tone continues until another tone command arrives or the PD reboots."
+    }
+   ]
+  },
+  {
+   "code": "0x6B",
+   "name": "osdp_TEXT",
+   "page": [
+    25,
+    26
+   ],
+   "section": "6.12",
+   "description": "Shows a text string on the reader's character display, permanently or temporarily.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "Commands to display elements that do not exist get a NAK. Temp text overwrites a field for a time and then the permanent text comes back. For a permanent text command, Temp Text Time has another meaning: 0 = let active temp text finish; non-zero = abort active temp text and show the permanent text now. Permanent text is lost on power cycle. Dates/times should use ISO 8601 GeneralizedTime.",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default Reader Number value",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "Text Command",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.textCommand",
+     "description": "How to treat the text."
+    },
+    {
+     "name": "Temp Text Time",
+     "offset": 2,
+     "size": 1,
+     "type": "uint8",
+     "units": "seconds",
+     "description": "How long temporary text is shown."
+    },
+    {
+     "name": "Row",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8",
+     "values": "0x01-0xFF",
+     "description": "Row of the first character. 0x01 = top row."
+    },
+    {
+     "name": "Column",
+     "offset": 4,
+     "size": 1,
+     "type": "uint8",
+     "values": "0x01-0xFF",
+     "description": "Column of the first character. 0x01 = leftmost column."
+    },
+    {
+     "name": "Text Length",
+     "offset": 5,
+     "size": 1,
+     "type": "uint8",
+     "description": "Number of characters in the string."
+    },
+    {
+     "name": "Display String",
+     "offset": 6,
+     "size": "var (Text Length)",
+     "type": "ASCII",
+     "values": "0x20-0x7E",
+     "description": "The string to show."
+    }
+   ]
+  },
+  {
+   "code": "0x6E",
+   "name": "osdp_COMSET",
+   "page": [
+    26,
+    27
+   ],
+   "section": "6.13",
+   "description": "Changes the PD's address and baud rate; the change takes effect after the PD replies.",
+   "reply": [
+    "osdp_COM",
+    "osdp_NAK"
+   ],
+   "notes": "The spec's Table 22 points to 'subclause 7.4' for osdp_COM; the correct section is 7.13. If the PD cannot comply, it replies with the values it will actually use. These settings are recommended to be non-volatile.",
+   "fields": [
+    {
+     "name": "Address",
+     "offset": 0,
+     "size": 1,
+     "type": "uint8",
+     "values": "0x00-0x7E",
+     "description": "Unit ID the PD will answer to after the change."
+    },
+    {
+     "name": "Baud Rate",
+     "offset": 1,
+     "size": 4,
+     "type": "uint32 LE",
+     "description": "Actual baud rate to use, such as 9600 or 38400."
+    }
+   ],
+   "example": {
+    "bytes": "537F0D00046E00802500006E38",
+    "meaning": "Broadcast COMSET, SQN 0, CRC: set address 0x00 and baud 0x00002580 = 9600 (from the CRC test vector, p.86)."
+   }
+  },
+  {
+   "code": "0x73",
+   "name": "osdp_BIOREAD",
+   "page": [
+    27,
+    28
+   ],
+   "section": "6.14",
+   "description": "Tells the reader to take a biometric scan and send the data back later as osdp_BIOREADR.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "BIO_TYPE",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioType",
+     "description": "Type/body part to scan."
+    },
+    {
+     "name": "BIO_FORMAT",
+     "offset": 2,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioFormat",
+     "description": "Format of the data to return."
+    },
+    {
+     "name": "BIO_QUALITY",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8",
+     "description": "Scan quality, normalised 0x00-0xFF."
+    }
+   ]
+  },
+  {
+   "code": "0x74",
+   "name": "osdp_BIOMATCH",
+   "page": [
+    28,
+    29
+   ],
+   "section": "6.15",
+   "description": "Tells the reader to scan a biometric and compare it with the template sent in this message; the result comes back as osdp_BIOMATCHR.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "If BIO_LENGTH is 0x0000, the PD uses a template it received earlier (for example via osdp_FILETRANSFER type 0x02).",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default",
+      "0x01-0x7F": "RFU",
+      "0x80-0xFF": "RPU"
+     }
+    },
+    {
+     "name": "BIO_TYPE",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioType"
+    },
+    {
+     "name": "BIO_FORMAT",
+     "offset": 2,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioFormat",
+     "description": "Format of the attached template."
+    },
+    {
+     "name": "BIO_QUALITY",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8",
+     "description": "Threshold needed to accept the match, normalised."
+    },
+    {
+     "name": "BIO_LENGTH",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Template data length."
+    },
+    {
+     "name": "BIO_DATA",
+     "offset": 6,
+     "size": "var (BIO_LENGTH)",
+     "type": "bytes",
+     "description": "Template data."
+    }
+   ]
+  },
+  {
+   "code": "0x75",
+   "name": "osdp_KEYSET",
+   "page": [
+    29,
+    80,
+    81
+   ],
+   "section": "6.16, D.2.1, Table D.2",
+   "description": "Sends a new Secure Channel Base Key (SCBK) from the ACU to the PD.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "Only sent and accepted when the connection is 'secure': either encrypted with keys from the current SCBK/SCBK-D, or physically secure in a special installation setup mode. Devices leave installation mode after a successful KEYSET. Being inside a secure channel means this travels as SCS_17 with the key encrypted.",
+   "fields": [
+    {
+     "name": "Key_Type",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x01": "Secure Channel Base Key"
+     },
+     "description": "Encryption method this key is for."
+    },
+    {
+     "name": "Length",
+     "offset": 1,
+     "size": 1,
+     "type": "uint8",
+     "description": "Number of key bytes = (key length in bits + 7) / 8. 16 for a 128-bit SCBK."
+    },
+    {
+     "name": "Data",
+     "offset": 2,
+     "size": "var (Length)",
+     "type": "bytes",
+     "description": "Key data (the 128-bit SCBK)."
+    }
+   ]
+  },
+  {
+   "code": "0x76",
+   "name": "osdp_CHLNG",
+   "page": [
+    29,
+    78,
+    81
+   ],
+   "section": "6.17, D.1.3.1, D.2.2, Table D.3",
+   "description": "Starts a secure channel session: the ACU sends an 8-byte random challenge (RND.A) with an SCS_11 header.",
+   "reply": [
+    "osdp_CCRYPT",
+    "osdp_NAK"
+   ],
+   "securityBlock": "SCS_11, SEC_BLK_LEN 3, SEC_BLK_DATA[0]: 0x01 = use SCBK, 0x00 = use SCBK-D",
+   "notes": "A PD that does not support the security block or SCS_11 answers NAK 0x05.",
+   "fields": [
+    {
+     "name": "Random Number (RND.A)",
+     "offset": 0,
+     "size": 8,
+     "type": "bytes",
+     "description": "Random number made by the ACU (server challenge)."
+    }
+   ],
+   "example": {
+    "bytes": "530013000D03110076B0B1B2B3B4B5B6B73177",
+    "meaning": "CHLNG to address 0, SQN 1, CRC+SCB, SCS_11 using SCBK-D, RND.A=B0..B7 (p.86)."
+   }
+  },
+  {
+   "code": "0x77",
+   "name": "osdp_SCRYPT",
+   "page": [
+    29,
+    79,
+    81
+   ],
+   "section": "6.18, D.1.3.3, D.2.3, Table D.4",
+   "description": "Secure channel step 3: the ACU sends its 16-byte server cryptogram so the PD can check the ACU knows the key.",
+   "reply": [
+    "osdp_RMAC_I",
+    "osdp_NAK"
+   ],
+   "securityBlock": "SCS_13, SEC_BLK_LEN 3, SEC_BLK_DATA[0]: 0x01 = SCBK, 0x00 = SCBK-D",
+   "notes": "D.2.3 says 'SCS connection sequence value is SCS_12', which conflicts with D.1 and D.1.3.3 (SCS_13). SCS_13 is correct, as the test vector shows.",
+   "fields": [
+    {
+     "name": "Cryptogram",
+     "offset": 0,
+     "size": 16,
+     "type": "bytes",
+     "description": "Server Cryptogram = AES-ENC(RND.B || RND.A, S-ENC)."
+    }
+   ],
+   "example": {
+    "bytes": "53001B000E0313007726D3356E07762D262801FC8E6665A89140B4",
+    "meaning": "SCRYPT, SQN 2, SCS_13 with SCBK-D (p.86)."
+   }
+  },
+  {
+   "code": "0x7B",
+   "name": "osdp_ACURXSIZE",
+   "page": 30,
+   "section": "6.20",
+   "description": "Tells the PD the largest message the ACU can receive.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "The spec gives no reply list; ACK/NAK assumed from 6.1.",
+   "fields": [
+    {
+     "name": "ACURX_BUFSIZE",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE",
+     "units": "bytes",
+     "description": "ACU maximum receive buffer."
+    }
+   ]
+  },
+  {
+   "code": "0x7C",
+   "name": "osdp_FILETRANSFER",
+   "page": [
+    34,
+    36
+   ],
+   "section": "6.26, Table 34",
+   "description": "Sends one fragment of a file (firmware, configuration, template, and so on) from the ACU to the PD.",
+   "reply": [
+    "osdp_FTSTAT",
+    "osdp_NAK"
+   ],
+   "notes": "Usually many message/reply pairs. The first fragment uses the default message size (128 bytes) or no more than the PDCAP value. Transfers continue until the PD aborts or the transfer finishes. Offsets must increase. Table 34 says 'DATA (12 bytes)' but the listed header fields add up to 11 bytes.",
+   "fields": [
+    {
+     "name": "FtType",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.fileTransferType"
+    },
+    {
+     "name": "FtSizeTotal",
+     "offset": 1,
+     "size": 4,
+     "type": "uint32 LE",
+     "units": "bytes",
+     "description": "File size."
+    },
+    {
+     "name": "FtOffset",
+     "offset": 5,
+     "size": 4,
+     "type": "uint32 LE",
+     "description": "Offset in the file of this message's data. Must increase with each message."
+    },
+    {
+     "name": "FtFragmentSize",
+     "offset": 9,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Fragment size. 0 in an 'idle' message."
+    },
+    {
+     "name": "FtData",
+     "offset": 11,
+     "size": "var (FtFragmentSize)",
+     "type": "bytes",
+     "description": "File fragment (optional)."
+    }
+   ]
+  },
+  {
+   "code": "0x80",
+   "name": "osdp_MFG",
+   "page": [
+    29,
+    30
+   ],
+   "section": "6.19, Table 27",
+   "description": "A manufacturer-specific command, identified by the vendor's 3-byte IEEE OUI.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK",
+    "osdp_MFGREP"
+   ],
+   "notes": "The PD reads the 3-byte Vendor Code together with a Command_ID to decide what the command means. Vendors define their own Command_IDs. The spec says 'four bytes formed by the three byte VendorCode and the Command_ID', so the first byte after the vendor code is in effect the Command_ID, although Table 27 only calls it vendor-defined DATA.",
+   "fields": [
+    {
+     "name": "Vendor Code",
+     "offset": 0,
+     "size": 3,
+     "type": "bytes",
+     "description": "IEEE assigned MA-L (OUI), 1st to 3rd octet."
+    },
+    {
+     "name": "DATA",
+     "offset": 3,
+     "size": "var",
+     "type": "bytes",
+     "description": "Vendor defined (starts with the vendor's Command_ID)."
+    }
+   ]
+  },
+  {
+   "code": "0xA1",
+   "name": "osdp_XWR",
+   "page": [
+    36,
+    37,
+    38,
+    39,
+    40,
+    42
+   ],
+   "section": "6.27, Tables 35-44",
+   "description": "Extended Write: smart card / transparent-mode command, identified by the pair (XRW_MODE, XWR_PCMND).",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK",
+    "osdp_XRD"
+   ],
+   "fields": [
+    {
+     "name": "XRW_MODE",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Extended READ/WRITE Mode 0",
+      "0x01": "Extended READ/WRITE Mode 1"
+     }
+    },
+    {
+     "name": "XWR_PCMND",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "description": "Command code that depends on XRW_MODE. See subcommands."
+    },
+    {
+     "name": "XWR_PDATA",
+     "offset": 2,
+     "size": "var",
+     "type": "bytes",
+     "description": "Optional data that depends on XWR_PCMND."
+    }
+   ],
+   "subcommands": [
+    {
+     "mode": "0x00",
+     "pcmnd": "0x01",
+     "name": "Mode-00 Read Setting (osdp_PR00REQ)",
+     "page": 38,
+     "description": "Asks the PD for its current background behaviour mode.",
+     "fields": [],
+     "reply": [
+      "osdp_XRD (XRW_MODE=0, XRD_REPLY=0x01) = osdp_PR00REQR",
+      "osdp_NAK"
+     ]
+    },
+    {
+     "mode": "0x00",
+     "pcmnd": "0x02",
+     "name": "Mode Set",
+     "page": [
+      37,
+      38
+     ],
+     "description": "Sets the background behaviour mode and its configuration.",
+     "fields": [
+      {
+       "name": "Mode code",
+       "offset": 2,
+       "size": 1,
+       "type": "enum",
+       "values": {
+        "0x00": "Mode 0",
+        "0x01": "Mode 1"
+       }
+      },
+      {
+       "name": "Mode config",
+       "offset": 3,
+       "size": 1,
+       "type": "bitfield",
+       "optional": true,
+       "description": "0x00 if absent. Mode 0: bit0 1 = enable / 0 = disable the Mode 0 Extended Read Card Info Report response (osdp_PR00CIRR); bits 1-7 are zero. Mode 1: bits 0-7 are zero.",
+       "values": {
+        "0x00": "Disable Read Card Info Report Response",
+        "0x01": "Enable Read Card Info Report Response (Mode 0 only)"
+       }
+      }
+     ],
+     "reply": [
+      "osdp_ACK",
+      "osdp_NAK"
+     ]
+    },
+    {
+     "mode": "0x01",
+     "pcmnd": "0x01",
+     "name": "Mode-01 Transparent Content Send Request (XMIT)",
+     "page": 39,
+     "description": "Passes an APDU through the reader to the smart card.",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8",
+       "values": {
+        "0x00": "Default Reader Number value"
+       }
+      },
+      {
+       "name": "APDU",
+       "offset": 3,
+       "size": "var",
+       "type": "bytes",
+       "description": "Valid APDU to send to the smart card."
+      }
+     ],
+     "reply": [
+      "osdp_ACK",
+      "osdp_NAK"
+     ],
+     "notes": "The text mentions '1 byte destination', but Table 41 has no destination field. The card's answer comes later as osdp_PR01SCREP."
+    },
+    {
+     "mode": "0x01",
+     "pcmnd": "0x02",
+     "name": "Mode-01 Connection Done",
+     "page": 39,
+     "description": "Tells the reader to end its connection to the smart card.",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8"
+      }
+     ],
+     "reply": [
+      "osdp_ACK",
+      "osdp_NAK"
+     ]
+    },
+    {
+     "mode": "0x01",
+     "pcmnd": "0x03",
+     "name": "Mode-01 Request Secure PIN Entry",
+     "page": [
+      39,
+      40,
+      41
+     ],
+     "description": "Tells the reader to collect a PIN on its keypad, put it into the supplied APDU, and send that to the card (the PIN never goes over OSDP). The reader should not add these keys to the keypad buffer.",
+     "notes": "The text says a '22-byte header' but Table 43 says 'DATA (20 bytes)', and the fields add up to 20 bytes including XRW_MODE and XWR_PCMND. Structure follows the PC/SC v2.02 Part 10 PIN_VERIFY_STRUCTURE.",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8"
+      },
+      {
+       "name": "TimeOut",
+       "offset": 3,
+       "size": 1,
+       "type": "uint8",
+       "units": "seconds",
+       "description": "0x00 means use the default timeout."
+      },
+      {
+       "name": "TimeOut2",
+       "offset": 4,
+       "size": 1,
+       "type": "uint8",
+       "units": "seconds",
+       "description": "Timeout after the first key press."
+      },
+      {
+       "name": "FormatString",
+       "offset": 5,
+       "size": 1,
+       "type": "uint8",
+       "description": "Formatting, USB_CCID_PIN_FORMAT_xxx."
+      },
+      {
+       "name": "PINBlockString",
+       "offset": 6,
+       "size": 1,
+       "type": "bitfield",
+       "description": "Bits 3-0: PIN block size in bytes after justification and formatting. Bits 7-4: bit size of the PIN length in the APDU."
+      },
+      {
+       "name": "PINLengthFormat",
+       "offset": 7,
+       "size": 1,
+       "type": "bitfield",
+       "description": "Bits 3-0: PIN length position in system units. Bit 4: set if system units are bytes, clear if bits. Bits 7-5: reserved."
+      },
+      {
+       "name": "PINMaxExtraDigit",
+       "offset": 8,
+       "size": 2,
+       "type": "uint16 MSB first",
+       "description": "XXYY: XX = minimum PIN size in digits, YY = maximum."
+      },
+      {
+       "name": "EntryValidationCondition",
+       "offset": 10,
+       "size": 1,
+       "type": "uint8",
+       "description": "Conditions under which PIN entry counts as complete."
+      },
+      {
+       "name": "Number Message",
+       "offset": 11,
+       "size": 1,
+       "type": "uint8",
+       "description": "Number of verification messages to display."
+      },
+      {
+       "name": "LangId",
+       "offset": 12,
+       "size": 2,
+       "type": "uint16 MSB first",
+       "description": "Language for messages."
+      },
+      {
+       "name": "MsgIndex",
+       "offset": 14,
+       "size": 1,
+       "type": "uint8",
+       "values": {
+        "0x00": "Message index"
+       }
+      },
+      {
+       "name": "TeoPrologue",
+       "offset": 15,
+       "size": 3,
+       "type": "bytes",
+       "description": "T=1 I-block prologue field (fill with 0x00)."
+      },
+      {
+       "name": "DataLength",
+       "offset": 18,
+       "size": 2,
+       "type": "uint16 MSB first",
+       "description": "Length of the APDU sent to the card."
+      },
+      {
+       "name": "APDU",
+       "offset": 20,
+       "size": "var (DataLength)",
+       "type": "bytes",
+       "description": "APDU for the card (the PIN is inserted by the reader)."
+      }
+     ],
+     "reply": [
+      "osdp_ACK",
+      "osdp_NAK"
+     ]
+    },
+    {
+     "mode": "0x01",
+     "pcmnd": "0x04",
+     "name": "Mode-01 Smartcard Scan (osdp_PR01SCSCAN)",
+     "page": 42,
+     "description": "Asks whether a smart card is present at the reader.",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8"
+      }
+     ],
+     "reply": [
+      "osdp_XRD (osdp_PR01PRES or osdp_PR01ERROR)",
+      "osdp_NAK"
+     ]
+    },
+    {
+     "mode": "0x01",
+     "pcmnd": "0x05",
+     "name": "Reserved",
+     "page": 38,
+     "description": "Reserved for future use."
+    }
+   ]
+  },
+  {
+   "code": "0xA2",
+   "name": "osdp_ABORT",
+   "page": 31,
+   "section": "6.22",
+   "description": "Tells the PD to stop the current operation, including any multi-part message or file transfer in progress.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "A PD that cannot abort (for example during a firmware update file transfer) returns osdp_NAK.",
+   "fields": []
+  },
+  {
+   "code": "0xA3",
+   "name": "osdp_PIVDATA",
+   "page": 31,
+   "section": "6.23, Table 31",
+   "description": "Asks the PD to read a selected data object from a PIV card.",
+   "reply": [
+    "osdp_PIVDATAR",
+    "osdp_NAK"
+   ],
+   "notes": "Some fields are MSB first to match the card contents. Data offset may change size or be deprecated in 2.3.",
+   "fields": [
+    {
+     "name": "PIV-OBJECT-ID",
+     "offset": 0,
+     "size": 3,
+     "type": "bytes MSB first",
+     "description": "PIV object per SP 800-73-4 Part 1."
+    },
+    {
+     "name": "PIV element ID",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8"
+    },
+    {
+     "name": "Data offset",
+     "offset": 4,
+     "size": 1,
+     "type": "uint8",
+     "description": "Single-byte offset within the requested field. Offsets over one byte are not officially supported in 2.2."
+    }
+   ]
+  },
+  {
+   "code": "0xA4",
+   "name": "osdp_GENAUTH",
+   "page": 32,
+   "section": "6.24, Table 32",
+   "description": "Asks the PD to have a PIV card run a General Authenticate (sends an encrypted challenge and expects a decrypted answer).",
+   "reply": [
+    "osdp_GENAUTHR",
+    "osdp_NAK"
+   ],
+   "multiPart": true,
+   "notes": "Algorithm and Key are only in the first fragment; later fragments leave them out. Table 32 says 'DATA (10 bytes)' but the listed header fields add up to 9 bytes before the challenge. Algorithm is shown as LSB/MSB rows, i.e. 2 bytes.",
+   "fields": [
+    {
+     "name": "TOTAL",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Whole message length."
+    },
+    {
+     "name": "OFFSET",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Offset within the whole message."
+    },
+    {
+     "name": "DATA_LEN",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Length of this fragment."
+    },
+    {
+     "name": "Algorithm",
+     "offset": 6,
+     "size": 2,
+     "type": "uint16 LE",
+     "firstFragmentOnly": true,
+     "description": "Selected algorithm (ISO 7816-4:2005, 7.5.5)."
+    },
+    {
+     "name": "Key",
+     "offset": 8,
+     "size": 1,
+     "type": "uint8",
+     "firstFragmentOnly": true,
+     "description": "Selected key (ISO 7816-4:2005, 7.5.5)."
+    },
+    {
+     "name": "Challenge",
+     "offset": 9,
+     "size": "var",
+     "type": "bytes",
+     "description": "Fragment of the cryptographic challenge payload."
+    }
+   ]
+  },
+  {
+   "code": "0xA5",
+   "name": "osdp_CRAUTH",
+   "page": [
+    32,
+    34
+   ],
+   "section": "6.25, Table 33",
+   "description": "Asks the PD to run a challenge/response with the card (sends a plaintext challenge and expects an encrypted answer).",
+   "reply": [
+    "osdp_CRAUTHR",
+    "osdp_NAK"
+   ],
+   "multiPart": true,
+   "notes": "Same layout as osdp_GENAUTH. Algorithm and Key are only in the first fragment.",
+   "fields": [
+    {
+     "name": "TOTAL",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Whole message length."
+    },
+    {
+     "name": "OFFSET",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Offset within the whole message."
+    },
+    {
+     "name": "DATA_LEN",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Length of this fragment."
+    },
+    {
+     "name": "Algorithm",
+     "offset": 6,
+     "size": 2,
+     "type": "uint16 LE",
+     "firstFragmentOnly": true,
+     "description": "Selected algorithm (ISO 7816-4:2005, 7.5.5)."
+    },
+    {
+     "name": "Key",
+     "offset": 8,
+     "size": 1,
+     "type": "uint8",
+     "firstFragmentOnly": true,
+     "description": "Selected key (ISO 7816-4:2005, 7.5.5)."
+    },
+    {
+     "name": "Challenge",
+     "offset": 9,
+     "size": "var",
+     "type": "bytes",
+     "description": "Fragment of the cryptographic challenge payload."
+    }
+   ]
+  },
+  {
+   "code": "0xA7",
+   "name": "osdp_KEEPACTIVE",
+   "page": [
+    30,
+    31
+   ],
+   "section": "6.21, Table 29",
+   "description": "Tells the PD to keep the reader's connection with the credential (card) alive for the given time.",
+   "reply": [
+    "osdp_ACK",
+    "osdp_NAK"
+   ],
+   "notes": "The spec gives no reply list; ACK/NAK assumed.",
+   "fields": [
+    {
+     "name": "KP_ACT_TIME",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE",
+     "units": "milliseconds",
+     "description": "How long to keep the card connection alive."
+    }
+   ]
+  }
+ ],
+ "replies": [
+  {
+   "code": "0x40",
+   "name": "osdp_ACK",
+   "page": 43,
+   "section": "7.2",
+   "description": "The command was accepted and there is nothing else to report.",
+   "inResponseTo": "any valid command that needs no specific reply; osdp_POLL when there is nothing to report",
+   "fields": []
+  },
+  {
+   "code": "0x41",
+   "name": "osdp_NAK",
+   "page": [
+    43,
+    44
+   ],
+   "section": "7.3, Tables 46-47",
+   "description": "The command was not processed; the first byte says why.",
+   "inResponseTo": "any command",
+   "fields": [
+    {
+     "name": "Error Code",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.nakErrorCode"
+    },
+    {
+     "name": "Data",
+     "offset": 1,
+     "size": "var",
+     "type": "bytes",
+     "optional": true,
+     "description": "Depends on the error code. For 0x09: optional array of one completion code per command record (0x00 = no error, 0xFF = generic error, others reserved). It is left out when the command had one record or when no records were processed because of bad record sizing."
+    }
+   ]
+  },
+  {
+   "code": "0x45",
+   "name": "osdp_PDID",
+   "page": [
+    44,
+    45
+   ],
+   "section": "7.4, Table 48",
+   "description": "Device identification: vendor, model, version, serial number, and firmware version.",
+   "inResponseTo": "osdp_ID",
+   "notes": "The cUID used by the secure channel is the first 8 bytes of the PDID reply.",
+   "fields": [
+    {
+     "name": "Vendor Code",
+     "offset": 0,
+     "size": 3,
+     "type": "bytes",
+     "description": "IEEE assigned MA-L (OUI), octets 1-3."
+    },
+    {
+     "name": "Model Number",
+     "offset": 3,
+     "size": 1,
+     "type": "uint8",
+     "description": "Manufacturer's model number (assigned by the vendor)."
+    },
+    {
+     "name": "Version",
+     "offset": 4,
+     "size": 1,
+     "type": "uint8",
+     "description": "Manufacturer's version of this product."
+    },
+    {
+     "name": "Serial Number",
+     "offset": 5,
+     "size": 4,
+     "type": "uint32 LE",
+     "description": "32-bit serial number assigned by the vendor."
+    },
+    {
+     "name": "Firmware Major",
+     "offset": 9,
+     "size": 1,
+     "type": "uint8"
+    },
+    {
+     "name": "Firmware Minor",
+     "offset": 10,
+     "size": 1,
+     "type": "uint8"
+    },
+    {
+     "name": "Firmware Build",
+     "offset": 11,
+     "size": 1,
+     "type": "uint8"
+    }
+   ]
+  },
+  {
+   "code": "0x46",
+   "name": "osdp_PDCAP",
+   "page": [
+    45,
+    46
+   ],
+   "section": "7.5, Table 49, Annex B",
+   "description": "List of the PD's capabilities, one 3-byte record per function.",
+   "inResponseTo": "osdp_CAP",
+   "recordSize": 3,
+   "repeating": true,
+   "notes": "Records may come in any order; count = DATA length / 3. A missing function code means it is not supported.",
+   "record": [
+    {
+     "name": "Function Code",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.pdcapFunctionCodes"
+    },
+    {
+     "name": "Compliance",
+     "offset": 1,
+     "size": 1,
+     "type": "uint8",
+     "description": "Compliance level; its meaning depends on the function code (Annex B)."
+    },
+    {
+     "name": "Number of",
+     "offset": 2,
+     "size": 1,
+     "type": "uint8",
+     "description": "Number of objects of this type; its meaning depends on the function code (Annex B)."
+    }
+   ]
+  },
+  {
+   "code": "0x48",
+   "name": "osdp_LSTATR",
+   "page": 46,
+   "section": "7.6, Table 50",
+   "description": "Local status: enclosure tamper and power supply status.",
+   "inResponseTo": "osdp_LSTAT, or a poll response when either status has changed",
+   "fields": [
+    {
+     "name": "Tamper Status",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Normal",
+      "0x01": "Tamper"
+     },
+     "description": "Found by monitoring the enclosure tamper mechanism."
+    },
+    {
+     "name": "Power Status",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Normal",
+      "0x01": "Power failure"
+     },
+     "description": "Taken from the power supply status."
+    }
+   ]
+  },
+  {
+   "code": "0x49",
+   "name": "osdp_ISTATR",
+   "page": [
+    46,
+    47
+   ],
+   "section": "7.7, Tables 51-52",
+   "description": "Status of every input, one byte per input.",
+   "inResponseTo": "osdp_ISTAT, or a poll response when any input changed",
+   "recordSize": 1,
+   "repeating": true,
+   "notes": "The first byte is input 0, the next is input 1, and so on. Every input is reported.",
+   "record": [
+    {
+     "name": "Input Status",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.inputStatus"
+    }
+   ]
+  },
+  {
+   "code": "0x4A",
+   "name": "osdp_OSTATR",
+   "page": [
+    47,
+    48
+   ],
+   "section": "7.8, Table 53",
+   "description": "Status of every output, one byte per output.",
+   "inResponseTo": "osdp_OSTAT, osdp_OUT, or a poll response when any output changed",
+   "recordSize": 1,
+   "repeating": true,
+   "notes": "One byte for each output reported in PDCAP Function Code 2, in order.",
+   "record": [
+    {
+     "name": "Output Status",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Inactive",
+      "0x01": "Active"
+     }
+    }
+   ]
+  },
+  {
+   "code": "0x4B",
+   "name": "osdp_RSTATR",
+   "page": 48,
+   "section": "7.9, Table 54",
+   "description": "Tamper status of each attached external reader, one byte per reader.",
+   "inResponseTo": "osdp_RSTAT, or a poll response when any reader status changed",
+   "recordSize": 1,
+   "repeating": true,
+   "notes": "Only applies when an external reader is attached and the PD can monitor it. Table 54 shows 'DATA (1 byte)'; the text says one byte per reader.",
+   "record": [
+    {
+     "name": "Tamper Status",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Normal",
+      "0x01": "Not connected",
+      "0x02": "Tamper"
+     }
+    }
+   ]
+  },
+  {
+   "code": "0x50",
+   "name": "osdp_RAW",
+   "page": [
+    48,
+    50
+   ],
+   "section": "7.10, Table 55",
+   "description": "Card read: raw card bits (for example Wiegand), not decoded.",
+   "inResponseTo": "osdp_POLL (poll response) after a card read",
+   "notes": "Unreported card data is deleted during or after a communication loss. With secure channel, this travels as SCS_18 and the card number is encrypted.",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default Reader Number value",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "Format Code",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.rawCardFormatCode"
+    },
+    {
+     "name": "Bit Count",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Number of card bits (the table calls it 'Template length'). The number of data bytes = ceil(BitCount/8) (derived)."
+    },
+    {
+     "name": "Data",
+     "offset": 4,
+     "size": "var",
+     "type": "bitstring",
+     "description": "8 card bits per data byte, MSB to LSB, left justified."
+    }
+   ]
+  },
+  {
+   "code": "0x51",
+   "name": "osdp_FMT",
+   "page": [
+    50,
+    52
+   ],
+   "section": "7.11, Table 56",
+   "description": "Card read as decoded ASCII characters (deprecated).",
+   "inResponseTo": "osdp_POLL (poll response)",
+   "deprecated": true,
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default Reader Number value",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "Read Direction",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.fmtReadDirection"
+    },
+    {
+     "name": "Character Count",
+     "offset": 2,
+     "size": 1,
+     "type": "uint8",
+     "description": "Number of characters, including START, END, CKSUM."
+    },
+    {
+     "name": "Data",
+     "offset": 3,
+     "size": "var (Character Count)",
+     "type": "ASCII",
+     "description": "Card data as ASCII characters."
+    }
+   ]
+  },
+  {
+   "code": "0x53",
+   "name": "osdp_KEYPAD",
+   "page": 52,
+   "section": "7.12, Table 57",
+   "description": "Keys pressed on the reader's keypad.",
+   "inResponseTo": "osdp_POLL (poll response) when the keypad buffer has data",
+   "notes": "Unreported keypad data is deleted during or after a communication loss. In plaintext (no secure channel) the PIN digits can be read directly.",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default Reader Number value",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "Digit Count",
+     "offset": 1,
+     "size": 1,
+     "type": "uint8",
+     "description": "Number of keypad digits that follow."
+    },
+    {
+     "name": "Data",
+     "offset": 2,
+     "size": "var (Digit Count)",
+     "type": "enum[]",
+     "enumRef": "enums.keypadEncoding",
+     "description": "Keypad data as ASCII characters."
+    }
+   ]
+  },
+  {
+   "code": "0x54",
+   "name": "osdp_COM",
+   "page": 53,
+   "section": "7.13, Table 58",
+   "description": "The address and baud rate the PD will use after sending this reply.",
+   "inResponseTo": "osdp_COMSET",
+   "fields": [
+    {
+     "name": "Address",
+     "offset": 0,
+     "size": 1,
+     "type": "uint8",
+     "values": "0x00-0x7E",
+     "description": "Unit ID the PD will answer to."
+    },
+    {
+     "name": "Baud Rate",
+     "offset": 1,
+     "size": 4,
+     "type": "uint32 LE",
+     "description": "Baud rate value."
+    }
+   ]
+  },
+  {
+   "code": "0x57",
+   "name": "osdp_BIOREADR",
+   "page": [
+    53,
+    55
+   ],
+   "section": "7.14, Table 59",
+   "description": "Result of a biometric scan requested by osdp_BIOREAD.",
+   "inResponseTo": "osdp_POLL (poll response) after osdp_BIOREAD",
+   "notes": "May be split into several packets because of the template size (multi-part). Table 59 says 'DATA (7 bytes)'; the listed fixed fields are 6 bytes before the template.",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "STATUS",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioStatus"
+    },
+    {
+     "name": "BIO_TYPE",
+     "offset": 2,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioType",
+     "description": "Bio template encoding type."
+    },
+    {
+     "name": "BIO_QUALITY",
+     "offset": 3,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Worst",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFE": "Reserved for private use",
+      "0xFF": "Best"
+     }
+    },
+    {
+     "name": "BIO_LENGTH",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "BIO_TEMPLATE",
+     "offset": 6,
+     "size": "var (BIO_LENGTH)",
+     "type": "bytes"
+    }
+   ]
+  },
+  {
+   "code": "0x58",
+   "name": "osdp_BIOMATCHR",
+   "page": [
+    55,
+    57
+   ],
+   "section": "7.15, Table 60",
+   "description": "Whether the scanned biometric matched the template sent in osdp_BIOMATCH.",
+   "inResponseTo": "osdp_POLL (poll response) after osdp_BIOMATCH",
+   "fields": [
+    {
+     "name": "Reader Number",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Default",
+      "0x01-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     }
+    },
+    {
+     "name": "STATUS",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "enumRef": "enums.bioStatus"
+    },
+    {
+     "name": "RESULT",
+     "offset": 2,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "No Match",
+      "0xFF": "Match"
+     }
+    }
+   ]
+  },
+  {
+   "code": "0x76",
+   "name": "osdp_CCRYPT",
+   "page": [
+    57,
+    78,
+    79,
+    81
+   ],
+   "section": "7.16, D.1.3.2, D.3.1, Table D.5",
+   "description": "Secure channel step 2: the PD sends its ID (cUID), its random number (RND.B) and its client cryptogram.",
+   "inResponseTo": "osdp_CHLNG",
+   "securityBlock": "SCS_12, SEC_BLK_DATA[0]: 0x01 = SCBK, 0x00 = SCBK-D",
+   "notes": "Same code value (0x76) as the osdp_CHLNG command; tell them apart by direction (ADDR bit 0x80). D.3.1 says 'SCS connection sequence value is SCS_13', which conflicts with D.1 and D.1.3.2 (SCS_12). SCS_12 is correct per the test vector.",
+   "fields": [
+    {
+     "name": "Client ID (cUID)",
+     "offset": 0,
+     "size": 8,
+     "type": "bytes",
+     "description": "Client's Unique Identifier (the first 8 bytes of PDID)."
+    },
+    {
+     "name": "Random Number (RND.B)",
+     "offset": 8,
+     "size": 8,
+     "type": "bytes",
+     "description": "Random number made by the PD."
+    },
+    {
+     "name": "Client Cryptogram",
+     "offset": 16,
+     "size": 16,
+     "type": "bytes",
+     "description": "AES-ENC(RND.A || RND.B, S-ENC)."
+    }
+   ],
+   "example": {
+    "bytes": "53802B000D0312007600 68E0000000000 A0A1A2A3A4A5A6A7 FDE5D2F428EC16312471EA3C02BD7796 F81E",
+    "meaning": "CCRYPT reply from address 0 (0x80), SQN 1, SCS_12 with SCBK-D (p.86). Spacing as printed in the spec. The cUID segment as printed ('00 68E0000000000') is only 7.5 bytes, a typo in the spec."
+   }
+  },
+  {
+   "code": "0x78",
+   "name": "osdp_RMAC_I",
+   "page": [
+    57,
+    79,
+    81,
+    82
+   ],
+   "section": "7.17, D.1.3.4, D.3.2, Table D.6",
+   "description": "Secure channel step 4: the PD accepts the ACU's cryptogram and sends the initial MAC that starts the rolling MAC chain.",
+   "inResponseTo": "osdp_SCRYPT",
+   "securityBlock": "SCS_14, SEC_BLK_DATA[0]: 0x01 = server cryptogram accepted, 0xFF = server cryptogram rejected (secure channel cannot continue)",
+   "fields": [
+    {
+     "name": "MAC_I",
+     "offset": 0,
+     "size": 16,
+     "type": "bytes",
+     "description": "Initial R-MAC = AES-ENC(AES-ENC(ServerCryptogram, S-MAC1), S-MAC2). This is the first ICV for the session."
+    }
+   ],
+   "example": {
+    "bytes": "53801B000E03140178B2A30057EB98BA2229EC1F875662B5246EEB",
+    "meaning": "RMAC_I reply, SQN 2, SCS_14 status 0x01 (accepted) (p.86)."
+   }
+  },
+  {
+   "code": "0x79",
+   "name": "osdp_BUSY",
+   "page": [
+    11,
+    58
+   ],
+   "section": "5.4, 7.19, Table 62",
+   "description": "The PD is busy and cannot handle the command now; the ACU should send the same command again.",
+   "inResponseTo": "any command",
+   "notes": "SQN is always 0. Always sent outside the secure channel (plain checksum/CRC, no SCB) and does not affect the secured messages before or after it. The ACU repeats the command in its original form until it gets something other than BUSY, or gives up; if it gives up, the new sequence number tells the PD to process the new command.",
+   "fields": []
+  },
+  {
+   "code": "0x7A",
+   "name": "osdp_FTSTAT",
+   "page": [
+    60,
+    61,
+    67
+   ],
+   "section": "7.25, Table 68, Table A.2",
+   "description": "File transfer status: whether to continue, wait, or stop, and flow-control hints.",
+   "inResponseTo": "osdp_FILETRANSFER",
+   "codeConflict": "Table 68 prints the code as 0x84 (which is osdp_MFGERRR). Annex A (normative, Table A.2) gives 0x7A. Decode as 0x7A.",
+   "fields": [
+    {
+     "name": "FtAction",
+     "offset": 0,
+     "size": 1,
+     "type": "bitfield",
+     "enumRef": "enums.ftActionFlags",
+     "description": "Control flags."
+    },
+    {
+     "name": "FtDelay",
+     "offset": 1,
+     "size": 2,
+     "type": "uint16 LE",
+     "units": "milliseconds",
+     "description": "Delay the ACU should wait before the next osdp_FILETRANSFER. 0 = no delay needed."
+    },
+    {
+     "name": "FtStatusDetail",
+     "offset": 3,
+     "size": 2,
+     "type": "int16 LE (signed)",
+     "enumRef": "enums.ftStatusDetail"
+    },
+    {
+     "name": "FtUpdateMsgMax",
+     "offset": 5,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Alternative maximum message size for later FILETRANSFER messages. 0 = no change requested; otherwise use it as the maximum FtFragmentSize in the next message. It may change from message to message."
+    }
+   ]
+  },
+  {
+   "code": "0x80",
+   "name": "osdp_PIVDATAR",
+   "page": 58,
+   "section": "7.20, Table 63",
+   "description": "Data read from a PIV card, sent in fragments.",
+   "inResponseTo": "osdp_PIVDATA",
+   "multiPart": true,
+   "notes": "Same code value (0x80) as the osdp_MFG command; tell them apart by direction.",
+   "fields": [
+    {
+     "name": "TOTAL",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Whole message length."
+    },
+    {
+     "name": "OFFSET",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Offset within the whole message."
+    },
+    {
+     "name": "DATA_LEN",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE",
+     "description": "Length of this fragment."
+    },
+    {
+     "name": "CARD_DATA",
+     "offset": 6,
+     "size": "var (DATA_LEN)",
+     "type": "bytes",
+     "description": "Requested data from the card."
+    }
+   ]
+  },
+  {
+   "code": "0x81",
+   "name": "osdp_GENAUTHR",
+   "page": 59,
+   "section": "7.21, Table 64",
+   "description": "The card's answer to General Authenticate, sent in fragments.",
+   "inResponseTo": "osdp_GENAUTH",
+   "multiPart": true,
+   "fields": [
+    {
+     "name": "TOTAL",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "OFFSET",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "DATA_LEN",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "AUTH_DATA",
+     "offset": 6,
+     "size": "var (DATA_LEN)",
+     "type": "bytes",
+     "description": "Response to General Authenticate."
+    }
+   ]
+  },
+  {
+   "code": "0x82",
+   "name": "osdp_CRAUTHR",
+   "page": 59,
+   "section": "7.22, Table 65",
+   "description": "The card's answer to a challenge/response request, sent in fragments.",
+   "inResponseTo": "osdp_CRAUTH",
+   "multiPart": true,
+   "fields": [
+    {
+     "name": "TOTAL",
+     "offset": 0,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "OFFSET",
+     "offset": 2,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "DATA_LEN",
+     "offset": 4,
+     "size": 2,
+     "type": "uint16 LE"
+    },
+    {
+     "name": "AUTH_DATA",
+     "offset": 6,
+     "size": "var (DATA_LEN)",
+     "type": "bytes",
+     "description": "Response to the cryptographic challenge."
+    }
+   ]
+  },
+  {
+   "code": "0x83",
+   "name": "osdp_MFGSTATR",
+   "page": 60,
+   "section": "7.23, Table 66",
+   "description": "Manufacturer-specific status (deprecated; to be redefined in 2.3.0).",
+   "inResponseTo": "sent when a status condition needs a manufacturer-specific reply",
+   "deprecated": true,
+   "fields": [
+    {
+     "name": "Data",
+     "offset": 0,
+     "size": 1,
+     "type": "uint8",
+     "description": "Vendor defined."
+    }
+   ]
+  },
+  {
+   "code": "0x84",
+   "name": "osdp_MFGERRR",
+   "page": 60,
+   "section": "7.24, Table 67",
+   "description": "Manufacturer-specific error (deprecated; to be redefined in 2.3.0).",
+   "inResponseTo": "sent when an error condition needs a manufacturer-specific reply",
+   "deprecated": true,
+   "fields": [
+    {
+     "name": "Data",
+     "offset": 0,
+     "size": 1,
+     "type": "uint8",
+     "description": "Vendor defined."
+    }
+   ]
+  },
+  {
+   "code": "0x90",
+   "name": "osdp_MFGREP",
+   "page": 57,
+   "section": "7.18, Table 61",
+   "description": "A manufacturer-specific reply, identified by the vendor's 3-byte IEEE OUI.",
+   "inResponseTo": "osdp_MFG, or a poll response",
+   "notes": "Table 61 describes the Data as 'Keypad data represented as ASCII characters', a copy-paste error; the content is vendor defined.",
+   "fields": [
+    {
+     "name": "Vendor Code",
+     "offset": 0,
+     "size": 3,
+     "type": "bytes",
+     "description": "IEEE assigned MA-L (OUI)."
+    },
+    {
+     "name": "Data",
+     "offset": 3,
+     "size": "var",
+     "type": "bytes",
+     "description": "Vendor defined."
+    }
+   ]
+  },
+  {
+   "code": "0xB1",
+   "name": "osdp_XRD",
+   "page": [
+    61,
+    62,
+    63,
+    64,
+    65
+   ],
+   "section": "7.26, Tables 69-78",
+   "description": "Extended Read: smart card / transparent-mode reply, identified by the pair (XRW_MODE, XRD_REPLY).",
+   "inResponseTo": "osdp_XWR, or a poll response",
+   "notes": "Table 69 labels the third field 'XRW_MODE'; it is the optional reply data (XRD_PDATA). The spec uses the names XRD_REPLY and XRD_PREPLY for the same thing.",
+   "fields": [
+    {
+     "name": "XRW_MODE",
+     "offset": 0,
+     "size": 1,
+     "type": "enum",
+     "values": {
+      "0x00": "Extended READ/WRITE Mode 0",
+      "0x01": "Extended READ/WRITE Mode 1"
+     }
+    },
+    {
+     "name": "XRD_REPLY",
+     "offset": 1,
+     "size": 1,
+     "type": "enum",
+     "description": "Reply code that depends on XRW_MODE (Table 70 for mode 0, Table 74 for mode 1)."
+    },
+    {
+     "name": "XRD_PDATA",
+     "offset": 2,
+     "size": "var",
+     "type": "bytes",
+     "description": "Optional data that depends on the reply."
+    }
+   ],
+   "subreplies": [
+    {
+     "mode": "0x00",
+     "preply": "0x00",
+     "name": "osdp_PR00ERROR",
+     "page": 62,
+     "description": "Mode 0 error or NAK: the PD could not process a Mode 0 command.",
+     "fields": [
+      {
+       "name": "Error Code",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8",
+       "description": "Transparent mode error condition (values are not defined by the spec)."
+      }
+     ]
+    },
+    {
+     "mode": "0x00",
+     "preply": "0x01",
+     "name": "osdp_PR00REQR",
+     "page": 63,
+     "description": "Current background behaviour mode and configuration (answer to Mode-00 Read Setting).",
+     "fields": [
+      {
+       "name": "Mode code",
+       "offset": 2,
+       "size": 1,
+       "type": "enum",
+       "values": {
+        "0x00": "Mode 0",
+        "0x01": "Mode 1"
+       },
+       "description": "XRW_MODE used for background operation."
+      },
+      {
+       "name": "Mode config",
+       "offset": 3,
+       "size": 1,
+       "type": "uint8",
+       "description": "The XRW_MODE configuration."
+      }
+     ]
+    },
+    {
+     "mode": "0x00",
+     "preply": "0x02",
+     "name": "osdp_PR00CIRR",
+     "page": 63,
+     "description": "Card information report: a smart card was detected (poll response, when enabled with Mode Set config bit 0).",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "enum",
+       "values": {
+        "0x00": "Default",
+        "0x01-0x7F": "Reserved for future use",
+        "0x80-0xFF": "Reserved for private use"
+       }
+      },
+      {
+       "name": "Protocol",
+       "offset": 3,
+       "size": 1,
+       "type": "enum",
+       "values": {
+        "0x00": "Detected Card Protocol Contact T0T1",
+        "0x01": "Detected Card Protocol 14443 A/B",
+        "0x02": "Reserved for future use"
+       }
+      },
+      {
+       "name": "Length of CSN",
+       "offset": 4,
+       "size": 1,
+       "type": "uint8",
+       "description": "Byte size of the CSN (0 = no data)."
+      },
+      {
+       "name": "CSN Data",
+       "offset": 5,
+       "size": "var (Length of CSN)",
+       "type": "bytes",
+       "description": "Card Serial Number."
+      },
+      {
+       "name": "Protocol Data",
+       "offset": "5 + Length of CSN",
+       "size": "var (rest)",
+       "type": "bytes",
+       "description": "Protocol 0: ATR. Protocol 1: ATS/ATQB."
+      }
+     ]
+    },
+    {
+     "mode": "0x01",
+     "preply": "0x00 (per spec table; see note)",
+     "name": "osdp_PR01ERROR",
+     "page": 64,
+     "description": "Mode 1 error or NAK for any Mode 1 command, or a poll response.",
+     "fields": [
+      {
+       "name": "Error Code",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8",
+       "description": "Transparent mode error condition."
+      }
+     ]
+    },
+    {
+     "mode": "0x01",
+     "preply": "0x00 (as printed in Table 76; see note)",
+     "name": "osdp_PR01PRES",
+     "page": 64,
+     "description": "Card present notification: answer to Smartcard Scan (PR01SCSCAN), or a poll response.",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8"
+      },
+      {
+       "name": "Status",
+       "offset": 3,
+       "size": 1,
+       "type": "enum",
+       "enumRef": "enums.xrdMode1CardPresence",
+       "description": "Smart card present status (the spec says 'Refer to table 73'; the values are in Table 74)."
+      }
+     ],
+     "note": "Table 76 prints XRD_PREPLY = 0x00 with the text 'error report', which is the same as PR01ERROR. This looks like a copy error. (External: earlier OSDP versions and common implementations use 0x01 for PR01PRES.)"
+    },
+    {
+     "mode": "0x01",
+     "preply": "not clearly stated (Table 77 prints XRW_PCMND 0x03 'Secure PIN Entry Request', a copy error)",
+     "name": "osdp_PR01SCREP",
+     "page": 65,
+     "description": "Transparent card data: the smart card's answer APDU to an XMIT (XWR mode 1, PCMND 0x01).",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8"
+      },
+      {
+       "name": "Status",
+       "offset": 3,
+       "size": 1,
+       "type": "uint8",
+       "description": "Result of the requested command."
+      },
+      {
+       "name": "APDU",
+       "offset": 4,
+       "size": "var",
+       "type": "bytes",
+       "description": "APDU from the card (the table text says 'APDU data to be sent to the card', a copy error)."
+      }
+     ],
+     "note": "External: earlier OSDP versions and common implementations use XRD_REPLY 0x02 for PR01SCREP."
+    },
+    {
+     "mode": "0x01",
+     "preply": "0x03",
+     "name": "osdp_PR01SPER",
+     "page": 65,
+     "description": "Secure PIN entry finished (answer to XWR mode 1 PCMND 0x03).",
+     "fields": [
+      {
+       "name": "Reader Number",
+       "offset": 2,
+       "size": 1,
+       "type": "uint8"
+      },
+      {
+       "name": "Status",
+       "offset": 3,
+       "size": 1,
+       "type": "uint8",
+       "description": "Result of the SPE sequence."
+      },
+      {
+       "name": "Tries",
+       "offset": 4,
+       "size": 1,
+       "type": "uint8",
+       "description": "Attempts left before the card locks itself."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "enums": {
+  "nakErrorCode": {
+   "page": 44,
+   "table": "Table 47",
+   "values": {
+    "0x00": "No error",
+    "0x01": "Message check character(s) error (bad checksum/bad cyclic redundancy check)",
+    "0x02": "Command length error",
+    "0x03": "Unknown Command Code - Command not implemented by PD",
+    "0x04": "Unexpected sequence number detected in the header",
+    "0x05": "This PD does not support the security block that was received",
+    "0x06": "Encrypted communication is required to process this command",
+    "0x07": "BIO_TYPE not supported",
+    "0x08": "BIO_FORMAT not supported",
+    "0x09": "Unable to process command record (one or more records had invalid parameters; may be followed by one completion code per record: 0x00 no error, 0xFF generic error)",
+    "0x0A-0x0F": "Reserved for future use",
+    "0x10-0x1F": "Reserved for private use",
+    "0x20-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "outputControlCode": {
+   "page": 22,
+   "table": "Table 14",
+   "note": "Permanent states are volatile and do not survive power cycles.",
+   "values": {
+    "0x00": "NOP - do not alter this output",
+    "0x01": "set the permanent state to OFF, abort timed operation (if any)",
+    "0x02": "set the permanent state to ON, abort timed operation (if any)",
+    "0x03": "set the permanent state to OFF, allow timed operation to complete",
+    "0x04": "set the permanent state to ON, allow timed operation to complete",
+    "0x05": "set the temporary state to ON, resume permanent state on timeout",
+    "0x06": "set the temporary state to OFF, resume permanent state on timeout"
+   }
+  },
+  "ledTemporaryControlCode": {
+   "page": 24,
+   "table": "Table 16",
+   "values": {
+    "0x00": "NOP - do not alter this LED's temporary settings. The remaining values of the temporary settings record are ignored.",
+    "0x01": "Cancel any temporary operation and display this LED's permanent state immediately",
+    "0x02": "Set the temporary state as given and start timer immediately."
+   }
+  },
+  "ledPermanentControlCode": {
+   "page": 24,
+   "table": "Table 17",
+   "values": {
+    "0x00": "NOP - do not alter this LED's permanent settings. The remaining value of the permanent settings record is ignored.",
+    "0x01": "Set the permanent state as given."
+   }
+  },
+  "ledColor": {
+   "page": [
+    23,
+    24
+   ],
+   "table": "Table 18",
+   "note": "Manufacturers or users may define colour values (for example animations, images, UV/IR emitters).",
+   "values": {
+    "0x00": "Black (off/unlit)",
+    "0x01": "Red",
+    "0x02": "Green",
+    "0x03": "Amber",
+    "0x04": "Blue",
+    "0x05": "Magenta",
+    "0x06": "Cyan",
+    "0x07": "White",
+    "0x08-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "buzzerToneCode": {
+   "page": 25,
+   "table": "Table 19",
+   "values": {
+    "0x00": "No tone (off) - use of this value is deprecated",
+    "0x01": "Off",
+    "0x02": "Default tone",
+    "0x03-0xFF": "Reserved for future use"
+   }
+  },
+  "textCommand": {
+   "page": 26,
+   "table": "Table 21",
+   "values": {
+    "0x01": "permanent text, no wrap",
+    "0x02": "permanent text, with wrap",
+    "0x03": "temp text, no wrap",
+    "0x04": "temp text, with wrap"
+   }
+  },
+  "bioType": {
+   "page": 28,
+   "table": "Table 24",
+   "values": {
+    "0x00": "Not specified - default -",
+    "0x01": "Right Thumb Print",
+    "0x02": "Right Index Finger Print",
+    "0x03": "Right Middle Finger Print",
+    "0x04": "Right Ring Finger Print",
+    "0x05": "Right Little Finger Print",
+    "0x06": "Left Thumb Print",
+    "0x07": "Left Index Finger Print",
+    "0x08": "Left Middle Finger Print",
+    "0x09": "Left Ring Finger Print",
+    "0x0A": "Left Little Finger Print",
+    "0x0B": "Right Iris Scan",
+    "0x0C": "Right Retina Scan",
+    "0x0D": "Left Iris Scan",
+    "0x0E": "Left Retina Scan",
+    "0x0F": "Full Face Template",
+    "0x10": "Right Hand Geometry",
+    "0x11": "Left Hand Geometry"
+   }
+  },
+  "bioFormat": {
+   "page": 28,
+   "table": "Table 25",
+   "values": {
+    "0x00": "Not specified - use default method to scan, then report format used",
+    "0x01": "Send raw fingerprint data as a PGM",
+    "0x02": "ANSI/INCITS 378 Fingerprint template",
+    "0x03-0x7F": "Reserved for future use",
+    "0x80-0xFE": "Reserved for private use",
+    "0xFF": "Format private to this PD"
+   }
+  },
+  "bioStatus": {
+   "page": [
+    55,
+    57
+   ],
+   "table": "Tables 59, 60",
+   "values": {
+    "0x00": "Success (rest of data fields are valid)",
+    "0x01": "Timeout",
+    "0x02-0xFE": "Not used",
+    "0xFF": "Unknown Error"
+   }
+  },
+  "inputStatus": {
+   "page": 47,
+   "table": "Table 52",
+   "values": {
+    "0x00": "Inactive - Input is in its normal state (e.g. door closed, window unbroken, no motion)",
+    "0x01": "Active - Input is of concern (e.g. door ajar, window broken, motion detected)",
+    "0x02": "Short - Short circuit or no resistance is detected (wires crossed or jumper on the switch)",
+    "0x03": "Open - Open circuit or infinite resistance is detected (wires broken or cut)",
+    "0x04": "Fault - Resistance does not correspond to known states (wires tampered with or circuit defective)",
+    "0x05": "Unknown - Not initialized or in need of configuration (not de-bounced; may need calibration)",
+    "0x06-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use (vendor defined)"
+   }
+  },
+  "outputStatus": {
+   "page": 48,
+   "table": "Table 53",
+   "values": {
+    "0x00": "Inactive",
+    "0x01": "Active"
+   }
+  },
+  "localTamperStatus": {
+   "page": 46,
+   "table": "Table 50",
+   "values": {
+    "0x00": "Normal",
+    "0x01": "Tamper"
+   }
+  },
+  "localPowerStatus": {
+   "page": 46,
+   "table": "Table 50",
+   "values": {
+    "0x00": "Normal",
+    "0x01": "Power failure"
+   }
+  },
+  "readerTamperStatus": {
+   "page": 48,
+   "table": "Table 54",
+   "values": {
+    "0x00": "Normal",
+    "0x01": "Not connected",
+    "0x02": "Tamper"
+   }
+  },
+  "rawCardFormatCode": {
+   "page": 50,
+   "table": "Table 55",
+   "values": {
+    "0x00": "Not specified (raw bit array)",
+    "0x01": "P/data/P (Wiegand)",
+    "0x02": "UID",
+    "0x03": "OSS-SID",
+    "0x04-0x7F": "Reserved for future use",
+    "0x80-0xFE": "Reserved for private use",
+    "0xFF": "Reserved for vendor specific data"
+   }
+  },
+  "fmtReadDirection": {
+   "page": 52,
+   "table": "Table 56",
+   "values": {
+    "0x00": "Forward read",
+    "0x01": "Reverse read",
+    "0x02-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "fmtFields": {
+   "page": 52,
+   "table": "Table 56",
+   "fields": [
+    "Reader Number (1)",
+    "Read Direction (1)",
+    "Character Count (1, includes START, END, CKSUM)",
+    "Data (ASCII, Character Count bytes)"
+   ]
+  },
+  "keypadEncoding": {
+   "page": 52,
+   "table": "Table 57 note",
+   "values": {
+    "0x30-0x39": "Digits 0 through 9",
+    "0x7F": "clear/delete/'*' key (ASCII DELETE)",
+    "0x0D": "enter/'#' key (ASCII return)",
+    "0x41": "A or F1",
+    "0x42": "B or F2",
+    "0x43": "C or F3",
+    "0x44": "D or F4",
+    "0x45": "F1 & F2",
+    "0x46": "F2 & F3",
+    "0x47": "F3 & F4",
+    "0x48": "F1 & F4"
+   }
+  },
+  "idRequestCode": {
+   "page": 19,
+   "table": "Table 7",
+   "values": {
+    "0x00": "Send Standard PD ID Block",
+    "0x01-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "capRequestCode": {
+   "page": 19,
+   "table": "Table 8",
+   "values": {
+    "0x00": "Send Standard Reply",
+    "0x01": "Return extended capabilities response",
+    "0x02-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "readerNumber": {
+   "page": [
+    23,
+    25,
+    26
+   ],
+   "values": {
+    "0x00": "Default Reader Number value",
+    "0x01-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "keysetKeyType": {
+   "page": 80,
+   "table": "Table D.2",
+   "values": {
+    "0x01": "Secure Channel Base Key"
+   }
+  },
+  "fileTransferType": {
+   "page": 36,
+   "table": "Table 34",
+   "values": {
+    "0x01": "Opaque file contents recognizable by this specific PD",
+    "0x02": "Template for the next osdp_BIOMATCH",
+    "0x03": "PD-specific opaque data for \"display\"",
+    "0x04-0x7F": "Reserved for future use",
+    "0x80-0xFF": "Reserved for private use"
+   }
+  },
+  "ftActionFlags": {
+   "page": 61,
+   "table": "Table 68",
+   "bits": {
+    "bit0 (0x01)": {
+     "0": "dedicate for filetransfer",
+     "1": "OK to interleave"
+    },
+    "bit1 (0x02)": {
+     "0": "stay in secure channel if SC is active",
+     "1": "shall leave secure channel for file transfer"
+    },
+    "bit2 (0x04)": {
+     "0": "no other activity",
+     "1": "A separate poll response is available"
+    }
+   }
+  },
+  "ftStatusDetail": {
+   "page": 61,
+   "table": "Table 68",
+   "type": "int16 little-endian, signed",
+   "values": {
+    "0": "ok to proceed",
+    "1": "file contents processed",
+    "2": "rebooting now, expect full communications reset",
+    "3": "PD is finishing file transfer. ACU shall send \"idle\" (FtFragmentSize=0) osdp_FILETRANSFER messages until status changes to another value.",
+    "-32768..-4": "Reserved for future use",
+    "-3": "file data unacceptable (malformed)",
+    "-2": "unrecognized file contents",
+    "-1": "abort file transfer",
+    "4..32767": "Reserved for future use"
+   },
+   "rawLE": {
+    "FDFF": -3,
+    "FEFF": -2,
+    "FFFF": -1,
+    "0000": 0,
+    "0100": 1,
+    "0200": 2,
+    "0300": 3
+   }
+  },
+  "xrwMode": {
+   "page": 17,
+   "table": "Table 5",
+   "values": {
+    "0x00": "Default - no specific behaviour mode; XWR commands read back and set the behaviour mode",
+    "0x01": "Transparent smart card interface support",
+    "0x02-0xFF": "Reserved for future use"
+   }
+  },
+  "xwrMode0Commands": {
+   "page": 37,
+   "table": "Table 36",
+   "values": {
+    "0x01": "Request the PD to return the current XRW_MODE in effect (Read Setting)",
+    "0x02": "Set the mode and config",
+    "0x03-0xFF": "Reserved for future use"
+   }
+  },
+  "xwrMode1Commands": {
+   "page": 38,
+   "table": "Table 40",
+   "values": {
+    "0x01": "Pass the APDU embedded in this command to the specified reader",
+    "0x02": "Notifies the designated reader to terminate its connection to the Smart Card",
+    "0x03": "Instructs the designated reader to perform \"Secure PIN Entry\"",
+    "0x04": "Instructs the designated reader to perform a Smart Card Scan",
+    "0x05": "Reserved for future use"
+   }
+  },
+  "xrdMode0Replies": {
+   "page": 62,
+   "table": "Table 70",
+   "values": {
+    "0x00": "General error indication: PD was unable to process the command (osdp_PR00ERROR)",
+    "0x01": "Returns the current XRW_MODE in effect (osdp_PR00REQR)",
+    "0x02": "Returns a Card Information Report when a Smart Card is detected (osdp_PR00CIRR)"
+   }
+  },
+  "xrdMode1CardPresence": {
+   "page": 64,
+   "table": "Table 74 ('Mode Specific Reply Codes')",
+   "note": "Titled as mode-1 reply codes, but the values describe card presence and are used as the PR01PRES Status byte. The spec is ambiguous here.",
+   "values": {
+    "0x00": "Card Not Present",
+    "0x01": "Card Present - Interface not specified",
+    "0x02": "Card Present on Contactless Interface",
+    "0x03": "Card Present on Contact Interface",
+    "0x04": "reserved for future use"
+   }
+  },
+  "xrdMode0CardProtocol": {
+   "page": 63,
+   "table": "Table 73",
+   "values": {
+    "0x00": "Detected Card Protocol Contact T0T1",
+    "0x01": "Detected Card Protocol 14443 A/B",
+    "0x02": "Reserved for future use"
+   }
+  },
+  "securityBlockType": {
+   "page": 77,
+   "table": "Table D.1",
+   "values": {
+    "0x11": "SCS_11 Begin new Secure Connection Sequence (ACU to PD)",
+    "0x12": "SCS_12 Secure Connection Sequence step 2 (PD to ACU)",
+    "0x13": "SCS_13 Secure Connection Sequence step 3 (ACU to PD)",
+    "0x14": "SCS_14 Secure Connection Sequence step 4 (PD to ACU)",
+    "0x15": "SCS_15 Secure Session msg. w. MAC, authenticated only or with non-encrypted Data (ACU to PD)",
+    "0x16": "SCS_16 Secure Session msg. w. MAC, authenticated only or with non-encrypted Data (PD to ACU)",
+    "0x17": "SCS_17 Secure Session msg. with MAC & Data Encryption (ACU to PD)",
+    "0x18": "SCS_18 Secure Session msg. with MAC & Data Encryption (PD to ACU)"
+   }
+  },
+  "pdcapFunctionCodes": {
+   "page": [
+    68,
+    69,
+    70,
+    71,
+    72,
+    73
+   ],
+   "section": "Annex B",
+   "recordLayout": "Byte 0 Function Code | Byte 1 Compliance (level of compliance with the function) | Byte 2 Number of (number of objects of this type)",
+   "codes": {
+    "1": {
+     "name": "Contact Status Monitoring",
+     "page": 68,
+     "description": "Can monitor the state of a switch through a two-wire connection (inputs).",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "PD monitors and reports the state of the circuit without any supervision, using its default interpretation of contact state as active/inactive.",
+      "0x02": "Like 01, plus: the open/closed to active/inactive encoding can be configured (normally closed / normally open).",
+      "0x03": "Like 02, plus: supervised monitoring; each circuit's operating mode is set by configuration.",
+      "0x04": "Like 03, plus: custom End-Of-Line settings within the manufacturer's guidelines."
+     },
+     "numberOf": "The number of Inputs."
+    },
+    "2": {
+     "name": "Output Control",
+     "page": [
+      68,
+      69
+     ],
+     "description": "Switched outputs, typically relays, with active/inactive states and optional timed activation.",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "The PD can activate and deactivate the Output on direct command from the ACU.",
+      "0x02": "Like 0x01, plus: the Output driver can be configured to set the inactive state (inverted drive, for fail-safe/fail-secure).",
+      "0x03": "Like 0x01, plus: timed commands to the Output are accepted.",
+      "0x04": "Like 02 and 03 - normal/inverted drive and timed operation."
+     },
+     "numberOf": "The number of Outputs."
+    },
+    "3": {
+     "name": "Card Data Format",
+     "page": 69,
+     "description": "Form in which card data is sent to the ACU.",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "Card data sent as an array of bits, not exceeding 1024 bits.",
+      "0x02": "Card data sent as an array of BCD characters, not exceeding 256 characters.",
+      "0x03": "Card data can be sent as an array of bits or as an array of BCD characters."
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "4": {
+     "name": "Reader LED Control",
+     "page": 69,
+     "description": "Presence and type of reader LEDs.",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "On/off control only; osdp_LED colour values 0-1.",
+      "0x02": "Timed commands; colour values 0-1.",
+      "0x03": "Like 02, plus red-green LEDs; colour values 0-2.",
+      "0x04": "Like 02, plus red-green-amber LEDs; colour values 0-3.",
+      "0x05": "Like 02, plus red-green-blue LEDs; colour values 0-7.",
+      "0x06": "Like 02, plus red-green-blue LEDs; may support any colour values 0-255."
+     },
+     "numberOf": "The number of LEDs per reader."
+    },
+    "5": {
+     "name": "Reader Audible Output",
+     "page": 70,
+     "description": "Presence and type of a buzzer or tone generator.",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "On/off control only.",
+      "0x02": "Timed commands."
+     },
+     "numberOf": "Ignored; there is only one audible output per PD (6.11)."
+    },
+    "6": {
+     "name": "Reader Text Output",
+     "page": 70,
+     "description": "Character text display.",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "1 row of 16 characters",
+      "0x02": "2 rows of 16 characters",
+      "0x03": "4 rows of 16 characters"
+     },
+     "numberOf": "Number of textual displays per reader."
+    },
+    "7": {
+     "name": "Time Keeping",
+     "page": 70,
+     "deprecated": true,
+     "description": "Date/time awareness (deprecated).",
+     "compliance": {
+      "0x00": "The PD does not support time/date functionality"
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "8": {
+     "name": "Check Character Support",
+     "page": 70,
+     "description": "Whether the PD supports CRC-16 (all PDs support checksum).",
+     "compliance": {
+      "0x00": "The PD does not support CRC-16, only checksum mode. (The table also has a row '0x00 Capability not supported'; both mean no CRC.)",
+      "0x01": "The PD supports the 16-bit CRC-16 mode."
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "9": {
+     "name": "Communication Security",
+     "page": 71,
+     "description": "How far the PD supports Annex D communication security.",
+     "compliance": {
+      "type": "bitmap of supported encryption algorithms",
+      "bit0": "AES128 support",
+      "bits1-7": "Must be 0x00"
+     },
+     "numberOf": {
+      "type": "key exchange capabilities",
+      "bit0": "AES128 support",
+      "bits1-7": "Must be 0x00"
+     }
+    },
+    "10": {
+     "name": "Receive BufferSize",
+     "page": 71,
+     "description": "Largest single message the PD can receive.",
+     "compliance": "LSB of the buffer size",
+     "numberOf": "MSB of the buffer size",
+     "decode": "size = Compliance | (NumberOf << 8)"
+    },
+    "11": {
+     "name": "Largest Combined Message Size",
+     "page": 71,
+     "description": "Largest multi-part message the PD can handle.",
+     "compliance": "LSB of the combined buffer size",
+     "numberOf": "MSB of the combined buffer size",
+     "decode": "size = Compliance | (NumberOf << 8)"
+    },
+    "12": {
+     "name": "Smart Card Support",
+     "page": [
+      71,
+      72
+     ],
+     "description": "Kind of direct smart card support.",
+     "compliance": {
+      "type": "bitmap",
+      "bit0 (0x01)": "PD supports XRW_MODE=1 (transparent mode)",
+      "bit1 (0x02)": "PD supports extended packet mode",
+      "note": "Either one or both modes may be supported."
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "13": {
+     "name": "Readers",
+     "page": 72,
+     "description": "Number of credential reader devices present.",
+     "compliance": "Must be 0x00",
+     "numberOf": "Number of attached downstream readers."
+    },
+    "14": {
+     "name": "Biometrics",
+     "page": 72,
+     "description": "Ability to handle biometric input.",
+     "compliance": {
+      "0x00": "Capability not supported",
+      "0x01": "Fingerprint, Template 1",
+      "0x02": "Fingerprint, Template 2",
+      "0x03": "Iris, Template 1"
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "15": {
+     "name": "Secure PIN Entry",
+     "page": 72,
+     "description": "Support for Secure PIN Entry (SPE) with ISO 7816 smart cards.",
+     "compliance": {
+      "0x00": "Capability not supported.",
+      "0x01": "Support Secure PIN Entry"
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "16": {
+     "name": "OSDP Version",
+     "page": [
+      72,
+      73
+     ],
+     "description": "Version of OSDP the PD supports.",
+     "compliance": {
+      "0x00": "Unspecified (also used for pre-IEC 60839-11-5 implementations)",
+      "0x01": "IEC 60839-11-5",
+      "0x02": "SIA OSDP 2.2",
+      "0x03": "SIA OSDP 2.2.1",
+      "0x04": "SIA OSDP 2.2.2",
+      "0x05-0x7F": "Reserved for future use",
+      "0x80-0xFF": "Reserved for private use"
+     },
+     "numberOf": "Must be 0x00"
+    },
+    "17": {
+     "name": "Secure PD Biometrics match support",
+     "page": [
+      6,
+      73
+     ],
+     "description": "Listed in the table of contents (B.18, p.67 in TOC) but NOT defined in the body. Compliance/number meanings are not in this document.",
+     "undefinedInSpec": true
+    },
+    "18": {
+     "name": "Extended Capability Display",
+     "page": 6,
+     "description": "Listed in the table of contents (B.19) with a broken bookmark and NOT defined in the body.",
+     "undefinedInSpec": true
+    }
+   }
+  }
+ },
+ "behaviors": [
+  {
+   "id": "reply-deadline",
+   "page": [
+    12,
+    43
+   ],
+   "rule": "The PD must start its reply less than REPLY_DELAY (at most 200 ms, typically under 3 ms) after the last byte of the command.",
+   "anomaly": "Replies later than 200 ms after the command ends; frequent replies over a few ms may mean an overloaded PD."
+  },
+  {
+   "id": "one-reply-per-command",
+   "page": 11,
+   "rule": "Only the ACU sends spontaneously. Each command addressed to a PD gets exactly one reply from that PD.",
+   "anomaly": "An unsolicited PD frame, two replies to one command, or a reply from a PD that was not addressed."
+  },
+  {
+   "id": "reply-address-match",
+   "page": 13,
+   "rule": "Reply ADDR = command ADDR | 0x80 (broadcast 0x7F -> 0xFF). Commands have bit 7 clear.",
+   "anomaly": "Reply address does not match the command address; a command with bit 0x80 set; addresses above 0x7F in commands."
+  },
+  {
+   "id": "broadcast-single-pd",
+   "page": 13,
+   "rule": "Address 0x7F should only be used when a single PD is connected.",
+   "anomaly": "Broadcast on a multi-PD bus (possible reply collisions)."
+  },
+  {
+   "id": "no-reply-next-cycle",
+   "page": 12,
+   "rule": "If no reply arrives within REPLY_DELAY, the ACU moves on to the next communication cycle.",
+   "anomaly": "A timeout."
+  },
+  {
+   "id": "retry-limit",
+   "page": 13,
+   "rule": "After a timeout, the ACU should resend with the same SQN a limited number of times (recommended at most 3), then restart the session (SQN 0). Retries should stop if the PD sends a NAK other than bad checksum.",
+   "anomaly": "More than 3 consecutive retransmissions; retries continuing after a non-0x01 NAK."
+  },
+  {
+   "id": "sqn-increment",
+   "page": 14,
+   "rule": "The ACU SQN goes 1,2,3,1,2,3... per PD (0 only at startup/reset).",
+   "anomaly": "Skipped SQN values, or SQN 0 in the middle of a session (a reset)."
+  },
+  {
+   "id": "same-sqn-retransmit",
+   "page": [
+    14,
+    43
+   ],
+   "rule": "A command repeated with the same SQN is a retransmission: the PD should send its previous reply again without running the command a second time. The ACU also does this after receiving a reply with a bad checksum/CRC.",
+   "decode": "Label as 'retransmission of previous command'."
+  },
+  {
+   "id": "sqn-zero-reset",
+   "page": 14,
+   "rule": "SQN 0 from the ACU means (re)start: the PD discards its last reply and processes the command. A PD reply with SQN 0 (except BUSY) asks the ACU to reset the sequence and clears any secure channel session.",
+   "anomaly": "An unexpected SQN 0 reply means a PD reset or loss of the secure session."
+  },
+  {
+   "id": "nak-sqn",
+   "page": 44,
+   "rule": "NAK 0x04 = unexpected sequence number.",
+   "anomaly": "Sequence desync."
+  },
+  {
+   "id": "after-nak",
+   "page": [
+    13,
+    43,
+    84
+   ],
+   "rule": "After NAK 0x01 (bad checksum/CRC), the ACU may resend. After other NAKs, the ACU should not retry the same command. NAK 0x05/0x06 point to security mismatches; NAK 0x06 on SQN 0 in a session means the PD reset the secure channel; NAK 0x03 means the command is not supported; NAK 0x09 means bad record(s) and may list per-record codes.",
+   "anomaly": "Repeated identical commands after a non-0x01 NAK; a burst of NAK 0x06."
+  },
+  {
+   "id": "busy-handling",
+   "page": [
+    11,
+    16,
+    58
+   ],
+   "rule": "osdp_BUSY (SQN 0, never inside the secure channel) means 'try again'. The ACU repeats the same command in its original form (same SQN), right away or after serving other PDs, until it gets a non-BUSY reply, or gives up and moves on with a new SQN, which the PD must treat as a new command.",
+   "anomaly": "BUSY with a non-zero SQN or with an SCB; a long run of BUSY replies."
+  },
+  {
+   "id": "two-step-data",
+   "page": [
+    11,
+    58
+   ],
+   "rule": "Data that is not available right away: the PD ACKs the command and later returns the data reply to osdp_POLL (for example BIOREAD -> ACK, ... POLL -> BIOREADR). If a specific reply is required and the data is late, the PD answers BUSY.",
+   "decode": "Link a later poll response to the earlier request."
+  },
+  {
+   "id": "poll-responses",
+   "page": [
+    18,
+    46,
+    47,
+    48,
+    50,
+    52
+   ],
+   "rule": "Replies allowed to POLL: ACK (nothing to report), LSTATR/ISTATR/OSTATR/RSTATR (on change), RAW/FMT (card read), KEYPAD, BIOREADR, BIOMATCHR, MFGREP, XRD. Card and keypad data not yet reported is deleted on communication loss.",
+   "anomaly": "PDID, PDCAP, COM, CCRYPT or RMAC_I sent in reply to POLL."
+  },
+  {
+   "id": "expected-reply-map",
+   "page": [
+    66,
+    67
+   ],
+   "rule": "ID->PDID; CAP->PDCAP; LSTAT->LSTATR; ISTAT->ISTATR; OSTAT->OSTATR; RSTAT->RSTATR; OUT->ACK/OSTATR; LED/BUZ/TEXT/BIOREAD/BIOMATCH/KEYSET/ACURXSIZE/KEEPACTIVE/ABORT->ACK; COMSET->COM; CHLNG->CCRYPT; SCRYPT->RMAC_I; FILETRANSFER->FTSTAT; MFG->ACK/MFGREP; XWR->ACK/XRD; PIVDATA->PIVDATAR; GENAUTH->GENAUTHR; CRAUTH->CRAUTHR. NAK or BUSY is possible for any command.",
+   "anomaly": "A reply code outside the expected set."
+  },
+  {
+   "id": "offline-timeout",
+   "page": 12,
+   "rule": "The PD goes off-line if more than 8 s pass between messages it answers. Both sides reset and restart the connect sequence (SQN 0, and a new secure channel handshake if used).",
+   "anomaly": "More than 8 s gap to a PD, followed by SQN 0 / CHLNG."
+  },
+  {
+   "id": "inter-char-timeout",
+   "page": 12,
+   "rule": "A gap of more than about 20 ms inside a frame aborts reception; receivers re-sync on the next SOM after an inter-character timeout.",
+   "anomaly": "Gaps inside a frame, or bytes between frames that are not a SOM (noise or a collision)."
+  },
+  {
+   "id": "frame-integrity",
+   "page": [
+    13,
+    14,
+    15
+   ],
+   "rule": "LEN must equal the actual frame length (7-1440). CTRL bits 4-7 must be 0. The check bytes must match (checksum or CRC per CTRL bit 2). A bad check makes the PD answer NAK 0x01.",
+   "anomaly": "LEN mismatch, reserved CTRL bits set, bad CRC/checksum."
+  },
+  {
+   "id": "size-limit",
+   "page": 12,
+   "rule": "A PD may reject a frame larger than its RX buffer (PDCAP FC10) with NAK 0x02. All must accept 128 bytes.",
+   "anomaly": "Frames over the PD's advertised buffer."
+  },
+  {
+   "id": "record-commands",
+   "page": 18,
+   "rule": "OUT (4-byte records) and LED (14-byte records): DATA length must be a multiple of the record size. If not, NAK 0x09 with no completion array. Records are processed in order; any failure gives NAK 0x09 plus one completion byte per record.",
+   "anomaly": "DATA length not a multiple of the record size."
+  },
+  {
+   "id": "multipart",
+   "page": [
+    15,
+    16
+   ],
+   "rule": "Fragments go in order with no gaps and start at offset 0. The ACU may not interleave other commands to the same PD during a multi-part command, except ABORT. Early end: offset >= total with fragment size 0. The PD may reject with NAK 0x09.",
+   "anomaly": "Offset gaps or going backwards, a first fragment with non-zero offset, other commands to the same PD in the middle of a transfer."
+  },
+  {
+   "id": "file-transfer-flow",
+   "page": [
+    34,
+    36,
+    60,
+    61
+   ],
+   "rule": "FILETRANSFER (first fragment no more than 128 bytes or the PDCAP limit) -> FTSTAT. Status 0 = continue; honour FtDelay ms before the next fragment; FtUpdateMsgMax may raise the fragment size; offsets increase. Status 1 = processed; 2 = PD rebooting (expect full comms reset: SQN 0, re-handshake); 3 = finishing, so the ACU sends idle FILETRANSFERs (size = total, offset = total, fragment size 0) until the status changes; negative = abort/error (-1 abort, -2 unrecognised, -3 malformed). FtAction bit0 = interleave allowed, bit1 = leave secure channel for the transfer, bit2 = a separate poll response is waiting.",
+   "anomaly": "Next fragment sent before FtDelay passed; continuing after a negative status; non-increasing offsets; interleaving when bit0=0."
+  },
+  {
+   "id": "abort",
+   "page": 31,
+   "rule": "osdp_ABORT ends any multi-part or file transfer in progress. A PD that cannot abort (for example mid firmware update) NAKs."
+  },
+  {
+   "id": "comset-change",
+   "page": [
+    26,
+    53
+   ],
+   "rule": "New address and baud take effect after the PD sends osdp_COM. Expect later traffic at the new address/baud, and the ACU to follow.",
+   "anomaly": "Unexpected COMSET (reconfiguration or hijack attempt)."
+  },
+  {
+   "id": "secure-handshake-order",
+   "page": [
+    76,
+    78,
+    79
+   ],
+   "rule": "CHLNG(SCS_11) -> CCRYPT(SCS_12) -> SCRYPT(SCS_13) -> RMAC_I(SCS_14), then only SCS_15-18 (plus BUSY / NAK). CTRL SCB bit set on all of them.",
+   "anomaly": "Steps out of order; plaintext (no SCB) commands or replies after the session starts (which ends the session); RMAC_I status 0xFF; repeated handshakes; SCBK-D (SEC_BLK_DATA[0]=0) used outside installation."
+  },
+  {
+   "id": "scs15-with-data",
+   "page": 80,
+   "rule": "SCS_15/16 are meant for messages without DATA. Messages with DATA must use SCS_17/18.",
+   "anomaly": "An SCS_15/16 frame that carries DATA (plaintext payload inside a session)."
+  },
+  {
+   "id": "keyset-context",
+   "page": [
+    80,
+    81
+   ],
+   "rule": "KEYSET only over a secure (encrypted) connection or in physically secured installation mode.",
+   "anomaly": "osdp_KEYSET sent in plaintext (the key is exposed) or under SCBK-D."
+  },
+  {
+   "id": "mac-failure",
+   "page": [
+    78,
+    84
+   ],
+   "rule": "A MAC mismatch (correct CRC, wrong MAC) ends the session. Expect a NAK 0x06 on SQN 0 or a new CHLNG.",
+   "anomaly": "Sessions torn down repeatedly (possible tampering or replay)."
+  },
+  {
+   "id": "code-direction",
+   "page": [
+    66,
+    67
+   ],
+   "rule": "Codes 0x76 and 0x80 are used in both directions: 0x76 = osdp_CHLNG command / osdp_CCRYPT reply; 0x80 = osdp_MFG command / osdp_PIVDATAR reply. Decode by the ADDR reply bit.",
+   "decode": "Always pick the name from the direction."
+  },
+  {
+   "id": "reserved-codes",
+   "page": [
+    18,
+    66,
+    67
+   ],
+   "rule": "Command/reply codes not in Annex A are reserved. Vendor extensions must use MFG (0x80) and MFGREP/MFGSTATR/MFGERRR.",
+   "anomaly": "Unknown codes (the PD should NAK 0x03)."
+  }
+ ],
+ "secureChannelSteps": [
+  {
+   "step": 1,
+   "direction": "ACU->PD",
+   "message": "osdp_CHLNG (0x76)",
+   "sbType": "SCS_11",
+   "carries": "SEC_BLK_DATA[0] key select (1=SCBK, 0=SCBK-D); 8-byte RND.A challenge in clear",
+   "plain": "The ACU asks the reader to start a secure session and sends a random challenge."
+  },
+  {
+   "step": 2,
+   "direction": "PD->ACU",
+   "message": "osdp_CCRYPT (0x76)",
+   "sbType": "SCS_12",
+   "carries": "Key select; cUID(8) | RND.B(8) | Client Cryptogram(16), all in clear",
+   "plain": "The reader sends its ID, its own random number, and proof that it knows the shared key. The PD has now derived S-ENC, S-MAC1, S-MAC2. If the ACU sees the PD used a different key (SCBK vs SCBK-D), it may switch keys or restart at SCS_11."
+  },
+  {
+   "step": 3,
+   "direction": "ACU->PD",
+   "message": "osdp_SCRYPT (0x77)",
+   "sbType": "SCS_13",
+   "carries": "Key select; Server Cryptogram(16) in clear",
+   "plain": "The ACU checked the reader's proof and now proves that it also knows the key."
+  },
+  {
+   "step": 4,
+   "direction": "PD->ACU",
+   "message": "osdp_RMAC_I (0x78)",
+   "sbType": "SCS_14",
+   "carries": "SEC_BLK_DATA[0]: 0x01 accepted / 0xFF rejected; MAC_I(16)",
+   "plain": "The reader accepts (or rejects) the ACU and sends the starting value for the message-authentication chain. On success the session is up. The PD may instead answer NAK 0x05."
+  }
+ ]
+}

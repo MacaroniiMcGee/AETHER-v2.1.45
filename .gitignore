@@ -56,3 +56,6 @@ frontend/public/oncafe-console-builder.*.html
 # Runtime-generated firmware uploads
 backend/data/firmware-library/
 backend/uploads/
+
+# Device firmware jobs and backups
+.device-firmware/

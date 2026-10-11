@@ -1,0 +1,7 @@
+{"t":1791658542393,"k":"relay","ch":"relay:0","v":1,"src":"physical"}
+{"t":1791658543245,"k":"relay","ch":"relay:0","v":0,"src":"physical"}
+{"t":1791667559141,"k":"card","ch":"osdp:osdp-reader-1","v":1,"src":"osdp","m":{"format":"wiegand26"}}
+{"t":1791667572085,"k":"card","ch":"osdp:osdp-reader-1","v":1,"src":"osdp","m":{"format":"wiegand26"}}
+{"t":1791667617163,"k":"card","ch":"wiegand:reader-1","v":1,"src":"wiegand","m":{"bits":26}}
+{"t":1791667617859,"k":"card","ch":"wiegand:reader-1","v":1,"src":"wiegand","m":{"bits":37}}
+{"t":1791667618534,"k":"card","ch":"wiegand:reader-1","v":1,"src":"wiegand","m":{"bits":26}}

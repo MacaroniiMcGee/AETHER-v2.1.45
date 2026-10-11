@@ -1,0 +1,66 @@
+# Aether VMS stream — mediamtx config
+#
+# One RTSP URL, nothing else:  rtsp://<pi-ip>:8554/aether
+#
+# The capture (Xvfb + Chromium + ffmpeg) is started ON DEMAND when the first
+# VMS connects and stopped 30 s after the last one disconnects, so an unwatched
+# unit spends no CPU on it.
+#
+# Only keys that exist in both older (v1.9+) and current (v1.21) mediamtx are
+# used, so this also works with an already-installed binary.
+
+logLevel: warn
+logDestinations: [stdout]
+
+# Local-only status API, read by the backend's /api/vms/stream-status
+api: true
+apiAddress: 127.0.0.1:9997
+metrics: false
+pprof: false
+playback: false
+
+# RTSP on; every other server off
+rtsp: true
+rtspAddress: :8554
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+# mediamtx v1.21+ also starts a MoQ server by default (ports 8892/8893).
+# Remove this line if you install a mediamtx older than v1.21 (it won't know the key).
+moq: false
+
+# Anyone on the LAN may VIEW; only this unit may PUBLISH or use the API.
+# (The stock config lets any host publish, which would let someone replace the feed.)
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+        path:
+  - user: any
+    pass:
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: publish
+        path:
+      - action: api
+      - action: metrics
+      - action: pprof
+
+paths:
+  aether:
+    runOnDemand: /opt/aether-stream/capture.sh
+    runOnDemandRestart: true
+    # Chromium needs a few seconds to paint the first frame on a Pi
+    runOnDemandStartTimeout: 30s
+    runOnDemandCloseAfter: 30s
+
+  # Old URL from the onvif-streaming setup, kept so existing VMS entries keep working
+  live:
+    source: rtsp://127.0.0.1:8554/aether
+    sourceOnDemand: true
+    sourceOnDemandStartTimeout: 35s
+    sourceOnDemandCloseAfter: 30s

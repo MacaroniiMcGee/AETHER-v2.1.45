@@ -1,18 +1,22 @@
+@import './theme/hv-tokens.css';
+@import './theme/fonts.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
 
+/* HV GUI Guidelines — page surface, text and Noto Sans (bundled; works offline on the Pi) */
+html { background: rgb(var(--hv-surface)); color: rgb(var(--hv-text)); }
+body { font-family: "Noto Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
 
-/* select-dark-scheme */
-select {
-  color-scheme: dark;
-}
-select option {
-  background-color: #1f1f1f;
-  color: #e2e8f0;
-}
-select option:checked {
-  background-color: #2a2a2a;
-}
+/* HV shadow strengths (Shadow/1–3): Dark 32/40/48 %, Light 12/12/16 % */
+:root[data-theme="light"] { --hv-shadow-1: 0.12; --hv-shadow-2: 0.12; --hv-shadow-3: 0.16; }
+
+/* Native select menus follow the active theme */
+select option { background-color: rgb(var(--hv-popup-panel)); color: rgb(var(--hv-text)); }
+select option:checked { background-color: rgb(var(--hv-box)); }
+
+/* Smooth theme switch */
+html.hv-theme-switching * { transition: background-color .15s ease, border-color .15s ease, color .15s ease !important; }

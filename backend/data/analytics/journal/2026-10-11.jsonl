@@ -1,0 +1,6 @@
+{"t":1791681308917,"k":"card","ch":"wiegand:reader-1","v":1,"src":"wiegand","m":{"bits":26}}
+{"t":1791681318202,"k":"card","ch":"wiegand:reader-1","v":1,"src":"wiegand","m":{"bits":26}}
+{"t":1791681318939,"k":"relay","ch":"relay:0","v":0,"src":"physical"}
+{"t":1791681321339,"k":"relay","ch":"relay:7","v":1,"src":"physical"}
+{"t":1791681331908,"k":"relay","ch":"relay:7","v":0,"src":"physical"}
+{"t":1791681334299,"k":"relay","ch":"relay:0","v":1,"src":"physical"}
