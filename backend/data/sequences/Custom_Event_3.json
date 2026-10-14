@@ -1,0 +1,79 @@
+{
+  "id": "Custom_Event_3",
+  "name": "Custom Event 3",
+  "steps": [
+    {
+      "id": "col-1791753989062",
+      "blocks": [
+        {
+          "id": "block-1791753989062-xz7u1qprd",
+          "type": "reader",
+          "readerId": "__this_door__",
+          "format": "w26",
+          "mode": "single",
+          "readType": "card",
+          "facilityCode": 100,
+          "cardNumber": 1234,
+          "sequenceMode": "sequential",
+          "delayBetweenCards": 500,
+          "pinValue": "1234",
+          "keypadFormat": "4bit"
+        }
+      ]
+    },
+    {
+      "id": "col-1791754035562",
+      "blocks": [
+        {
+          "id": "block-1791754035562-tnnnllqpg",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "17:40"
+        }
+      ]
+    },
+    {
+      "id": "col-1791754043633",
+      "blocks": [
+        {
+          "id": "block-1791754043633-3656nnaqv",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "dps",
+          "action": "pulse",
+          "pulseDuration": 30000
+        },
+        {
+          "id": "block-1791754102419-jcbnk99y9",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "rexIn",
+          "action": "pulse",
+          "pulseDuration": 5000
+        }
+      ]
+    },
+    {
+      "id": "col-1791754063748",
+      "blocks": [
+        {
+          "id": "block-1791754063748-n294mi7pc",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1,
+          "waitMin": 1,
+          "waitMax": 5,
+          "waitUntilTime": "17:40"
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-10-11T21:28:55.826Z",
+  "updatedAt": "2026-10-11T21:28:55.826Z",
+  "globalDelay": 1000,
+  "repeatCount": 0,
+  "version": "workflow-v2"
+}

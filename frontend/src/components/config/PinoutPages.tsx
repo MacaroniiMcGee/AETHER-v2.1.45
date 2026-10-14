@@ -9,6 +9,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ArrowLeft, Cpu } from 'lucide-react';
 import { T, Card } from './ui';
+import { parseSavedDoorConfig, collectDoorOutputUsers, collectDoorInputUsers } from '../../lib/doorOutputs';   // AETHER_ANALOG_IN: + collectDoorInputUsers
 
 const C_POWER = 'rgb(var(--hv-brand))', C_WIEG = 'rgb(var(--hv-info-strong))', C_I2C = 'rgb(var(--hv-success))', C_GND = 'rgb(var(--hv-text-3))', C_OFF = 'rgb(var(--hv-line))';
 
@@ -191,7 +192,7 @@ function SequentBoard({ api, onPi }: { api: string; onPi: () => void }) {
   const [optos, setOptos] = useState<number[]>([]);
   const [zones, setZones] = useState<Record<number, { v: number; state: string }>>({});
   const [dac, setDac] = useState<number[]>([]);
-  const [names, setNames] = useState<{ relay: Record<number, string[]>; opto: Record<number, string[]>; analog: Record<number, string[]>; relayIO: Record<number, string> }>({ relay: {}, opto: {}, analog: {}, relayIO: {} });
+  const [names, setNames] = useState<{ relay: Record<number, string[]>; opto: Record<number, string[]>; analog: Record<number, string[]>; relayIO: Record<number, string>; dac: Record<number, string[]>; od: Record<number, string[]> }>({ relay: {}, opto: {}, analog: {}, relayIO: {}, dac: {}, od: {} });
   const [hat, setHat] = useState<any>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [bus, setBus] = useState<{ readers: string[]; emulator: boolean; port: string }>({ readers: [], emulator: false, port: '/dev/ttyAMA0' });
@@ -199,17 +200,20 @@ function SequentBoard({ api, onPi }: { api: string; onPi: () => void }) {
   useEffect(() => {
     (async () => {
       const relay: Record<number, string[]> = {}, opto: Record<number, string[]> = {}, analog: Record<number, string[]> = {}, relayIO: Record<number, string> = {};
+      const dacUse: Record<number, string[]> = {}, odUse: Record<number, string[]> = {};
       const add = (m: Record<number, string[]>, n: number, s: string) => { if (n >= 1 && n <= 8) (m[n] ||= []).push(s); };
       try {
-        const d = (await (await fetch(`${api}/api/doors/config`)).json())?.config;
-        for (const door of d?.doors || []) {
-          if (door.enabled === false || (door.ioSource && door.ioSource !== 'physical')) continue;
-          if (door.lock?.channel != null) add(relay, door.lock.channel + 1, `${door.name} strike`);
-          for (const [io, lbl] of [[door.dps, 'DPS'], [door.rexIn, 'REX']] as const) {
-            if (io?.channel == null) continue;
-            (io.hardwareType === 'analog' ? add(analog, io.channel + 1, `${door.name} ${lbl}`) : add(opto, io.channel + 1, `${door.name} ${lbl}`));
-          }
+        const j = await (await fetch(`${api}/api/doors/config`)).json();
+        const d = j?.config;
+        // AETHER_DOOR_OUTPUTS (Update 69): a door's Lock, DPS and REX are all
+        // outputs Aether drives (REL n / DAC n / O.D. n), same labels as the Doors page.
+        for (const u of collectDoorOutputUsers(parseSavedDoorConfig(j)?.doors || [])) {
+          if (u.stackLevel) continue;   // only stack 0 is drawn
+          add(u.kind === 'dac' ? dacUse : u.kind === 'od' ? odUse : relay, u.channel + 1, u.user);
         }
+        // AETHER_LOCK_WATCH (Update 71): a watched Lock is an INPUT on OPTO n (not a relay)
+        // AETHER_ANALOG_IN (Update 72): ... or on ADC n; custom input I/O on OPTO n / ADC n too
+        for (const u of collectDoorInputUsers(parseSavedDoorConfig(j)?.doors || [])) add(u.kind === 'analog' ? analog : opto, u.channel + 1, u.user);
         const so = d?.systemOutputs || {};
         for (const [k, l] of [['powerFault', 'Power fault'], ['batteryFault', 'Battery fault'], ['tamper', 'Tamper'], ['fai', 'Fire alarm']] as const)
           if (so[k]?.channel >= 0) add(relay, so[k].channel + 1, l);
@@ -217,8 +221,20 @@ function SequentBoard({ api, onPi }: { api: string; onPi: () => void }) {
       try {
         const el = JSON.parse(localStorage.getItem('aether.elevator.v2') || 'null');
         for (const f of el?.floors || []) {
-          if (f.relay > 0) add(relay, f.relay, `Elevator F${f.id} tracking`);
-          if (f.input > 0) (el.inputType === 'analog' ? add(analog, f.input, `Elevator F${f.id} grant`) : add(opto, f.input, `Elevator F${f.id} grant`));
+          if (!f || typeof f !== 'object') continue;
+          // AETHER_ELEV_TRACK (Update 71): per-floor track / grant (v3); older configs use relay / input
+          const t = f.track, g = f.grant;
+          if (t && typeof t === 'object') {
+            const n = Number(t.channel) + 1;
+            if (t.kind === 'relay') add(relay, n, `Elevator F${f.id} tracking`);
+            else if (t.kind === 'od') add(odUse, n, `Elevator F${f.id} tracking`);
+            else if (t.kind === 'dac') add(dacUse, n, `Elevator F${f.id} tracking`);
+          } else if (f.relay > 0) add(relay, f.relay, `Elevator F${f.id} tracking`);
+          if (g && typeof g === 'object') {
+            const n = Number(g.channel) + 1;
+            if (g.kind === 'opto') add(opto, n, `Elevator F${f.id} grant`);
+            else if (g.kind === 'analog') add(analog, n, `Elevator F${f.id} grant`);
+          } else if (f.input > 0) (el.inputType === 'analog' ? add(analog, f.input, `Elevator F${f.id} grant`) : add(opto, f.input, `Elevator F${f.id} grant`));
         }
       } catch { /* */ }
       try {
@@ -226,7 +242,7 @@ function SequentBoard({ api, onPi }: { api: string; onPi: () => void }) {
         for (const o of app?.outputs || []) (o.inputType === 'analog' ? add(analog, o.channel + 1, o.name) : add(opto, o.channel + 1, o.name));
         for (const i of app?.inputs || []) if (i.channel >= 0 && i.channel < 8) relayIO[i.channel + 1] = i.name;
       } catch { /* */ }
-      setNames({ relay, opto, analog, relayIO });
+      setNames({ relay, opto, analog, relayIO, dac: dacUse, od: odUse });
     })();
   }, [api]);
 
@@ -271,15 +287,18 @@ function SequentBoard({ api, onPi }: { api: string; onPi: () => void }) {
         return { title: `OPTO ${t.ch}`, name: who.join(' · ') || undefined, state: on ? 'active' : 'idle', on, color: T.teal, used: who.length > 0, compact: false }; }
       case 'adc': { const z = zones[t.ch!], who = names.analog[t.ch!] || [];
         return { title: `ADC ${t.ch} · 0–3.3 V`, name: who.join(' · ') || 'EOL zone', state: z ? `${(z.v / 1000).toFixed(2)} V · ${z.state.toLowerCase()}` : '—', on: !!z && z.state !== 'NORMAL', color: zoneColor(z?.state), used: true, compact: false }; }
-      case 'dac': { const v = dac[t.ch! - 1];
-        return { title: `DAC ${t.ch} · 0–10 V`, name: 'Analog output', state: v != null ? `${v.toFixed(2)} V` : '—', on: !!v, color: T.amber, used: true, compact: false }; }
+      case 'dac': { const v = dac[t.ch! - 1], who = names.dac[t.ch!] || [];
+        return { title: `DAC ${t.ch} · 0–10 V`, name: who.length ? who.join(' · ') : 'Analog output', state: v != null ? `${v.toFixed(2)} V` : '—', on: !!v, color: T.amber, used: true, clash: who.length > 1, compact: false }; }
       case 'rs485': {
         const active = bus.emulator || bus.readers.length > 0;
         return { title: `RS-485 ${t.label.endsWith('A') ? 'A (+)' : 'B (−)'}`, name: `OSDP bus · ${bus.port}`,
           state: bus.emulator ? 'Controller Emulator' : bus.readers.length ? `${bus.readers.length} reader${bus.readers.length > 1 ? 's' : ''}` : 'idle',
           on: active, color: T.blue, used: true, compact: false };
       }
-      case 'od': return { title: `O.D. ${t.ch}`, name: 'not used by Aether', color: T.dim, used: false, compact: false };
+      case 'od': { const who = names.od[t.ch!] || [];
+        return who.length
+          ? { title: `O.D. ${t.ch}`, name: who.join(' · '), color: T.amber, used: true, clash: who.length > 1, compact: false }
+          : { title: `O.D. ${t.ch}`, name: 'not used by Aether', color: T.dim, used: false, compact: false }; }
       case 'com': return { title: t.label, name: 'common for 4 relays', color: T.dim, used: true, compact: true };
       case 'gnd': return { title: 'GND', color: T.dim, used: false, compact: true };
       case 'pwr': return { title: '+5V', color: 'rgb(var(--hv-brand-fg))', used: true, compact: true };

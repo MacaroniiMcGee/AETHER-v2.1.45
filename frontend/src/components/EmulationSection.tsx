@@ -11,6 +11,17 @@ import {
   MessageSquare, Repeat, Shield, Target, Timer, Hash, FileText, AlertTriangle,
   CheckCircle, XCircle, HelpCircle, Cpu, Binary, BarChart3, CalendarClock
 } from 'lucide-react';
+import { loadSavedDoors, driveDoorOutput, readDoorOutput, lockDriveIO, isDoorOutputAssigned, doorOutputLabel, isLockWatch, lockWatchLabel } from '../lib/doorOutputs';
+// AETHER_DOOR_WORKFLOWS: door Custom Events run saved workflows through this engine
+import {
+  THIS_DOOR_ID, THIS_DOOR_READER, THIS_DOOR_LABEL, THIS_DOOR_NO_CONTEXT_ERROR,
+  onRunWorkflowRequest, onEditWorkflowRequest, pastDeadline, DEADLINE_ERROR, emitWorkflowSaved, navigateToDoors, linkWorkflowToDoorEvent,
+  resolveDoorId, blockUsesThisDoor, doorReaderIdOf, mapDoorReaderToPool, looksLikeDoorReaderId,
+  type WiegandCfgDoor, type LegacyPoolReader,
+  // AETHER_DOOR_IO_WORKFLOWS: door Custom I/O in blocks
+  type CustomIoRef, type DoorCustomIo, MAX_CUSTOM_IO, resolveCustomIo, customIoDriveLevel, customInputActive,
+  nodeScope, remapCustomIoRef, isCustomIoInput, isCustomIoRelay, customIoChannelLabel, customIoOptionLabel, customIoSlotLabel, customIoRefValue, parseCustomIoRefValue,
+} from '../lib/workflowBridge';
 
 // ========== TYPE DEFINITIONS ==========
 interface CardFormat {
@@ -116,10 +127,11 @@ interface WorkflowBlock {
   cardCount?: number;
   delayBetweenCards?: number;
   doorId?: number;
-  eventType?: 'lock' | 'dps' | 'rexIn';
+  eventType?: 'lock' | 'dps' | 'rexIn' | 'io';   // AETHER_DOOR_IO_WORKFLOWS: 'io' = a door Custom I/O (ioRef)
+  ioRef?: CustomIoRef;                           // AETHER_DOOR_IO_WORKFLOWS: {id} specific door / {index} This-door slot
   ioType?: 'input' | 'output' | 'controller';
   ioId?: number;
-  action?: 'activate' | 'deactivate' | 'pulse';
+  action?: 'activate' | 'deactivate' | 'pulse' | 'toggle';   // AETHER_DOOR_IO_WORKFLOWS: 'toggle' (Custom I/O relays; the I/O block already ran it)
   pulseDuration?: number;
   // ── Wait block ─────────────────────────────────────────────────────────
   // 'until_time' waits for the wall-clock time to reach waitUntilTime (HH:MM).
@@ -135,7 +147,11 @@ interface WorkflowBlock {
   controlType?: 'stop' | 'loop';
   loopToColumn?: number;
   waitInputId?: number;
-  waitInputType?: 'input' | 'door_dps' | 'door_rex' | 'controller_input' | 'controller_output';
+  waitInputType?: 'input' | 'door_dps' | 'door_rex' | 'controller_input' | 'controller_output' | 'door_io';
+  // AETHER_DOOR_IO_WORKFLOWS: 'door_io' = a door's Custom INPUT (waitInputDoorId + waitIoRef);
+  // high/low = active/inactive (the I/O's reverseSense applied); waitZoneState = exact EOL state (analog)
+  waitIoRef?: CustomIoRef;
+  waitZoneState?: 'ALARM' | 'NORMAL' | 'TROUBLE' | 'TAMPER';
   waitInputDoorId?: number;
   waitInputState?: 'high' | 'low' | 'any_change';
   waitInputTimeout?: number;
@@ -145,6 +161,10 @@ interface WorkflowBlock {
   assertCondition?: boolean;
   assertInputId?: number;
   assertInputState?: 'high' | 'low';
+  // AETHER_DOOR_IO_WORKFLOWS: assert a door Custom INPUT instead (high = active)
+  assertSource?: 'input' | 'door_io';
+  assertDoorId?: number;
+  assertIoRef?: CustomIoRef;
   supervisionInputId?: number;
   supervisionState?: SupervisionState;
   supervisionDuration?: number;
@@ -221,7 +241,16 @@ interface EmulationWorkflowProps {
   logSystem: (type: string, message: string) => void;
   /** True while the Emulation page is the one on screen (the component stays mounted while hidden). */
   active?: boolean;
+  /** AETHER_DOOR_WORKFLOWS: the page's legacy reader pool ('reader1'…), only to map a door's legacy reader id by pins. */
+  legacyReaderPool?: LegacyPoolReader[];
+  /** AETHER_DOOR_IO_WORKFLOWS: cluster node id — with ipAddress, the bridge scope of this node. */
+  nodeId?: string;
 }
+
+// AETHER_DOOR_WORKFLOWS: a run started for a door event (runWorkflow override).
+type RunOverride = { columns: WorkflowColumn[]; globalDelay?: number; repeatCount?: number; contextDoorId?: number | null; label?: string };
+// AETHER_DOOR_WORKFLOWS: the builder was opened from a door's Custom Event.
+type DoorEditContext = { doorId: number; doorName: string; eventIndex: number; eventName: string; workflowId: string | null; isNew: boolean };
 
 const DEFAULT_FORMATS: CardFormat[] = [
   { id: '26', name: 'Standard 26-bit', bits: 26, facilityBits: 8, cardBits: 16, maxFacility: 255, maxCard: 65535, category: 'wiegand' },
@@ -254,6 +283,15 @@ const FALLBACK_BLOCK_CONFIG = {
 };
 const getBlockConfig = (t: any) =>
   (t && (BLOCK_CONFIG as any)[t]) ? (BLOCK_CONFIG as any)[t] : FALLBACK_BLOCK_CONFIG;
+// AETHER_DOOR_WORKFLOWS: option for a reader <select>'s current value when nothing else
+// lists it (a converted 'wg-2', a stale id, or no reader). Without it the controlled
+// select would DISPLAY its first option, "This door". A plain function, not a component.
+const unlistedReaderOption = (value: string | undefined, listed: boolean) => {
+  if (listed) return null;
+  if (!value) return <option value="">— Select a reader —</option>;
+  return <option value={value}>{looksLikeDoorReaderId(value) ? `Doors-page reader ${value}` : `${value} (missing)`}</option>;
+};
+
 const isKnownBlockType = (t: any): t is BlockType =>
   typeof t === 'string' && Object.prototype.hasOwnProperty.call(BLOCK_CONFIG, t);
 
@@ -271,6 +309,8 @@ const SCENARIO_TEMPLATES: Record<ScenarioType, { name: string; description: stri
 const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   ipAddress, connected, inputs, outputs, controllerOutputs, controllerInputs, doors,
   readerPool: propReaderPool, isEmulating, setIsEmulating, logEmulation, logSystem, active = true,
+  legacyReaderPool,   // AETHER_DOOR_WORKFLOWS
+  nodeId,             // AETHER_DOOR_IO_WORKFLOWS
 }) => {
   const [workflow, setWorkflow] = useState<WorkflowColumn[]>([]);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
@@ -283,7 +323,34 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   const [executingBlockIds, setExecutingBlockIds] = useState<Set<string>>(new Set());
   const [isPaused, setIsPaused] = useState(false);
   const executionControlRef = useRef({ shouldStop: false, isPaused: false });
-  const [testResults, setTestResults] = useState<{ passed: number; failed: number; assertions: string[] }>({ passed: 0, failed: 0, assertions: [] });
+  const [testResults, setTestResultsState] = useState<{ passed: number; failed: number; assertions: string[] }>({ passed: 0, failed: 0, assertions: [] });
+  // Results also live in a ref so the end-of-run "📊 Results" line reads the
+  // live tally, not the value captured when runWorkflow's closure was created.
+  const testResultsRef = useRef<{ passed: number; failed: number; assertions: string[] }>({ passed: 0, failed: 0, assertions: [] });
+  type TestResults = { passed: number; failed: number; assertions: string[] };
+  const setTestResults = (u: TestResults | ((p: TestResults) => TestResults)) => {
+    const next = typeof u === 'function' ? (u as (p: TestResults) => TestResults)(testResultsRef.current) : u;
+    testResultsRef.current = next;
+    setTestResultsState(next);
+  };
+  // AETHER_EMU_RUNTOKEN (Update 69): every runWorkflow() takes a fresh token.
+  // A run is "live" only while runTokenRef.current === its token and shouldStop
+  // is false. Every await point in the engine checks halted(tok); waits sleep in
+  // 100 ms slices that check it, so Stop takes effect within ~100 ms and a
+  // superseded run can never wake up later and keep going next to a new one.
+  // isEmulating is cleared only by the run that still owns the current token,
+  // in its finally, i.e. when its loop has actually exited.
+  const runTokenRef = useRef(0);
+  const activeRunRef = useRef(0);   // token of the run whose loop is still executing (0 = none)
+  const halted = (tok: number) => runTokenRef.current !== tok || executionControlRef.current.shouldStop;
+  const sleepRun = async (ms: number, tok: number): Promise<boolean> => {
+    const end = Date.now() + Math.max(0, ms || 0);
+    while (Date.now() < end) {
+      if (halted(tok)) return false;
+      await new Promise(r => setTimeout(r, Math.min(100, end - Date.now())));
+    }
+    return !halted(tok);
+  };
   const [readerPool, setReaderPool] = useState<Reader[]>([]);
   const [cardFormats, setCardFormats] = useState<CardFormat[]>(DEFAULT_FORMATS);
   const [loadingReaders, setLoadingReaders] = useState(false);
@@ -448,6 +515,8 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   const wasActiveRef = useRef(active);
   useEffect(() => {
     if (active && !wasActiveRef.current && connected && ipAddress) {
+      // AETHER_DOOR_IO_WORKFLOWS: door names / Custom I/O may have changed on the Doors page
+      loadSavedDoors(`http://${ipAddress}:3001`).then(ds => setPickerDoors(ds.map((d: any) => ({ id: Number(d.id), name: String(d.name || `Door ${d.id}`), ios: Array.isArray(d.ios) ? d.ios : [] })))).catch(() => { /* keep */ });
       loadReadersFromBackend();
       loadCardFormats();
       loadSavedWorkflows();
@@ -476,7 +545,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         block.pinValue = '1234';
         block.keypadFormat = '4bit';
         break;
-      case 'door': block.doorId = doors[0]?.id || 1; block.eventType = 'lock'; block.action = 'pulse'; block.pulseDuration = 500; break;
+      case 'door': block.doorId = pickerDoors[0]?.id || doors[0]?.id || 1; block.eventType = 'lock'; block.action = 'pulse'; block.pulseDuration = 500; break;
       case 'io': block.ioType = 'output'; block.ioId = outputs[0]?.id || 1; block.action = 'pulse'; block.pulseDuration = 500; break;
       case 'wait':
         block.waitType = 'seconds'; block.waitValue = 3;
@@ -705,21 +774,344 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         const { address, index } = controllerIoFromId(inputId);
         return await readControllerOutput(address, index);
       }
-      // Pi GPIO input
+      // AETHER_EMU_READS (Update 69): Pi-side read of what the CONTROLLER is
+      // doing on channel N. The items IOAccessEmulator passes carry `channel`
+      // (not `gpio` — that built /api/gpio/read/undefined → 400 → always LOW),
+      // and /api/gpio/read/:pin reads a RELAY, not an opto. Aether watches the
+      // controller's outputs on its opto inputs (or, when the channel's monitor
+      // is configured as Analog 0-10 V, on the EOL supervision zone), so:
+      //   opto   → GET /api/gpio/opto/:channel        (raw state, 400 ms bulk cache)
+      //   analog → GET /api/supervision/zone/0/:ch+1  (ALARM/TAMPER = HIGH)
+      // HIGH/LOW is the raw electrical state; NO/NC display inversion is not applied.
+      // Note: the pickers list `inputs` (ids 1-8 ↔ channel 0-7); the selected item
+      // only supplies the channel — the read is always Aether's opto/analog on it.
       const input = inputs.find(i => i.id === inputId); if (!input) return false;
-      const response = await fetch(`http://${ipAddress}:3001/api/gpio/read/${(input as any).gpio}`);
-      const result = await response.json();
-      return result.success ? result.value === 1 : false;
+      const ch = Number((input as any).channel ?? (input as any).gpio);
+      if (!Number.isInteger(ch) || ch < 0 || ch > 7) return false;
+      const monitor = outputs.find(o => Number((o as any).channel ?? (o as any).gpio) === ch);
+      if ((monitor as any)?.inputType === 'analog') return await readAnalogZone(ch);
+      return await readOptoChannel(ch);
     } catch (e) { return false; }
   };
 
+  // AETHER_EMU_READS (Update 69): raw opto read (0-7). Returns false on any error.
+  const readOptoChannel = async (ch: number): Promise<boolean> => {
+    try {
+      const r = await fetch(`http://${ipAddress}:3001/api/gpio/opto/${ch}`);
+      if (!r.ok) return false;
+      const d = await r.json();
+      return d.success ? Number(d.state ?? d.value) === 1 : false;
+    } catch (e) { return false; }
+  };
+  // AETHER_EMU_READS (Update 69): analog EOL zone state, from GET /api/supervision/status
+  // (one shared scan the backend caches for 5 s; boards[0].zones[] with 1-based
+  // `channel`). /api/supervision/zone/... is NOT used: it hits the ADC directly,
+  // bypassing the I2C queue. All callers share one snapshot refreshed at most once
+  // per second (and one in-flight request). ALARM/TAMPER = active (HIGH).
+  // No socket is passed into this component, so there is no live
+  // 'input_state_change' map here; this throttled HTTP read is the path.
+  const zoneSnapRef = useRef<{ at: number; zones: any[] | null; inflight: Promise<any[] | null> | null }>({ at: 0, zones: null, inflight: null });
+  const getZoneSnapshot = async (): Promise<any[] | null> => {
+    const z = zoneSnapRef.current;
+    if (z.zones && Date.now() - z.at < 1000) return z.zones;
+    if (z.inflight) return z.inflight;
+    z.inflight = (async () => {
+      try {
+        const r = await fetch(`http://${ipAddress}:3001/api/supervision/status`);
+        if (!r.ok) return z.zones;
+        const d = await r.json();
+        const zones = Array.isArray(d?.boards?.[0]?.zones) ? d.boards[0].zones : null;
+        if (zones) { z.zones = zones; z.at = Date.now(); }
+        return zones;
+      } catch (e) { return z.zones; }
+      finally { z.inflight = null; }
+    })();
+    return z.inflight;
+  };
+  const readAnalogZone = async (ch: number): Promise<boolean> => {
+    const st = (await readAnalogZoneState(ch)) || '';
+    return st === 'ALARM' || st === 'TAMPER';
+  };
+  // AETHER_DOOR_IO_WORKFLOWS: the zone's state word (ALARM / NORMAL / TROUBLE / TAMPER), null if unknown
+  const readAnalogZoneState = async (ch: number): Promise<string | null> => {
+    const zones = await getZoneSnapshot();
+    const zone = zones?.find((x: any) => Number(x?.channel) === ch + 1);
+    const st = String(zone?.state || '').toUpperCase();
+    return st || null;
+  };
+  // AETHER_EMU_READS (Update 69): read back a relay Aether itself drives (0-7)
+  // from /api/gpio/status (cache is invalidated on every relay write).
+  // AETHER_DOOR_IO_WORKFLOWS: null when the relay could not be read (a toggle must then do nothing)
+  const readRelayState = async (ch: number): Promise<boolean | null> => {
+    try {
+      const r = await fetch(`http://${ipAddress}:3001/api/gpio/status`);
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (!d?.success || !Array.isArray(d.relays)) return null;
+      const rel = d.relays.find((x: any) => x.channel === ch) ?? d.relays[ch];
+      if (!rel || rel.error || (Number(rel.state) !== 0 && Number(rel.state) !== 1)) return null;
+      return Number(rel.state) === 1;
+    } catch (e) { return null; }
+  };
+  // AETHER_DOOR_IO_WORKFLOWS: opto read that reports failure (null) instead of LOW
+  const readOptoChannelOrNull = async (ch: number): Promise<boolean | null> => {
+    try {
+      const r = await fetch(`http://${ipAddress}:3001/api/gpio/opto/${ch}`);
+      if (!r.ok) return null;
+      const d = await r.json();
+      const v = Number(d?.state ?? d?.value);
+      return d?.success && (v === 0 || v === 1) ? v === 1 : null;
+    } catch (e) { return null; }
+  };
+
+  // AETHER_EMU_READS (Update 69): door Lock / DPS / REX are OUTPUTS Aether drives
+  // (relay / dac / od, channel -1 = unassigned). The `doors` prop from
+  // IOAccessEmulator is a hard-coded placeholder list, so door blocks use the
+  // SAVED door config (lib/doorOutputs). Loaded once at run start and again on
+  // demand when a door id isn't found.
+  const savedDoorsRef = useRef<any[] | null>(null);
+  // Saved doors for the Door / Wait-door pickers (the `doors` prop is a stale
+  // hard-coded list). Loaded on mount and whenever ipAddress / connection changes.
+  const [pickerDoors, setPickerDoors] = useState<{ id: number; name: string; ios: DoorCustomIo[] }[]>([]);   // AETHER_DOOR_IO_WORKFLOWS: + ios
+  useEffect(() => {
+    if (!ipAddress) return;
+    let cancelled = false;
+    loadSavedDoors(`http://${ipAddress}:3001`)
+      .then(ds => { if (!cancelled) setPickerDoors(ds.map((d: any) => ({ id: Number(d.id), name: String(d.name || `Door ${d.id}`), ios: Array.isArray(d.ios) ? d.ios : [] }))); })
+      .catch(() => { /* keep previous list */ });
+    return () => { cancelled = true; };
+  }, [ipAddress, connected]);
+  const doorPickerOptions = (selectedId: number | undefined) => {
+    const opts = pickerDoors.map(d => ({ id: d.id, label: `${d.name} (#${d.id})` }));
+    if (selectedId !== undefined && Number(selectedId) !== THIS_DOOR_ID && !opts.some(o => o.id === Number(selectedId))) {
+      opts.unshift({ id: Number(selectedId), label: `Door #${selectedId} (missing)` });
+    }
+    opts.unshift({ id: THIS_DOOR_ID, label: THIS_DOOR_LABEL });   // AETHER_DOOR_WORKFLOWS: resolves at run time
+    return opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>);
+  };
+  // AETHER_DOOR_IO_WORKFLOWS: <option>s for a door's Custom I/O. A specific door lists its
+  // ios by name ({id}); "This door" lists slots 1-6 ({index}) resolved on the running door.
+  const customIoOptions = (doorId: number | undefined, current: CustomIoRef | undefined, inputsOnly: boolean) => {
+    const cur = customIoRefValue(current, Number(doorId) === THIS_DOOR_ID);
+    const opts: { v: string; label: string }[] = [];
+    if (Number(doorId) === THIS_DOOR_ID) {
+      for (let i = 0; i < MAX_CUSTOM_IO; i++) opts.push({ v: `io:idx:${i}`, label: `${customIoSlotLabel(i)}${inputsOnly ? ' (must be an OPTO / ADC input)' : ''}` });
+    } else {
+      const d = pickerDoors.find(x => x.id === Number(doorId));
+      (d?.ios || []).forEach(io => { if (io && io.id && (!inputsOnly || isCustomIoInput(io))) opts.push({ v: `io:id:${io.id}`, label: customIoOptionLabel(io) }); });
+    }
+    if (cur && !opts.some(o => o.v === cur)) opts.unshift({ v: cur, label: `${current?.id ? `Custom I/O "${current.id}"` : customIoSlotLabel(current?.index ?? 0)} (missing on this door)` });
+    return opts.map(o => <option key={o.v} value={o.v}>{o.label}</option>);
+  };
+  // Changing the door keeps the same Custom I/O where it can: id <-> slot position.
+  const remapIoRef = (fromDoorId: number, toDoorId: number, ref: CustomIoRef | undefined): CustomIoRef | undefined => {
+    const ios = (id: number) => pickerDoors.find(x => x.id === Number(id))?.ios || [];
+    return remapCustomIoRef(ref, ios(fromDoorId), ios(toDoorId), fromDoorId === THIS_DOOR_ID, toDoorId === THIS_DOOR_ID);   // AETHER_DOOR_IO_WORKFLOWS
+  };
+  // Name of a block's Custom I/O for summaries.
+  const customIoName = (doorId: number | undefined, ref: CustomIoRef | undefined) => {
+    if (!ref) return 'Custom I/O ?';
+    if (Number(doorId) === THIS_DOOR_ID || ref.id === undefined) return customIoSlotLabel(ref.index ?? 0);
+    const io = pickerDoors.find(x => x.id === Number(doorId))?.ios.find(x => x.id === ref.id);
+    return io ? `${io.name || io.id} · ${customIoChannelLabel(io)}` : `Custom I/O "${ref.id}" (missing)`;
+  };
+  const reloadSavedDoors = async (): Promise<any[]> => {
+    try { savedDoorsRef.current = await loadSavedDoors(`http://${ipAddress}:3001`); }
+    catch (e) { if (!savedDoorsRef.current) savedDoorsRef.current = []; }
+    return savedDoorsRef.current || [];
+  };
+  // A door id not found after one on-demand reload is remembered as missing for
+  // the rest of the run (cleared at run start), so a Wait polling 10×/s never
+  // refetches /api/doors/config.
+  const missingDoorIdsRef = useRef<Set<number>>(new Set());
+  const findSavedDoor = async (doorId: number): Promise<any | null> => {
+    const id = Number(doorId);
+    let d = (savedDoorsRef.current || []).find((x: any) => Number(x.id) === id);
+    if (!d && !missingDoorIdsRef.current.has(id)) {
+      d = (await reloadSavedDoors()).find((x: any) => Number(x.id) === id);
+      if (!d) missingDoorIdsRef.current.add(id);
+    }
+    return d || null;
+  };
+
+  // AETHER_DOOR_WORKFLOWS: "This door" context. A run started by a door event
+  // stores {tok, doorId}; only blocks of THAT run (same token) see the door.
+  // A run from the builder has doorId null, so "This door" blocks are skipped.
+  const runContextRef = useRef<{ tok: number; doorId: number | null; label: string; cols: number; repeat: number }>({ tok: 0, doorId: null, label: '', cols: 0, repeat: 0 });
+  const [doorRunCol, setDoorRunCol] = useState(-1);   // progress of a door-event run (the canvas shows another workflow)
+  const contextDoorFor = (tok: number): number | null => (runContextRef.current.tok === tok ? runContextRef.current.doorId : null);
+  // /api/wiegand/config doors (to map a door's 'wg-<n>' reader) — fetched on demand, once per run.
+  const wiegandCfgRef = useRef<WiegandCfgDoor[] | null>(null);
+  const loadWiegandCfgDoors = async (): Promise<WiegandCfgDoor[]> => {
+    if (wiegandCfgRef.current) return wiegandCfgRef.current;
+    try {
+      const r = await fetch(`http://${ipAddress}:3001/api/wiegand/config`);
+      const j = r.ok ? await r.json() : null;
+      wiegandCfgRef.current = Array.isArray(j?.doors) ? j.doors : [];
+    } catch (e) { wiegandCfgRef.current = []; }
+    return wiegandCfgRef.current || [];
+  };
+  // Block door id -> real door id ("This door" -> the run's door). null + error when it can't.
+  const resolveBlockDoorId = (doorId: number | undefined, tok: number): { id: number | null; error?: string } => {
+    const r = resolveDoorId(doorId, contextDoorFor(tok));
+    return r.ok ? { id: r.value as number } : { id: null, error: r.error };
+  };
+  // Block reader id -> Reader. "This door" -> the run's door's reader, mapped into
+  // readerPool; a Doors-page id ('wg-1', 'osdp-…', 'reader1', from converted
+  // events) is mapped the same way. Any other id: the pool lookup, as before.
+  const resolveBlockReader = async (readerId: string | undefined, tok: number): Promise<{ reader: Reader | null; error?: string }> => {
+    const direct = readerPool.find(r => r.id === readerId);
+    if (direct) return { reader: direct };
+    let doorReaderId: string | null | undefined = readerId;
+    let who = '';
+    if (readerId === THIS_DOOR_READER) {
+      const ctx = contextDoorFor(tok);
+      if (ctx === null) return { reader: null, error: THIS_DOOR_NO_CONTEXT_ERROR };
+      const door = await findSavedDoor(ctx);
+      if (!door) return { reader: null, error: `This door (#${ctx}) is not in the saved door config` };
+      doorReaderId = doorReaderIdOf(door);
+      who = `${door.name || `Door ${ctx}`}: `;
+    } else if (!looksLikeDoorReaderId(readerId)) {
+      return { reader: null };
+    }
+    const wg = doorReaderId && /^wg-\d+$/.test(doorReaderId) ? await loadWiegandCfgDoors() : [];
+    const m = mapDoorReaderToPool(doorReaderId, readerPool, wg, legacyReaderPool || []);
+    if (!m.ok) return { reader: null, error: `${who}${m.error}` };
+    return { reader: readerPool.find(r => r.id === m.value) || null };
+  };
+
+  // ── AETHER_DOOR_IO_WORKFLOWS: door Custom I/O ("Additional I/O") ──────────
+  // Relay outputs are driven exactly as the Doors page does (DoorSection
+  // setRelayOutput: POST /api/gpio/set), so the Pi's relay_state_change and the
+  // per-door activity log see it. Inputs (OPTO / ADC) follow the panel: read only.
+  const setCustomIoRelay = async (io: DoorCustomIo, on: boolean) => {
+    const ch = Number(io.channel);
+    if (!Number.isInteger(ch) || ch < 0 || ch > 7) throw new Error(`relay channel ${ch + 1} does not exist (REL 1-8)`);
+    const r = await fetch(`http://${ipAddress}:3001/api/gpio/set`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: ch, value: on ? 1 : 0, stackLevel: Number(io.stackLevel) || 0 }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j?.success === false) throw new Error(j?.error || `HTTP ${r.status}`);
+  };
+  const runDoorCustomIo = async (block: WorkflowBlock, door: any, columnIndex: number, tok: number, log: (c: number, m: string, t?: EmulationLogEntry['type']) => void) => {
+    const rr = resolveCustomIo(door, block.ioRef);
+    if (!rr.ok) { log(columnIndex, `❌ ${rr.error} — skipped`, 'error'); return; }
+    const { io, index, note } = rr.value!;
+    if (note) log(columnIndex, `ℹ️ ${note}`, 'info');   // id not on this door → slot used
+    const nm = `${door.name} ${io.name || customIoSlotLabel(index)} (${customIoChannelLabel(io)})`;
+    const act = block.action || 'pulse';
+    if (isCustomIoInput(io)) { log(columnIndex, `⚠️ ${nm} is an input — it follows the panel and can't be driven; ${act} skipped`, 'warning'); return; }
+    if (!isCustomIoRelay(io)) { log(columnIndex, `⚠️ ${nm}: only relay Custom I/O can be driven from a workflow — skipped`, 'warning'); return; }
+    if (isEmulatedDoor(door)) { log(columnIndex, `⚠️ ${nm}: Custom I/O relays are driven only on Aether (physical) doors — skipped`, 'warning'); return; }
+    if (halted(tok)) return;
+    if (act === 'pulse') {
+      const on = customIoDriveLevel('activate', false, io.reverseSense).relayOn;
+      const off = customIoDriveLevel('deactivate', false, io.reverseSense).relayOn;
+      log(columnIndex, `⚡ Pulse ${nm} (${block.pulseDuration || 500}ms)`, 'info');
+      await setCustomIoRelay(io, on);
+      let full = false;
+      try { full = await sleepRun(block.pulseDuration || 500, tok); }
+      finally { await setCustomIoRelay(io, off); }   // release always runs
+      log(columnIndex, full ? `  ✓ Pulse complete` : `  ⏹ Pulse stopped early — released`, full ? 'success' : 'warning');
+    } else if (act === 'toggle') {
+      const cur = await readRelayState(Number(io.channel));
+      if (halted(tok)) return;
+      if (cur === null) { log(columnIndex, `⚠️ ${nm}: relay state could not be read — toggle skipped`, 'warning'); return; }
+      const lv = customIoDriveLevel('toggle', cur, io.reverseSense);
+      await setCustomIoRelay(io, lv.relayOn);
+      log(columnIndex, `🔄 ${nm} toggled → ${lv.active ? 'ACTIVE' : 'INACTIVE'} (relay ${lv.relayOn ? 'ON' : 'OFF'})`, 'success');
+    } else {
+      const lv = customIoDriveLevel(act, false, io.reverseSense);
+      await setCustomIoRelay(io, lv.relayOn);
+      log(columnIndex, `${lv.active ? '🟢' : '🔴'} ${nm} ${lv.active ? 'ACTIVE' : 'INACTIVE'} (relay ${lv.relayOn ? 'ON' : 'OFF'})`, 'success');
+    }
+  };
+  // A block's door + Custom INPUT (Wait Input / Assert). Error text when it can't.
+  const resolveDoorInput = async (doorId: number | undefined, ref: CustomIoRef | undefined, tok: number): Promise<{ io?: DoorCustomIo; label?: string; error?: string }> => {
+    const rd = resolveBlockDoorId(doorId || 1, tok);
+    if (rd.id === null) return { error: rd.error };
+    const door = await findSavedDoor(rd.id);
+    if (!door) return { error: `Door ${rd.id}: not found in saved door config` };
+    const r = resolveCustomIo(door, ref);
+    if (!r.ok) return { error: r.error };
+    const { io, index } = r.value!;
+    const label = `${door.name} ${io.name || customIoSlotLabel(index)} (${customIoChannelLabel(io)})${r.value!.note ? ` [${r.value!.note}]` : ''}`;
+    if (!isCustomIoInput(io)) return { error: `${label} is not an input (only OPTO / ADC Custom I/O can be watched)` };
+    return { io, label };
+  };
+  // Live reading of a Custom INPUT: opto level / EOL zone state, and whether it is ACTIVE.
+  // ok:false = no reading (request failed / zone unknown): never counts as a state or a change.
+  const readCustomInput = async (io: DoorCustomIo): Promise<{ ok: boolean; active: boolean; zone: string | null; text: string }> => {
+    const ch = Number(io.channel);
+    if (io.hardwareType === 'analog') {
+      const zone = await readAnalogZoneState(ch);
+      return { ok: zone !== null, active: customInputActive(io, { zone }), zone, text: zone || 'no reading' };
+    }
+    const opto = await readOptoChannelOrNull(ch);
+    return { ok: opto !== null, active: opto !== null && customInputActive(io, { opto }), zone: null, text: opto === null ? 'no reading' : opto ? 'ON' : 'OFF' };
+  };
+
+  // AETHER_EMU_READS (Update 69): EMULATED doors (ioSource 'emulated', emuBoard =
+  // board address) — mirrors DoorSection: Lock → board OUTPUT n
+  // (POST /api/emulator/device/:addr/output/:n, Lock reverseSense not applied),
+  // DPS/REX → board INPUT n (POST .../input/:n, reverseSense inverts). The board is
+  // resolved from /api/emulator/status; if it can't be, the caller logs an error
+  // and drives NOTHING. An emulated door never falls through to a physical relay.
+  const isEmulatedDoor = (door: any) => door?.ioSource === 'emulated';
+  const resolveEmuBoard = async (door: any): Promise<any | null> => {
+    const addr = Number(door?.emuBoard) || 0;
+    if (!addr) return null;
+    try {
+      const r = await fetch(`http://${ipAddress}:3001/api/emulator/status`);
+      if (!r.ok) return null;
+      const j = await r.json();
+      return (j?.status?.devices || []).find((d: any) => Number(d.address) === addr) || null;
+    } catch (e) { return null; }
+  };
+  const setEmuOutput = async (address: number, index: number, active: boolean) => {
+    const r = await fetch(`http://${ipAddress}:3001/api/emulator/device/${address}/output/${index}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j?.success === false) throw new Error(j?.error || `emulator output ${index} rejected (addr ${address})`);
+  };
+  // Drive one role of an emulated door; returns a description, throws on any problem.
+  const driveEmulatedDoorRole = async (door: any, ev: 'lock' | 'dps' | 'rexIn', on: boolean): Promise<string> => {
+    const io = door[ev];
+    const ch = Number(io?.channel);
+    if (!io || !Number.isInteger(ch) || ch < 0) throw new Error('no channel assigned');
+    const b = await resolveEmuBoard(door);
+    if (!b) throw new Error(`emulated board #${door.emuBoard || '?'} not found / not running`);
+    if (ev === 'lock') {
+      const n = Number(b.numOutputs) || 0;
+      if (ch >= n) throw new Error(`OUTPUT ${ch} out of range — board #${b.address} has ${n} outputs`);
+      await setEmuOutput(b.address, ch, on);
+      return `OUTPUT ${ch} (#${b.address}) ${on ? 'ON' : 'OFF'}`;
+    }
+    const n = Number(b.numInputs) || 0;
+    if (ch >= n) throw new Error(`INPUT ${ch} out of range — board #${b.address} has ${n} inputs`);
+    const level = io.reverseSense ? !on : on;
+    await setControllerInput(b.address, ch, level);   // POST /api/emulator/device/:addr/input/:n
+    return `INPUT ${ch} (#${b.address}) ${level ? 'ON' : 'OFF'}`;
+  };
+  // "Wait for Door DPS/REX" has no sensor to watch — nothing observes those lines —
+  // so it reads back what Aether is DRIVING (readDoorOutput: relay/dac/od, logical
+  // state with reverseSense applied). HIGH = "door open / REX pressed" as commanded.
   const readDoorInput = async (doorId: number, inputType: 'dps' | 'rex'): Promise<boolean> => {
     try {
-      const door = doors.find(d => d.id === doorId); if (!door) return false;
-      const gpio = inputType === 'dps' ? door.dps.gpio : door.rexIn.gpio;
-      const response = await fetch(`http://${ipAddress}:3001/api/gpio/read/${gpio}`);
-      const result = await response.json();
-      return result.success ? result.value === 1 : false;
+      const door = await findSavedDoor(doorId); if (!door) return false;
+      const io = inputType === 'dps' ? door.dps : door.rexIn;
+      if (!io || !isDoorOutputAssigned(io)) return false;
+      if (isEmulatedDoor(door)) {
+        // Emulated: read the board's INPUT n from the emulator snapshot (as
+        // DoorSection.refreshDoorInputs does). Never a physical relay.
+        const b = await resolveEmuBoard(door);
+        const ch = Number(io.channel);
+        if (!b || !Array.isArray(b.inputs) || ch >= (Number(b.numInputs) || b.inputs.length)) return false;
+        const raw = !!b.inputs[ch];
+        return io.reverseSense ? !raw : raw;
+      }
+      return await readDoorOutput(`http://${ipAddress}:3001`, io, undefined, `${door.name} ${inputType === 'dps' ? 'DPS' : 'REX'}`);
     } catch (e) { return false; }
   };
 
@@ -814,14 +1206,15 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     return await readOptoByChannel(channel);
   };
   const scenarioWaitFor = async (
-    block: WorkflowBlock, channel: number, target: boolean, timeoutMs: number, pollMs = 100
+    tok: number, block: WorkflowBlock, channel: number, target: boolean, timeoutMs: number, pollMs = 100
   ): Promise<{ reached: boolean; elapsedMs: number }> => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      if (executionControlRef.current.shouldStop) return { reached: false, elapsedMs: Date.now() - start };
+      if (halted(tok)) return { reached: false, elapsedMs: Date.now() - start };  // AETHER_EMU_RUNTOKEN
       const s = await scenarioReadFromPanel(block, channel);
+      if (halted(tok)) return { reached: false, elapsedMs: Date.now() - start };
       if (s === target) return { reached: true, elapsedMs: Date.now() - start };
-      await new Promise(r => setTimeout(r, pollMs));
+      await sleepRun(pollMs, tok);
     }
     return { reached: false, elapsedMs: timeoutMs };
   };
@@ -838,13 +1231,15 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     return await readOptoByChannel(channel);
   };
   const scenarioWaitDoor2 = async (
-    block: WorkflowBlock, channel: number, target: boolean, timeoutMs: number, pollMs = 100
+    tok: number, block: WorkflowBlock, channel: number, target: boolean, timeoutMs: number, pollMs = 100
   ): Promise<{ reached: boolean; elapsedMs: number }> => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      if (executionControlRef.current.shouldStop) return { reached: false, elapsedMs: Date.now() - start };
-      if (await scenarioReadDoor2(block, channel) === target) return { reached: true, elapsedMs: Date.now() - start };
-      await new Promise(r => setTimeout(r, pollMs));
+      if (halted(tok)) return { reached: false, elapsedMs: Date.now() - start };  // AETHER_EMU_RUNTOKEN
+      const s = await scenarioReadDoor2(block, channel);
+      if (halted(tok)) return { reached: false, elapsedMs: Date.now() - start };
+      if (s === target) return { reached: true, elapsedMs: Date.now() - start };
+      await sleepRun(pollMs, tok);
     }
     return { reached: false, elapsedMs: timeoutMs };
   };
@@ -900,8 +1295,10 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     pin: string,
     keypadFormat: KeypadFormat,
     facilityCode: number,
-    onProgress?: (msg: string) => void
+    onProgress?: (msg: string) => void,
+    tok?: number
   ): Promise<{ success: boolean; error?: string }> => {
+    const pinStopped = () => tok !== undefined ? halted(tok) : executionControlRef.current.shouldStop;
     if (!pin) return { success: false, error: 'PIN is empty' };
 
     // OSDP path — single backend call regardless of format
@@ -949,7 +1346,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
       };
       const keys = pin + '#';
       for (let i = 0; i < keys.length; i++) {
-        if (executionControlRef.current.shouldStop) return { success: false, error: 'stopped' };
+        if (pinStopped()) return { success: false, error: 'stopped' };
         const k = keys[i];
         const cardVal = getKeyValue(k);
         try {
@@ -962,6 +1359,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           onProgress?.(`  ✓ Key '${k}' sent (${bitLen}-bit)`);
         } catch (e: any) { return { success: false, error: `key '${k}': ${e?.message}` }; }
         if (i < keys.length - 1) await new Promise(r => setTimeout(r, 50));
+        if (pinStopped()) return { success: false, error: 'stopped' };
       }
       return { success: true };
     }
@@ -989,6 +1387,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     return Math.max(0, target.getTime() - Date.now());
   };
   const sleepUntilTime = async (
+    tok: number,
     timeStr?: string,
     dateStr?: string,
     onTick?: (remainingMs: number) => void
@@ -999,25 +1398,46 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     const deadline = start + totalMs;
     let lastTick = 0;
     while (Date.now() < deadline) {
-      if (executionControlRef.current.shouldStop) return { reached: false };
+      if (halted(tok)) return { reached: false };   // AETHER_EMU_RUNTOKEN
       while (executionControlRef.current.isPaused) {
-        if (executionControlRef.current.shouldStop) return { reached: false };
-        await new Promise(r => setTimeout(r, 250));
+        if (halted(tok)) return { reached: false };
+        await new Promise(r => setTimeout(r, 100));
       }
       const remaining = deadline - Date.now();
       if (onTick && Date.now() - lastTick > 1000) { onTick(remaining); lastTick = Date.now(); }
-      await new Promise(r => setTimeout(r, Math.min(500, remaining)));
+      await new Promise(r => setTimeout(r, Math.max(0, Math.min(100, remaining))));
     }
-    return { reached: true };
+    return { reached: !halted(tok) };
   };
 
-  const executeBlock = async (block: WorkflowBlock, columnIndex: number): Promise<void> => {
+  // AETHER_EMU_RUNTOKEN (Update 69): run-scoped log/result sinks. Once a run is
+  // halted (Stop, or superseded by a newer run) nothing it does reaches the log
+  // or the results tally.
+  const runLogger = (tok: number) => (column: number, message: string, type: EmulationLogEntry['type'] = 'info') => {
+    if (!halted(tok)) addLog(column, message, type);
+  };
+  const runResults = (tok: number) => (u: TestResults | ((p: TestResults) => TestResults)) => {
+    if (!halted(tok)) setTestResults(u);
+  };
+
+  const executeBlock = async (block: WorkflowBlock, columnIndex: number, tok: number): Promise<void> => {
+    if (halted(tok)) return;
+    const addLog = runLogger(tok);              // shadows the component-level addLog for this run
+    const setTestResults = runResults(tok);
+    // AETHER_DOOR_WORKFLOWS: "This door" needs a door event's run; from the builder it is skipped.
+    if (blockUsesThisDoor(block) && contextDoorFor(tok) === null) {
+      addLog(columnIndex, `❌ ${THIS_DOOR_NO_CONTEXT_ERROR} — ${getBlockConfig(block.type).label} block skipped`, 'error');
+      return;
+    }
     setExecutingBlockIds(prev => new Set(prev).add(block.id));
     try {
       switch (block.type) {
         case 'reader': {
-          const reader = readerPool.find(r => r.id === block.readerId);
-          if (!reader) { addLog(columnIndex, `❌ Reader not found: ${block.readerId}`, 'error'); return; }
+          // AETHER_DOOR_WORKFLOWS: "This door" / Doors-page reader ids resolve into readerPool
+          const rr = await resolveBlockReader(block.readerId, tok);
+          if (halted(tok)) break;
+          const reader = rr.reader;
+          if (!reader) { addLog(columnIndex, rr.error ? `❌ Reader: ${rr.error} — skipped` : `❌ Reader not found: ${block.readerId}`, 'error'); return; }
           // PIN branch
           if (block.readType === 'pin') {
             const pin = (block.pinValue || '').trim();
@@ -1025,38 +1445,82 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             const fc  = block.facilityCode || 0;
             if (!pin) { addLog(columnIndex, `❌ PIN is empty`, 'error'); return; }
             addLog(columnIndex, `🔢 Sending PIN '${pin}' (${fmt}) → ${reader.name}`, 'info');
-            const result = await sendPin(reader, pin, fmt, fc, msg => addLog(columnIndex, msg, 'info'));
+            const result = await sendPin(reader, pin, fmt, fc, msg => addLog(columnIndex, msg, 'info'), tok);
             if (result.success) addLog(columnIndex, `  ✓ PIN sent`, 'success');
             else addLog(columnIndex, `  ✗ PIN send failed: ${result.error}`, 'error');
             break;
           }
           // CARD branch (existing behavior)
-          const format = cardFormats.find(f => f.id === block.format) || DEFAULT_FORMATS[0];
+          const format = cardFormats.find(f => f.id === block.format)
+            // AETHER_DOOR_WORKFLOWS: converted events use the catalog's 'w<bits>' ids; if the
+            // catalog didn't load, match the built-in format with that many bits.
+            || (/^w\d+$/.test(block.format || '') ? DEFAULT_FORMATS.find(f => `w${f.bits}` === block.format) : undefined)
+            || DEFAULT_FORMATS[0];
           const cards = generateCardSequence(block, format);
           addLog(columnIndex, `💳 Sending ${cards.length} card(s) to ${reader.name}`, 'info');
           for (let i = 0; i < cards.length; i++) {
-            if (executionControlRef.current.shouldStop) break;
+            if (halted(tok)) break;
             const { fc, cn } = cards[i];
             const result = await sendCard(reader, fc, cn, format);
             if (result.success) { addLog(columnIndex, `  ✓ Card ${i+1}/${cards.length}: FC:${fc} CN:${cn}`, 'success'); }
             else { addLog(columnIndex, `  ✗ Card ${i+1} failed: ${result.error}`, 'error'); }
-            if (i < cards.length - 1 && block.delayBetweenCards) await new Promise(r => setTimeout(r, block.delayBetweenCards));
+            if (i < cards.length - 1 && block.delayBetweenCards) await sleepRun(block.delayBetweenCards, tok);
           }
           break;
         }
         case 'door': {
-          const door = doors.find(d => d.id === block.doorId);
-          const relayIndex = (block.doorId || 1) - 1;
+          // AETHER_EMU_READS (Update 69): drive the door's CONFIGURED output for the
+          // selected event (Lock → lock, DPS → dps, REX → rexIn) from the saved door
+          // config — previously this always drove relay doorId-1 and ignored the
+          // event selector. Unassigned (-1) / disabled / missing → error, nothing driven.
+          const base = `http://${ipAddress}:3001`;
+          const ev = (block.eventType || 'lock') as 'lock' | 'dps' | 'rexIn' | 'io';   // AETHER_DOOR_IO_WORKFLOWS: + 'io'
+          const role = ev === 'dps' ? 'DPS' : ev === 'rexIn' ? 'REX' : ev === 'io' ? 'Custom I/O' : 'Lock';
+          // AETHER_DOOR_WORKFLOWS: "This door" -> the door whose event started this run
+          const rd = resolveBlockDoorId(block.doorId || 1, tok);
+          if (rd.id === null) { addLog(columnIndex, `❌ Door: ${rd.error} — skipped`, 'error'); break; }
+          const door = await findSavedDoor(rd.id);
+          if (halted(tok)) break;
+          if (!door) { addLog(columnIndex, `❌ Door ${rd.id}: not found in saved door config — skipped`, 'error'); break; }
+          const who = `${door.name} ${role}`;
+          if (door.enabled === false) { addLog(columnIndex, `❌ ${door.name} is disabled — ${role} not driven`, 'error'); break; }
+          if (ev === 'io') { await runDoorCustomIo(block, door, columnIndex, tok, addLog); break; }   // AETHER_DOOR_IO_WORKFLOWS
+          const raw = door[ev];
+          if (!raw || !isDoorOutputAssigned(raw)) { addLog(columnIndex, `❌ ${who}: no output assigned — skipped`, 'error'); break; }
+          if (isEmulatedDoor(door)) {
+            // Emulated door: board OUTPUT (Lock) / INPUT (DPS, REX) only.
+            const b = await resolveEmuBoard(door);
+            if (halted(tok)) break;
+            if (!b) { addLog(columnIndex, `❌ ${who}: emulated board #${door.emuBoard || '?'} not found / not running — nothing driven`, 'error'); break; }
+            if (block.action === 'pulse') {
+              addLog(columnIndex, `🚪 Pulse ${who} (emulated #${b.address}) (${block.pulseDuration}ms)`, 'info');
+              await driveEmulatedDoorRole(door, ev, true);
+              try { await sleepRun(block.pulseDuration || 500, tok); }
+              finally { await driveEmulatedDoorRole(door, ev, false); } // release always runs
+              addLog(columnIndex, `  ✓ Pulse complete`, 'success');
+            } else {
+              const on = block.action === 'activate';
+              const what = await driveEmulatedDoorRole(door, ev, on);
+              addLog(columnIndex, `${on ? '🟢' : '🔴'} ${who} ${on ? 'ON' : 'OFF'} (${what})`, 'success');
+            }
+            break;
+          }
+          if (ev === 'lock' && isLockWatch(raw)) {   // AETHER_LOCK_WATCH (Update 71): the controller drives it (AETHER_ANALOG_IN: OPTO or ADC)
+            addLog(columnIndex, `⚠️ ${who} is watched on ${lockWatchLabel(raw)} (${raw.hardwareType === 'analog-in' ? "the controller's EOL zone" : "the controller's lock relay"}) — nothing to drive, skipped`, 'warning');
+            break;
+          }
+          const io = ev === 'lock' ? lockDriveIO(raw) : raw;
+          const where = doorOutputLabel(io);
           if (block.action === 'pulse') {
-            addLog(columnIndex, `🚪 Pulse ${door?.name || `Door ${block.doorId}`} (${block.pulseDuration}ms)`, 'info');
-            await controlRelay(relayIndex, 1);
-            await new Promise(r => setTimeout(r, block.pulseDuration || 500));
-            await controlRelay(relayIndex, 0);
+            addLog(columnIndex, `🚪 Pulse ${who} on ${where} (${block.pulseDuration}ms)`, 'info');
+            await driveDoorOutput(base, io, true, who);
+            try { await sleepRun(block.pulseDuration || 500, tok); }
+            finally { await driveDoorOutput(base, io, false, who); } // release always runs
             addLog(columnIndex, `  ✓ Pulse complete`, 'success');
           } else {
-            const value: 0 | 1 = block.action === 'activate' ? 1 : 0;
-            await controlRelay(relayIndex, value);
-            addLog(columnIndex, `${value ? '🟢' : '🔴'} ${door?.name || `Door ${block.doorId}`} ${value ? 'ON' : 'OFF'}`, 'success');
+            const on = block.action === 'activate';
+            const what = await driveDoorOutput(base, io, on, who);
+            addLog(columnIndex, `${on ? '🟢' : '🔴'} ${who} ${on ? 'ON' : 'OFF'} (${what})`, 'success');
           }
           break;
         }
@@ -1076,7 +1540,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             if (block.action === 'pulse') {
               addLog(columnIndex, `⚡ Pulse ${label} (${block.pulseDuration}ms)`, 'info');
               await setControllerInput(address, index, true);
-              await new Promise(r => setTimeout(r, block.pulseDuration || 500));
+              await sleepRun(block.pulseDuration || 500, tok); // release below runs even if stopped
               await setControllerInput(address, index, false);
               addLog(columnIndex, `  ✓ Pulse complete`, 'success');
             } else if (block.action === 'toggle') {
@@ -1098,11 +1562,13 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           if (block.action === 'pulse') {
             addLog(columnIndex, `⚡ Pulse ${io?.name || `Output ${block.ioId}`} (${block.pulseDuration}ms)`, 'info');
             await controlRelay(relayIndex, 1);
-            await new Promise(r => setTimeout(r, block.pulseDuration || 500));
+            await sleepRun(block.pulseDuration || 500, tok); // release below runs even if stopped
             await controlRelay(relayIndex, 0);
             addLog(columnIndex, `  ✓ Pulse complete`, 'success');
           } else if (block.action === 'toggle') {
-            const cur = await readInput(block.ioId || 1);
+            const cur = await readRelayState(relayIndex); // AETHER_EMU_READS: toggle reads the relay, not an input
+            // AETHER_DOOR_IO_WORKFLOWS: an unreadable relay is not toggled (it used to read as OFF → switched ON)
+            if (cur === null) { addLog(columnIndex, `⚠️ ${io?.name || `Output ${block.ioId}`}: relay state could not be read — toggle skipped`, 'warning'); break; }
             await controlRelay(relayIndex, cur ? 0 : 1);
             addLog(columnIndex, `🔄 ${io?.name || `Output ${block.ioId}`} toggled → ${!cur ? 'ON' : 'OFF'}`, 'success');
           } else {
@@ -1118,7 +1584,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             const totalMs = computeMsUntilTime(block.waitUntilTime, block.waitUntilDate);
             const target = new Date(Date.now() + totalMs);
             addLog(columnIndex, `⏰ Waiting until ${target.toLocaleString()} (${Math.round(totalMs/1000)}s)...`, 'info');
-            const r = await sleepUntilTime(block.waitUntilTime, block.waitUntilDate);
+            const r = await sleepUntilTime(tok, block.waitUntilTime, block.waitUntilDate);
             if (r.reached) addLog(columnIndex, `  ✓ Reached target time`, 'success');
             break;
           }
@@ -1131,7 +1597,8 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             ms = block.waitType === 'minutes' ? (block.waitValue || 1) * 60000 : (block.waitValue || 5) * 1000;
             addLog(columnIndex, `⏱️ Waiting ${block.waitValue} ${block.waitType}...`, 'info');
           }
-          await new Promise(r => setTimeout(r, ms));
+          // AETHER_EMU_RUNTOKEN: sliced sleep — Stop / a newer run ends it within ~100 ms.
+          if (!(await sleepRun(ms, tok))) break;
           addLog(columnIndex, `  ✓ Wait complete`, 'success');
           break;
         }
@@ -1139,14 +1606,14 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           const totalMs = computeMsUntilTime(block.scheduleTime, block.scheduleDate);
           const target  = new Date(Date.now() + totalMs);
           addLog(columnIndex, `📅 Scheduled hold until ${target.toLocaleString()} (${Math.round(totalMs/1000)}s)...`, 'marker');
-          const r = await sleepUntilTime(block.scheduleTime, block.scheduleDate);
+          const r = await sleepUntilTime(tok, block.scheduleTime, block.scheduleDate);
           if (r.reached) addLog(columnIndex, `  ✓ Schedule reached — proceeding`, 'success');
           break;
         }
         case 'control': {
           if (block.controlType === 'stop') {
             addLog(columnIndex, `🛑 Stop command`, 'warning');
-            executionControlRef.current.shouldStop = true;
+            if (!halted(tok)) executionControlRef.current.shouldStop = true;
           } else if (block.controlType === 'loop') {
             // Logging only — actual jump happens in runWorkflow after Promise.all
             const targetCol = block.loopToColumn ?? 0;
@@ -1156,9 +1623,44 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         }
         case 'waitInput': {
           const timeout = block.waitInputTimeout || 0;
+          // AETHER_DOOR_IO_WORKFLOWS: a door's Custom INPUT (OPTO / ADC), specific door or This door slot
+          if (block.waitInputType === 'door_io') {
+            const di = await resolveDoorInput(block.waitInputDoorId, block.waitIoRef, tok);
+            if (halted(tok)) break;
+            if (!di.io) { addLog(columnIndex, `❌ Wait Input: ${di.error} — skipped`, 'error'); break; }
+            const zoneWanted = di.io.hardwareType === 'analog' ? block.waitZoneState : undefined;
+            const want = zoneWanted ? zoneWanted : block.waitInputState === 'any_change' ? 'a change' : block.waitInputState === 'low' ? 'INACTIVE' : 'ACTIVE';
+            addLog(columnIndex, `👁️ Waiting for ${di.label} to be ${want}...`, 'info');
+            const t0 = Date.now();
+            let first: string | null = null;
+            while (!halted(tok)) {
+              const rd = await readCustomInput(di.io);
+              if (halted(tok)) break;
+              const key = di.io.hardwareType === 'analog' ? String(rd.zone) : rd.active ? 'A' : 'I';
+              if (first === null && rd.ok) first = key;   // a failed first read is not a baseline
+              const hit = !rd.ok ? false
+                : zoneWanted ? rd.zone === zoneWanted
+                : block.waitInputState === 'any_change' ? key !== first
+                : rd.active === (block.waitInputState !== 'low');
+              if (hit) { addLog(columnIndex, `  ✓ ${di.label} is ${rd.active ? 'ACTIVE' : 'INACTIVE'} (${rd.text})`, 'success'); break; }
+              if (timeout > 0 && (Date.now() - t0) >= timeout) {
+                addLog(columnIndex, `  ⚠️ Timeout after ${timeout}ms (${di.label} reads ${rd.text})`, 'warning');
+                if (block.waitInputTimeoutAction === 'stop' && !halted(tok)) executionControlRef.current.shouldStop = true;
+                break;
+              }
+              await sleepRun(100, tok);
+            }
+            break;
+          }
+          // AETHER_DOOR_WORKFLOWS: "This door" for Door DPS / REX waits
+          const waitDoor = resolveBlockDoorId(block.waitInputDoorId || 1, tok);
+          if ((block.waitInputType === 'door_dps' || block.waitInputType === 'door_rex') && waitDoor.id === null) {
+            addLog(columnIndex, `❌ Wait Input: ${waitDoor.error} — skipped`, 'error'); break;
+          }
+          const waitDoorId = waitDoor.id ?? 1;
           const startTime = Date.now();
           addLog(columnIndex, `👁️ Waiting for input ${block.waitInputId} to be ${block.waitInputState}...`, 'info');
-          while (!executionControlRef.current.shouldStop) {
+          while (!halted(tok)) {
             let currentState: boolean;
             if (block.waitInputType === 'controller_output') {
               const { address, index } = controllerIoFromId(block.waitInputId || 0);
@@ -1166,20 +1668,41 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             }
             else if (block.waitInputType === 'controller_input') currentState = await readInput(block.waitInputId || 1);
             else if (block.waitInputType === 'input') currentState = await readInput(block.waitInputId || 1);
-            else if (block.waitInputType === 'door_dps') currentState = await readDoorInput(block.waitInputDoorId || 1, 'dps');
-            else currentState = await readDoorInput(block.waitInputDoorId || 1, 'rex');
+            else if (block.waitInputType === 'door_dps') currentState = await readDoorInput(waitDoorId, 'dps');
+            else currentState = await readDoorInput(waitDoorId, 'rex');
             if (block.waitInputState === 'any_change') { if (currentState) { addLog(columnIndex, `  ✓ Input changed`, 'success'); break; } }
             else if (currentState === (block.waitInputState === 'high')) { addLog(columnIndex, `  ✓ Input is ${currentState ? 'HIGH' : 'LOW'}`, 'success'); break; }
             if (timeout > 0 && (Date.now() - startTime) >= timeout) {
               addLog(columnIndex, `  ⚠️ Timeout after ${timeout}ms`, 'warning');
-              if (block.waitInputTimeoutAction === 'stop') executionControlRef.current.shouldStop = true;
+              if (block.waitInputTimeoutAction === 'stop' && !halted(tok)) executionControlRef.current.shouldStop = true;
               break;
             }
-            await new Promise(r => setTimeout(r, 100));
+            if (halted(tok)) break;
+            await sleepRun(100, tok);
           }
           break;
         }
         case 'log': {
+          // AETHER_DOOR_IO_WORKFLOWS: assert a door Custom INPUT (expected HIGH = ACTIVE)
+          if (block.assertCondition && block.assertSource === 'door_io') {
+            const di = await resolveDoorInput(block.assertDoorId, block.assertIoRef, tok);
+            if (halted(tok)) break;
+            const expected = block.assertInputState !== 'low';
+            if (!di.io) {
+              addLog(columnIndex, `❌ ASSERT FAIL: ${di.error}`, 'error');
+              setTestResults(prev => ({ ...prev, failed: prev.failed + 1, assertions: [...prev.assertions, `❌ ${block.logMessage || 'Assertion'}`] }));
+              break;
+            }
+            const rd = await readCustomInput(di.io);
+            if (!rd.ok) {
+              addLog(columnIndex, `❌ ASSERT FAIL: ${di.label} could not be read`, 'error');
+              setTestResults(prev => ({ ...prev, failed: prev.failed + 1, assertions: [...prev.assertions, `❌ ${block.logMessage || 'Assertion'}`] }));
+              break;
+            }
+            if (rd.active === expected) { addLog(columnIndex, `✅ ASSERT PASS: ${di.label} is ${rd.active ? 'ACTIVE' : 'INACTIVE'} (${rd.text})`, 'success'); setTestResults(prev => ({ ...prev, passed: prev.passed + 1, assertions: [...prev.assertions, `✅ ${block.logMessage || 'Assertion'}`] })); }
+            else { addLog(columnIndex, `❌ ASSERT FAIL: ${di.label} expected ${expected ? 'ACTIVE' : 'INACTIVE'}, got ${rd.active ? 'ACTIVE' : 'INACTIVE'} (${rd.text})`, 'error'); setTestResults(prev => ({ ...prev, failed: prev.failed + 1, assertions: [...prev.assertions, `❌ ${block.logMessage || 'Assertion'}`] })); }
+            break;
+          }
           if (block.assertCondition) {
             const state = await readInput(block.assertInputId || 1);
             const expected = block.assertInputState === 'high';
@@ -1202,13 +1725,19 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'open': addLog(columnIndex, `  Setting OPEN (cut wire) state`, 'warning'); await controlRelay(relayIndex, 0); break;
             case 'trouble': addLog(columnIndex, `  Setting TROUBLE state`, 'warning'); break;
           }
-          if (block.supervisionDuration) { await new Promise(r => setTimeout(r, block.supervisionDuration)); addLog(columnIndex, `  Reverting to normal`, 'info'); await controlRelay(relayIndex, 0); }
+          if (block.supervisionDuration) { await sleepRun(block.supervisionDuration, tok); addLog(columnIndex, `  Reverting to normal`, 'info'); await controlRelay(relayIndex, 0); }
           break;
         }
         case 'scenario': {
           const scenarioInfo = SCENARIO_TEMPLATES[block.scenarioType || 'valid_access'];
-          const reader  = readerPool.find(r => r.id === block.scenarioReaderId);
-          const reader2 = readerPool.find(r => r.id === block.scenarioReader2Id);
+          // AETHER_DOOR_WORKFLOWS: scenario readers may be "This door"
+          const sr1 = await resolveBlockReader(block.scenarioReaderId, tok);
+          const sr2 = await resolveBlockReader(block.scenarioReader2Id, tok);
+          if (halted(tok)) break;
+          if (sr1.error) addLog(columnIndex, `❌ Scenario reader: ${sr1.error}`, 'error');
+          if (sr2.error && block.scenarioType === 'interlock') addLog(columnIndex, `❌ Scenario reader 2: ${sr2.error}`, 'error');
+          const reader  = sr1.reader || undefined;
+          const reader2 = sr2.reader || undefined;
           const format  = cardFormats.find(f => f.id === '26') || DEFAULT_FORMATS[0];
 
           // ── Resolved I/O channels ────────────────────────────────────────────
@@ -1230,6 +1759,14 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           const PASS = (msg: string) => { addLog(columnIndex, `  ✅ PASS: ${msg}`, 'success'); setTestResults(p => ({ ...p, passed: p.passed + 1, assertions: [...p.assertions, `✅ ${msg}`] })); };
           const FAIL = (msg: string) => { addLog(columnIndex, `  ❌ FAIL: ${msg}`, 'error');   setTestResults(p => ({ ...p, failed: p.failed + 1, assertions: [...p.assertions, `❌ ${msg}`] })); };
           const INFO = (msg: string) => addLog(columnIndex, `  ${msg}`, 'info');
+          // AETHER_EMU_RUNTOKEN (Update 69): once the run is halted (Stop / superseded),
+          // no further card is presented and nothing is driven ACTIVE; release steps
+          // (drive false) stay unconditional so the panel is never left with DPS/REX
+          // asserted. Later waits return at once and PASS/FAIL are dropped by the
+          // run-scoped logger, so the scenario unwinds quickly.
+          const guardedSendCard = async (r: Reader, f: number, c: number, fm: CardFormat) =>
+            halted(tok) ? { success: false, error: 'stopped' } : sendCard(r, f, c, fm);
+          const guardedAssert = async (ch: number) => { if (!halted(tok)) await scenarioDriveToPanel(block, ch, true); };
           const WARN = (msg: string) => addLog(columnIndex, `  ⚠️  ${msg}`, 'warning');
 
           // Source-aware channel labels so the log matches what's actually
@@ -1250,22 +1787,22 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'valid_access': {
               if (!reader) { FAIL('No reader configured'); break; }
               INFO(`Step 1 — Send card FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format);
+              await guardedSendCard(reader, fc, cn, format);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} for grant (up to ${timeout}ms)...`);
-              const unlock = await scenarioWaitFor(block, lockInput, true, timeout);
+              const unlock = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (!unlock.reached) { FAIL(`Panel did not grant — ${RD(lockInput)} did not activate within ${timeout}ms`); break; }
               PASS(`Panel granted — ${RD(lockInput)} active in ${unlock.elapsedMs}ms (${GRANT})`);
 
               INFO(`Step 3 — Open: asserting ${DR(dpsRelay)} (door opened)`);
-              await scenarioDriveToPanel(block, dpsRelay, true);
-              await new Promise(r => setTimeout(r, 500));
+              await guardedAssert(dpsRelay);
+              await sleepRun(500, tok);
 
               INFO(`Step 4 — Close: releasing ${DR(dpsRelay)} (door closed)`);
               await scenarioDriveToPanel(block, dpsRelay, false);
 
               INFO(`Step 5 — Monitoring ${RD(lockInput)} for re-lock...`);
-              const relock = await scenarioWaitFor(block, lockInput, false, 15000);
+              const relock = await scenarioWaitFor(tok, block, lockInput, false, 15000);
               if (relock.reached) PASS(`Panel re-locked (${RD(lockInput)} inactive) in ${relock.elapsedMs}ms`);
               else WARN(`${RD(lockInput)} still active after 15s — panel may require manual re-lock`);
               break;
@@ -1275,10 +1812,10 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'denied_access': {
               if (!reader) { FAIL('No reader configured'); break; }
               INFO(`Step 1 — Send invalid card FC:${badFc} CN:${badCn} → ${reader.name}`);
-              await sendCard(reader, badFc, badCn, format);
+              await guardedSendCard(reader, badFc, badCn, format);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} — must stay inactive for ${timeout}ms (no grant)...`);
-              const granted = await scenarioWaitFor(block, lockInput, true, timeout);
+              const granted = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (granted.reached) FAIL(`Panel GRANTED an invalid card — ${RD(lockInput)} went active`);
               else PASS(`Panel correctly DENIED — ${RD(lockInput)} stayed inactive for ${timeout}ms`);
               break;
@@ -1290,16 +1827,16 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'forced_door': {
               const holdMs = block.scenarioHeldTime || 3000;
               INFO(`Step 1 — Forced open: asserting ${DR(dpsRelay)} with NO card`);
-              await scenarioDriveToPanel(block, dpsRelay, true);
+              await guardedAssert(dpsRelay);
 
               INFO(`Step 2 — Holding ${DR(dpsRelay)} asserted for ${holdMs}ms while watching ${RD(lockInput)}...`);
               // Poll the lock output across the whole hold; any activation = fail.
               const holdStart = Date.now();
               let lockEverActive = false;
               while (Date.now() - holdStart < holdMs) {
-                if (executionControlRef.current.shouldStop) break;
+                if (halted(tok)) break;
                 if (await scenarioReadFromPanel(block, lockInput)) { lockEverActive = true; break; }
-                await new Promise(r => setTimeout(r, 100));
+                await sleepRun(100, tok);
               }
               const heldFull = (Date.now() - holdStart) >= holdMs - 150; // tolerance
 
@@ -1330,26 +1867,26 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               if (!reader) { FAIL('No reader configured'); break; }
 
               INFO(`Step 1 — Send credential FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format);
+              await guardedSendCard(reader, fc, cn, format);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} for grant (up to ${timeout}ms)...`);
-              const grant = await scenarioWaitFor(block, lockInput, true, timeout);
+              const grant = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (!grant.reached) { FAIL(`Panel did not grant — ${RD(lockInput)} did not activate; cannot run held-door sequence`); break; }
               PASS(`Panel granted — ${RD(lockInput)} active in ${grant.elapsedMs}ms`);
 
               INFO(`Step 3 — Trigger REX: pulsing ${DR(rexRelay)} (egress request)`);
-              await scenarioDriveToPanel(block, rexRelay, true);
-              await new Promise(r => setTimeout(r, 300));
+              await guardedAssert(rexRelay);
+              await sleepRun(300, tok);
               await scenarioDriveToPanel(block, rexRelay, false);
 
               INFO(`Step 4 — Open: asserting ${DR(dpsRelay)} (door opened)`);
-              await scenarioDriveToPanel(block, dpsRelay, true);
+              await guardedAssert(dpsRelay);
 
               INFO(`Step 5 — Holding door open for ${heldTime}ms (${(heldTime/1000).toFixed(0)}s)...`);
               const holdStart = Date.now();
               while (Date.now() - holdStart < heldTime) {
-                if (executionControlRef.current.shouldStop) break;
-                await new Promise(r => setTimeout(r, 250));
+                if (halted(tok)) break;
+                await sleepRun(250, tok);
               }
               const heldActual = Date.now() - holdStart;
               INFO(`Held for ${heldActual}ms — see IC2 event log for Door Held / Forced events`);
@@ -1363,23 +1900,23 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             // ── REX EGRESS — REX → Unlock → Open → Close ────────────────────
             case 'rex_egress': {
               INFO(`Step 1 — REX: pulsing ${DR(rexRelay)} (egress request)`);
-              await scenarioDriveToPanel(block, rexRelay, true);
-              await new Promise(r => setTimeout(r, 300));
+              await guardedAssert(rexRelay);
+              await sleepRun(300, tok);
               await scenarioDriveToPanel(block, rexRelay, false);
 
               INFO(`Step 2 — Monitoring ${RD(lockInput)} for unlock within ${timeout}ms...`);
-              const unlocked = await scenarioWaitFor(block, lockInput, true, timeout);
+              const unlocked = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (!unlocked.reached) { FAIL(`Panel did not respond to REX — ${RD(lockInput)} stayed inactive`); break; }
               PASS(`Panel unlocked ${RD(lockInput)} in ${unlocked.elapsedMs}ms after REX`);
 
               INFO(`Step 3 — Open: asserting ${DR(dpsRelay)} (door opened)`);
-              await scenarioDriveToPanel(block, dpsRelay, true);
-              await new Promise(r => setTimeout(r, 500));
+              await guardedAssert(dpsRelay);
+              await sleepRun(500, tok);
               INFO(`Step 4 — Close: releasing ${DR(dpsRelay)} (door closed)`);
               await scenarioDriveToPanel(block, dpsRelay, false);
 
               INFO(`Step 5 — Monitoring ${RD(lockInput)} for re-lock...`);
-              const relocked = await scenarioWaitFor(block, lockInput, false, 15000);
+              const relocked = await scenarioWaitFor(tok, block, lockInput, false, 15000);
               if (relocked.reached) PASS(`Panel re-locked in ${relocked.elapsedMs}ms`);
               else WARN(`${RD(lockInput)} still active — panel may require door close to re-lock`);
               break;
@@ -1389,19 +1926,19 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             case 'anti_passback': {
               if (!reader) { FAIL('No reader configured'); break; }
               INFO(`Step 1 — First presentation: FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format);
-              const firstGrant = await scenarioWaitFor(block, lockInput, true, timeout);
+              await guardedSendCard(reader, fc, cn, format);
+              const firstGrant = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (!firstGrant.reached) { FAIL(`First card denied — can't test anti-passback`); break; }
               PASS(`First card granted — ${RD(lockInput)} active in ${firstGrant.elapsedMs}ms`);
 
               const apbDelay = block.scenarioApbDelay ?? 3000;
               INFO(`Step 2 — Monitoring ${RD(lockInput)} for re-lock, then waiting ${apbDelay}ms before 2nd presentation...`);
-              await scenarioWaitFor(block, lockInput, false, 10000);
-              await new Promise(r => setTimeout(r, apbDelay));
+              await scenarioWaitFor(tok, block, lockInput, false, 10000);
+              await sleepRun(apbDelay, tok);
 
               INFO(`Step 3 — Second presentation of same card (anti-passback should deny)...`);
-              await sendCard(reader, fc, cn, format);
-              const secondGrant = await scenarioWaitFor(block, lockInput, true, timeout);
+              await guardedSendCard(reader, fc, cn, format);
+              const secondGrant = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (secondGrant.reached) FAIL(`Anti-passback NOT enforced — ${RD(lockInput)} went active on 2nd presentation`);
               else PASS(`Anti-passback ENFORCED — 2nd presentation denied (${RD(lockInput)} stayed inactive)`);
               break;
@@ -1419,22 +1956,22 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               INFO(`Tailgating: presenting ${creds.length} credential(s), ${tailgateDelay}ms apart`);
               let granted = 0;
               for (let i = 0; i < creds.length; i++) {
-                if (executionControlRef.current.shouldStop) break;
+                if (halted(tok)) break;
                 const cr = creds[i];
                 INFO(`Person ${i + 1} — FC:${cr.fc} CN:${cr.cn} → ${reader.name}`);
-                await sendCard(reader, cr.fc, cr.cn, format);
-                const g = await scenarioWaitFor(block, lockInput, true, timeout);
+                await guardedSendCard(reader, cr.fc, cr.cn, format);
+                const g = await scenarioWaitFor(tok, block, lockInput, true, timeout);
                 if (g.reached) {
                   granted++;
                   PASS(`Person ${i + 1} granted — ${RD(lockInput)} active in ${g.elapsedMs}ms`);
                   // wait for re-lock so the next presentation is clean
-                  await scenarioWaitFor(block, lockInput, false, 10000);
+                  await scenarioWaitFor(tok, block, lockInput, false, 10000);
                 } else {
                   WARN(`Person ${i + 1} not granted within ${timeout}ms (panel config dependent)`);
                 }
                 if (i < creds.length - 1) {
                   INFO(`Waiting ${tailgateDelay}ms before next presentation...`);
-                  await new Promise(r => setTimeout(r, tailgateDelay));
+                  await sleepRun(tailgateDelay, tok);
                 }
               }
               INFO(`Tailgating sequence done — ${granted}/${creds.length} granted. Tailgate detection is panel-side; verify in the IC2 event log.`);
@@ -1454,42 +1991,42 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 : `Opto I${ch}`;
 
               INFO(`Step 1 — Unlock Door 1: FC:${fc} CN:${cn} → ${reader.name}`);
-              await sendCard(reader, fc, cn, format);
-              const door1unlock = await scenarioWaitFor(block, lockInput, true, timeout);
+              await guardedSendCard(reader, fc, cn, format);
+              const door1unlock = await scenarioWaitFor(tok, block, lockInput, true, timeout);
               if (!door1unlock.reached) { FAIL(`Door 1 did not unlock — ${RD(lockInput)} did not activate; cannot test interlock`); break; }
               PASS(`Door 1 unlocked — ${RD(lockInput)} active in ${door1unlock.elapsedMs}ms`);
 
               if (!reader2) { WARN(`No Door 2 reader configured — skipping interlock attempt`); break; }
 
               INFO(`Step 2 — Open Door 1: assert ${DR(dpsRelay)} (door 1 ajar)`);
-              await scenarioDriveToPanel(block, dpsRelay, true);
+              await guardedAssert(dpsRelay);
 
-              if (settleMs > 0) { INFO(`Settle: waiting ${settleMs}ms before attempting Door 2...`); await new Promise(r => setTimeout(r, settleMs)); }
+              if (settleMs > 0) { INFO(`Settle: waiting ${settleMs}ms before attempting Door 2...`); await sleepRun(settleMs, tok); }
 
               INFO(`Step 3 — While Door 1 is open, attempt Door 2: ${reader2.name}${d2Board ? ` (board #${d2Board})` : ''}`);
-              await sendCard(reader2, fc, cn, format);
-              const door2blocked = await scenarioWaitDoor2(block, lock2Input, true, ilkTimeout);
+              await guardedSendCard(reader2, fc, cn, format);
+              const door2blocked = await scenarioWaitDoor2(tok, block, lock2Input, true, ilkTimeout);
               if (door2blocked.reached) FAIL(`Interlock NOT enforced — Door 2 ${D2(lock2Input)} went active while Door 1 open`);
               else PASS(`Interlock ENFORCED — Door 2 ${D2(lock2Input)} stayed inactive for ${ilkTimeout}ms while Door 1 open`);
 
               INFO(`Step 4 — Close Door 1: release ${DR(dpsRelay)}, wait for re-lock...`);
               await scenarioDriveToPanel(block, dpsRelay, false);
-              const door1relock = await scenarioWaitFor(block, lockInput, false, 15000);
+              const door1relock = await scenarioWaitFor(tok, block, lockInput, false, 15000);
               if (!door1relock.reached) { WARN(`Door 1 ${RD(lockInput)} still active after 15s — cannot complete interlock test`); break; }
               INFO(`Door 1 re-locked after ${door1relock.elapsedMs}ms`);
 
-              if (settleMs > 0) { INFO(`Settle: waiting ${settleMs}ms before retrying Door 2...`); await new Promise(r => setTimeout(r, settleMs)); }
+              if (settleMs > 0) { INFO(`Settle: waiting ${settleMs}ms before retrying Door 2...`); await sleepRun(settleMs, tok); }
 
               INFO(`Step 5 — Door 1 closed. Retry Door 2: ${reader2.name}`);
-              await sendCard(reader2, fc, cn, format);
-              const door2now = await scenarioWaitDoor2(block, lock2Input, true, ilkTimeout);
+              await guardedSendCard(reader2, fc, cn, format);
+              const door2now = await scenarioWaitDoor2(tok, block, lock2Input, true, ilkTimeout);
               if (door2now.reached) PASS(`Door 2 ${D2(lock2Input)} unlocked after Door 1 closed (${door2now.elapsedMs}ms) — interlock correct`);
               else FAIL(`Door 2 ${D2(lock2Input)} still locked after Door 1 closed — check panel interlock config`);
               break;
             }
           }
 
-          const passed = testResults.passed; // snapshot for log
+          const passed = testResultsRef.current.passed; // snapshot for log
           addLog(columnIndex, `  🏁 Scenario complete`, 'success');
           break;
         }
@@ -1501,17 +2038,38 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     }
   };
 
-  const runWorkflow = async () => {
-    if (!connected) { alert('Not connected!'); return; }
-    if (workflow.length === 0) { alert('No steps in workflow!'); return; }
+  // AETHER_DOOR_WORKFLOWS: `override` runs a given workflow (a door event's saved
+  // workflow) instead of the builder canvas, with an optional "This door" context.
+  // No override = the builder's run, exactly as before.
+  const runWorkflow = async (override?: RunOverride) => {
+    const isOverride = !!override;
+    const runCols: WorkflowColumn[] = override ? override.columns : workflow;
+    const runDelay = override ? Math.max(0, Number(override.globalDelay ?? 1000) || 0) : globalDelay;
+    const runRepeat = override ? Math.max(0, Math.floor(Number(override.repeatCount ?? 0) || 0)) : repeatCount;
+    if (!connected) { if (!isOverride) alert('Not connected!'); return; }
+    if (runCols.length === 0) { if (!isOverride) alert('No steps in workflow!'); return; }
+
+    // AETHER_EMU_RUNTOKEN (Update 69): claim a new generation. Any older run still
+    // parked in a wait sees runTokenRef !== its token and exits without logging.
+    const tok = ++runTokenRef.current;
+    activeRunRef.current = tok;
+    const isLive = () => !halted(tok);
+    const log = runLogger(tok);
+    runContextRef.current = { tok, doorId: override?.contextDoorId ?? null, label: override?.label || '', cols: runCols.length, repeat: runRepeat };   // AETHER_DOOR_WORKFLOWS
+    setDoorRunCol(isOverride ? 0 : -1);
+    wiegandCfgRef.current = null;
 
     executionControlRef.current.shouldStop = false;
     executionControlRef.current.isPaused = false;
-    setIsEmulating(true); setIsPaused(false); setEmulationLog([]); setCurrentColumnIndex(0);
+    savedDoorsRef.current = null;
+    missingDoorIdsRef.current = new Set();
+    zoneSnapRef.current.zones = null;
+    setIsEmulating(true); setIsPaused(false); setEmulationLog([]); setCurrentColumnIndex(isOverride ? -1 : 0);   // AETHER_DOOR_WORKFLOWS
     setTestResults({ passed: 0, failed: 0, assertions: [] });
 
-    const totalRuns = repeatCount + 1;
-    addLog(0, `🚀 Starting workflow: ${workflow.length} columns × ${totalRuns} runs`, 'info');
+    const totalRuns = runRepeat + 1;
+    if (override?.label) log(0, `🚪 ${override.label}`, 'marker');   // AETHER_DOOR_WORKFLOWS: door + event that started it
+    log(0, `🚀 Starting workflow${override?.label ? ` for ${override.label}` : ''}: ${runCols.length} columns × ${totalRuns} runs`, 'info');
 
     // Hard safety cap on loop-back jumps so a misconfigured/unbounded loop
     // can never run forever. ~10k iterations is far beyond any real test;
@@ -1520,25 +2078,27 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     let loopIterations = 0;
 
     try {
+      await reloadSavedDoors();   // AETHER_EMU_READS: saved door outputs, once per run
       for (let run = 0; run < totalRuns; run++) {
-        if (executionControlRef.current.shouldStop) break;
-        if (run > 0) addLog(0, `━━━ Run ${run + 1}/${totalRuns} ━━━`, 'info');
+        if (!isLive()) break;
+        if (run > 0) log(0, `━━━ Run ${run + 1}/${totalRuns} ━━━`, 'info');
 
-        for (let colIdx = 0; colIdx < workflow.length; colIdx++) {
-          if (executionControlRef.current.shouldStop) break;
+        for (let colIdx = 0; colIdx < runCols.length; colIdx++) {
+          if (!isLive()) break;
           while (executionControlRef.current.isPaused) {
-            if (executionControlRef.current.shouldStop) break;
+            if (!isLive()) break;
             await new Promise(r => setTimeout(r, 100));
           }
-          if (executionControlRef.current.shouldStop) break;
+          if (!isLive()) break;
 
-          const column = workflow[colIdx];
-          setCurrentColumnIndex(colIdx);
-          addLog(colIdx + 1, `▶ Column ${colIdx + 1} (${column.blocks.length} blocks)`, 'info');
+          const column = runCols[colIdx];
+          if (!isOverride) setCurrentColumnIndex(colIdx);   // AETHER_DOOR_WORKFLOWS: the canvas shows another workflow
+          else setDoorRunCol(colIdx);
+          log(colIdx + 1, `▶ Column ${colIdx + 1} (${column.blocks.length} blocks)`, 'info');
 
-          await Promise.all(column.blocks.map(block => executeBlock(block, colIdx + 1)));
+          await Promise.all(column.blocks.map(block => executeBlock(block, colIdx + 1, tok)));
 
-          if (executionControlRef.current.shouldStop) break;
+          if (!isLive()) break;
 
           // ── LOOP CONTROL — guarded ───────────────────────────────────────────
           const loopBlock = column.blocks.find(b => b.type === 'control' && b.controlType === 'loop');
@@ -1547,49 +2107,146 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             if (targetCol >= 0 && targetCol <= colIdx) {
               loopIterations++;
               if (loopIterations > MAX_LOOP_ITERATIONS) {
-                addLog(0, `⛔ Loop safety limit reached (${MAX_LOOP_ITERATIONS} iterations) — stopping. Add an exit/timeout condition to the loop.`, 'error');
+                log(0, `⛔ Loop safety limit reached (${MAX_LOOP_ITERATIONS} iterations) — stopping. Add an exit/timeout condition to the loop.`, 'error');
                 executionControlRef.current.shouldStop = true;
                 break;
               }
               if (loopIterations % 50 === 0) {
-                addLog(colIdx + 1, `🔁 Loop iteration ${loopIterations} → column ${targetCol + 1}`, 'info');
+                log(colIdx + 1, `🔁 Loop iteration ${loopIterations} → column ${targetCol + 1}`, 'info');
               } else {
-                addLog(colIdx + 1, `🔁 Looping back to column ${targetCol + 1}`, 'info');
+                log(colIdx + 1, `🔁 Looping back to column ${targetCol + 1}`, 'info');
               }
               // Yield to the event loop EVERY loop-back so: (a) React can paint
               // the log, (b) the Stop button's state change is observed, (c) a
               // tight loop can't starve the UI thread.
-              await new Promise(r => setTimeout(r, Math.max(globalDelay, 50)));
-              if (executionControlRef.current.shouldStop) break;
+              if (!(await sleepRun(Math.max(runDelay, 50), tok))) break;
               colIdx = targetCol - 1; // for-loop ++ lands on targetCol
               continue;
             }
           }
           // ─────────────────────────────────────────────────────────────────────
 
-          if (colIdx < workflow.length - 1) await new Promise(r => setTimeout(r, globalDelay));
+          if (colIdx < runCols.length - 1 && !(await sleepRun(runDelay, tok))) break;
         }
-        if (executionControlRef.current.shouldStop) break;
+        if (!isLive()) break;
       }
 
-      if (!executionControlRef.current.shouldStop) {
-        addLog(0, '✅ Workflow complete!', 'success');
-        if (testResults.passed > 0 || testResults.failed > 0) {
-          addLog(0, `📊 Results: ${testResults.passed} passed, ${testResults.failed} failed`, testResults.failed > 0 ? 'warning' : 'success');
+      if (isLive()) {
+        log(0, '✅ Workflow complete!', 'success');
+        const tr = testResultsRef.current;   // live tally, not the run-start snapshot
+        if (tr.passed > 0 || tr.failed > 0) {
+          log(0, `📊 Results: ${tr.passed} passed, ${tr.failed} failed`, tr.failed > 0 ? 'warning' : 'success');
         }
       }
     } catch (err: any) {
-      addLog(0, `❌ Workflow error: ${err.message}`, 'error');
+      log(0, `❌ Workflow error: ${err.message}`, 'error');
     } finally {
-      setIsEmulating(false); setCurrentColumnIndex(-1); setExecutingBlockIds(new Set());
+      // AETHER_EMU_RUNTOKEN: only the run that still owns the current token may
+      // clear the running state — a superseded run must not hide a newer run's badge.
+      if (runTokenRef.current === tok) {
+        activeRunRef.current = 0;
+        setIsEmulating(false); setCurrentColumnIndex(-1); setExecutingBlockIds(new Set());
+      }
     }
   };
 
+  const runWorkflowRef = useRef(runWorkflow);
+  runWorkflowRef.current = runWorkflow;
+
+  // ── AETHER_DOOR_WORKFLOWS: door Custom Events → this engine ─────────────
+  // 'aether:run-workflow': load the saved workflow from the Pi and run it with
+  // that door as "This door". Replies once the run has STARTED. A run already
+  // in progress is never replaced.
+  const runIsLive = () => activeRunRef.current !== 0 && activeRunRef.current === runTokenRef.current && !executionControlRef.current.shouldStop;
+  const handleDoorRunRequest = async (req: { workflowId: string; doorId: number; label: string; deadline?: number }): Promise<{ ok: boolean; error?: string }> => {
+    // Say WHICH run is active, and where its Stop button is.
+    const busy = () => ({ ok: false, error: `Another workflow is already running in Emulation (${runContextRef.current.label ? `door event ${runContextRef.current.label}` : 'the workflow builder\'s run'}) — press Stop on the Emulation page first` });
+    if (runIsLive()) return busy();
+    if (!connected || !ipAddress) return { ok: false, error: 'Emulation is not connected to the Pi' };
+    if (!req.workflowId) return { ok: false, error: 'No workflow is linked to this event' };
+    let seq: any = null;
+    try {
+      const r = await fetch(`http://${ipAddress}:3001/api/emulations/${encodeURIComponent(req.workflowId)}`);
+      if (!r.ok) return { ok: false, error: `Workflow "${req.workflowId}" was not found on the Pi` };
+      seq = (await r.json())?.sequence;
+    } catch (e: any) { return { ok: false, error: `Could not load workflow: ${e?.message || e}` }; }
+    const cols = normalizeWorkflow(seq?.steps);
+    if (cols.length === 0) return { ok: false, error: `Workflow "${seq?.name || req.workflowId}" has no blocks` };
+    if (runIsLive()) return busy();   // another run started while loading
+    if (pastDeadline(req)) return { ok: false, error: DEADLINE_ERROR };   // the door already gave up waiting — don't start late
+    void runWorkflowRef.current({
+      columns: cols,
+      globalDelay: typeof seq?.globalDelay === 'number' ? seq.globalDelay : 1000,
+      repeatCount: typeof seq?.repeatCount === 'number' ? seq.repeatCount : 0,
+      contextDoorId: Number(req.doorId),
+      label: `${req.label || `Door ${req.doorId}`} → workflow "${seq?.name || req.workflowId}"`,
+    });
+    return { ok: true };
+  };
+  const doorRunHandlerRef = useRef(handleDoorRunRequest);
+  doorRunHandlerRef.current = handleDoorRunRequest;
+  // AETHER_DOOR_IO_WORKFLOWS: answer only this node's requests (cluster: one app per node, events are global)
+  const scopeRef = useRef(nodeScope(nodeId, ipAddress)); scopeRef.current = nodeScope(nodeId, ipAddress);   // `${nodeId}|${ip}` in the cluster, ip standalone
+  useEffect(() => onRunWorkflowRequest(() => scopeRef.current, req => doorRunHandlerRef.current(req)), []);
+
+  // 'aether:edit-workflow': open a saved workflow (or a new empty one) in the
+  // builder for a door event, with a banner back to Doors. Saving a NEW
+  // workflow (or under a new id) links it to that event on the Pi.
+  const [doorEditCtx, setDoorEditCtx] = useState<DoorEditContext | null>(null);
+  const cleanSigRef = useRef('[]');   // canvas as last loaded/saved — to warn before replacing unsaved work
+  const handleEditRequest = async (req: { workflowId?: string; newName?: string; doorId?: number; doorName?: string; eventIndex?: number; eventName?: string }) => {
+    const dirty = workflow.length > 0 && JSON.stringify(workflow) !== cleanSigRef.current;
+    if (dirty && !window.confirm('Replace the workflow on the Emulation canvas? Its unsaved changes will be lost.')) return;
+    const hasDoor = req.doorId !== undefined && req.doorId !== null;
+    const base = hasDoor ? {
+      doorId: Number(req.doorId), doorName: req.doorName || `Door ${req.doorId}`,
+      eventIndex: Number(req.eventIndex ?? 0), eventName: req.eventName || `Event ${Number(req.eventIndex ?? 0) + 1}`,
+    } : null;
+    if (req.workflowId) {
+      if (!(await loadWorkflow(req.workflowId))) { setDoorEditCtx(null); return; }
+      setDoorEditCtx(base ? { ...base, workflowId: req.workflowId, isNew: false } : null);
+    } else {
+      prevCanvasLenRef.current = 0;   // emptying the canvas here must not end the door edit we're starting
+      setWorkflow([]); setSelectedBlockId(null); setSelectedColumnId(null);
+      setWorkflowName(req.newName || ''); setGlobalDelay(1000); setRepeatCount(0);
+      cleanSigRef.current = '[]';
+      setDoorEditCtx(base ? { ...base, workflowId: null, isNew: true } : null);
+    }
+  };
+  // Load dialog: a DIFFERENT workflow ends the door edit (a later Save must not relink the event to it).
+  const loadFromDialog = async (id: string) => {
+    if ((await loadWorkflow(id)) && doorEditCtxRef.current && doorEditCtxRef.current.workflowId !== id) setDoorEditCtx(null);
+  };
+  const doorEditCtxRef = useRef(doorEditCtx);
+  doorEditCtxRef.current = doorEditCtx;
+  // Canvas emptied (every column removed) after having content: the door edit is over.
+  const prevCanvasLenRef = useRef(0);
+  useEffect(() => {
+    if (prevCanvasLenRef.current > 0 && workflow.length === 0) setDoorEditCtx(null);
+    prevCanvasLenRef.current = workflow.length;
+  }, [workflow.length]);
+  const editHandlerRef = useRef(handleEditRequest);
+  editHandlerRef.current = handleEditRequest;
+  useEffect(() => onEditWorkflowRequest(() => scopeRef.current, req => { void editHandlerRef.current(req); }), []);   // AETHER_DOOR_IO_WORKFLOWS: scoped
+
   const stopWorkflow = () => {
+    // AETHER_EMU_RUNTOKEN (Update 69): set shouldStop and let the owning run's
+    // finally clear isEmulating once its loop has actually exited (≤ ~100 ms with
+    // sliced sleeps; an in-flight HTTP request may add its own latency).
     executionControlRef.current.shouldStop = true;
     executionControlRef.current.isPaused = false;   // unstick a paused loop so it can observe shouldStop
-    setIsEmulating(false); setCurrentColumnIndex(-1); setIsPaused(false);
+    setIsPaused(false);
     addLog(0, '⏹️ Workflow stopped by user', 'warning');
+    // Watchdog: if the run is wedged in a request that never returns, retire its
+    // token after 3 s so the UI is released; the wedged run is then halted and
+    // will exit silently whenever the request settles.
+    const stuck = activeRunRef.current;
+    if (stuck !== 0) setTimeout(() => {
+      if (activeRunRef.current === stuck && runTokenRef.current === stuck) {
+        runTokenRef.current++; activeRunRef.current = 0;
+        setIsEmulating(false); setCurrentColumnIndex(-1); setExecutingBlockIds(new Set());
+      }
+    }, 3000);
   };
 
   // ── Schedule whole workflow ──────────────────────────────────────────
@@ -1607,8 +2264,15 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     scheduleTimerRef.current = setTimeout(() => {
       setScheduledRunAt(null);
       scheduleTimerRef.current = null;
+      // AETHER_EMU_RUNTOKEN (Update 69): never start on top of a live run, and call
+      // the CURRENT runWorkflow (via ref) so the run uses the workflow/delay/repeat
+      // as they are now, not as captured when the schedule was set.
+      if (activeRunRef.current !== 0 && activeRunRef.current === runTokenRef.current && !executionControlRef.current.shouldStop) {
+        addLog(0, '⚠️ Scheduled time reached but a run is in progress — scheduled run skipped', 'warning');
+        return;
+      }
       addLog(0, '⏰ Scheduled time reached — starting workflow', 'success');
-      runWorkflow();
+      runWorkflowRef.current();
     }, ms);
   };
   const cancelScheduledRun = () => {
@@ -1699,6 +2363,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
       const cols = normalizeWorkflow(seq?.steps ?? seq);
       if (cols.length === 0) return { ok: false, error: 'No valid workflow columns found in the file.' };
       setWorkflow(cols);
+      cleanSigRef.current = JSON.stringify(cols);   // AETHER_DOOR_WORKFLOWS
       if (seq && typeof seq === 'object') {
         if (typeof seq.globalDelay === 'number') setGlobalDelay(seq.globalDelay);
         if (typeof seq.repeatCount === 'number') setRepeatCount(seq.repeatCount);
@@ -1750,6 +2415,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         const res = applyLoadedSequence(parsed);
         if (res.ok) {
           logSystemRef.current('success', `Imported workflow from ${file.name}`);
+          setDoorEditCtx(null);   // AETHER_DOOR_WORKFLOWS: another workflow now — don't link it to the door event
           setShowIoWizard(false);
         } else {
           setIoError(res.error || 'Invalid workflow file.');
@@ -1839,6 +2505,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     const res = applyLoadedSequence({ steps: s.steps, globalDelay: s.globalDelay, repeatCount: s.repeatCount, name: s.name });
     if (res.ok) {
       logSystemRef.current('success', `Loaded scenario: ${s.name}`);
+      setDoorEditCtx(null);   // AETHER_DOOR_WORKFLOWS
       setShowScenarioWizard(false);
     } else {
       setScenarioWizError(res.error || 'Failed to load scenario.');
@@ -1872,6 +2539,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
       if (res.ok) {
         logSystemRef.current('success', 'Restored last unsaved workflow');
         setRestoreAvailable(false);
+        setDoorEditCtx(null);   // AETHER_DOOR_WORKFLOWS
       } else {
         logSystemRef.current('error', `Restore failed: ${res.error}`);
       }
@@ -1884,26 +2552,43 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
     if (!workflowName.trim()) { alert('Enter a name'); return; }
     try {
       const response = await fetch(`http://${ipAddress}:3001/api/emulations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: workflowName, steps: workflow, globalDelay, repeatCount, version: 'workflow-v2' }) });
-      if (response.ok) { logSystemRef.current('success', `Saved: ${workflowName}`); setShowSaveDialog(false); setWorkflowName(''); loadSavedWorkflows(); }
+      if (response.ok) {
+        const savedName = workflowName;
+        const savedId: string = String((await response.json().catch(() => ({})))?.id || '');
+        logSystemRef.current('success', `Saved: ${workflowName}`); setShowSaveDialog(false); setWorkflowName(''); loadSavedWorkflows();
+        cleanSigRef.current = JSON.stringify(workflow);
+        // AETHER_DOOR_WORKFLOWS: opened from a door event → link a NEW workflow
+        // (or one saved under a new id) to that event, on the Pi.
+        const ctx = doorEditCtx;
+        if (ctx && savedId && (ctx.isNew || savedId !== ctx.workflowId)) {
+          setDoorEditCtx({ ...ctx, workflowId: savedId, isNew: false });
+          const linked = await linkWorkflowToDoorEvent(`http://${ipAddress}:3001`, { doorId: ctx.doorId, eventIndex: ctx.eventIndex, workflowId: savedId, workflowName: savedName });
+          if (linked.ok) logSystemRef.current('success', `Linked "${savedName}" to ${ctx.eventName} on ${ctx.doorName}`);
+          else logSystemRef.current('error', `Saved, but could not link it to ${ctx.eventName} on ${ctx.doorName}: ${linked.error}`);
+          emitWorkflowSaved({ scope: nodeScope(nodeId, ipAddress) /* AETHER_DOOR_IO_WORKFLOWS */, id: savedId, name: savedName, doorId: ctx.doorId, eventIndex: ctx.eventIndex, persisted: linked.ok });
+        }
+      }
     } catch (e) { logSystemRef.current('error', `Save failed: ${e}`); }
   };
 
-  const loadWorkflow = async (id: string) => {
+  const loadWorkflow = async (id: string): Promise<boolean> => {   // AETHER_DOOR_WORKFLOWS: reports success
     try {
       const response = await fetch(`http://${ipAddress}:3001/api/emulations/${id}`);
-      if (!response.ok) { logSystemRef.current('error', `Load failed: HTTP ${response.status}`); return; }
+      if (!response.ok) { logSystemRef.current('error', `Load failed: HTTP ${response.status}`); return false; }
       const data = await response.json();
-      if (!data.success || !data.sequence) { logSystemRef.current('error', 'Load failed: empty response'); return; }
+      if (!data.success || !data.sequence) { logSystemRef.current('error', 'Load failed: empty response'); return false; }
       const res = applyLoadedSequence(data.sequence);
       if (res.ok) {
         logSystemRef.current('success', `Loaded: ${data.sequence.name || id}`);
         setShowLoadDialog(false);
+        return true;
       } else {
         logSystemRef.current('error', `Load failed: ${res.error}`);
       }
     } catch (e: any) {
       logSystemRef.current('error', `Load failed: ${e?.message || e}`);
     }
+    return false;
   };
 
   const deleteWorkflow = async (id: string, name: string) => {
@@ -1925,22 +2610,24 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
   const getBlockDescription = (block: WorkflowBlock): string => {
     switch (block.type) {
       case 'reader': {
-        const reader = readerPool.find(r => r.id === block.readerId);
+        const reader = block.readerId === THIS_DOOR_READER ? { name: 'This door' } : readerPool.find(r => r.id === block.readerId);   // AETHER_DOOR_WORKFLOWS
         if (block.readType === 'pin') return `PIN '${block.pinValue || ''}' (${block.keypadFormat || '4bit'}) → ${reader?.name || 'Unknown'}`;
         if (block.mode === 'range') return `${block.sequenceMode} FC:${block.facilityStart}-${block.facilityEnd} → ${reader?.name || 'Unknown'}`;
         return `FC:${block.facilityCode} CN:${block.cardNumber} → ${reader?.name || 'Unknown'}`;
       }
-      case 'door': { const door = doors.find(d => d.id === block.doorId); return `${door?.name || `Door ${block.doorId}`} ${block.eventType} ${block.action}`; }
+      case 'door': { const door = block.doorId === THIS_DOOR_ID ? { name: 'This door' } /* AETHER_DOOR_WORKFLOWS */ : pickerDoors.find(d => d.id === block.doorId); return `${door?.name || `Door ${block.doorId}`} ${block.eventType === 'io' ? customIoName(block.doorId, block.ioRef) /* AETHER_DOOR_IO_WORKFLOWS */ : block.eventType} ${block.action}`; }
       case 'io': { const ioList = block.ioType === 'output' ? outputs : controllerOutputs; const io = ioList.find(i => i.id === block.ioId); return `${io?.name || `${block.ioType} ${block.ioId}`} ${block.action}`; }
       case 'wait':
         if (block.waitType === 'until_time') return `Until ${block.waitUntilDate ? block.waitUntilDate + ' ' : ''}${block.waitUntilTime || '--:--'}`;
         return block.waitType === 'random' ? `Random ${block.waitMin}-${block.waitMax}s` : `${block.waitValue} ${block.waitType}`;
       case 'schedule': return `Hold until ${block.scheduleDate ? block.scheduleDate + ' ' : ''}${block.scheduleTime || '--:--'}`;
       case 'control': return block.controlType === 'stop' ? 'Stop' : `Loop → Col ${(block.loopToColumn ?? 0) + 1}`;
-      case 'waitInput': return `Wait ${block.waitInputType} ${block.waitInputId} = ${block.waitInputState}`;
-      case 'log': return block.assertCondition ? `Assert: Input ${block.assertInputId} = ${block.assertInputState}` : (block.logMessage || 'Log');
+      case 'waitInput': if (block.waitInputType === 'door_io') { const dn = block.waitInputDoorId === THIS_DOOR_ID ? 'This door' : (pickerDoors.find(d => d.id === (block.waitInputDoorId || 1))?.name || `Door ${block.waitInputDoorId || 1}`); return `Wait ${dn} ${customIoName(block.waitInputDoorId || 1, block.waitIoRef)} = ${block.waitZoneState || (block.waitInputState === 'any_change' ? 'change' : block.waitInputState === 'low' ? 'INACTIVE' : 'ACTIVE')}`; }   // AETHER_DOOR_IO_WORKFLOWS
+        return blockUsesThisDoor(block) ? `Wait This door ${block.waitInputType === 'door_dps' ? 'DPS' : 'REX'} = ${block.waitInputState}` /* AETHER_DOOR_WORKFLOWS */ : `Wait ${block.waitInputType} ${block.waitInputId} = ${block.waitInputState}`;
+      case 'log': if (block.assertCondition && block.assertSource === 'door_io') { const dn = block.assertDoorId === THIS_DOOR_ID ? 'This door' : (pickerDoors.find(d => d.id === (block.assertDoorId || 1))?.name || `Door ${block.assertDoorId || 1}`); return `Assert: ${dn} ${customIoName(block.assertDoorId || 1, block.assertIoRef)} = ${block.assertInputState === 'low' ? 'INACTIVE' : 'ACTIVE'}`; }   // AETHER_DOOR_IO_WORKFLOWS
+        return block.assertCondition ? `Assert: Input ${block.assertInputId} = ${block.assertInputState}` : (block.logMessage || 'Log');
       case 'supervision': return `Input ${block.supervisionInputId} → ${block.supervisionState}`;
-      case 'scenario': return SCENARIO_TEMPLATES[block.scenarioType || 'valid_access'].name;
+      case 'scenario': return `${SCENARIO_TEMPLATES[block.scenarioType || 'valid_access'].name}${blockUsesThisDoor(block) ? ' · This door' : ''}`;   // AETHER_DOOR_WORKFLOWS
       default: return 'Unknown';
     }
   };
@@ -1973,6 +2660,8 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                 <>
                   <div><label className="text-xs text-hv-text-3 block mb-1">Reader</label>
                     <select value={topVal} onChange={e => onTop(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
+                      <option value={THIS_DOOR_READER}>{THIS_DOOR_LABEL}</option>{/* AETHER_DOOR_WORKFLOWS */}
+                      {unlistedReaderOption(topVal, topVal === THIS_DOOR_READER || otherReaders.some(r => r.id === topVal) || emuBoards.some((b: any) => `emu:${b.address}` === topVal))}
                       {otherReaders.length > 0 && <optgroup label="Physical / OSDP">{otherReaders.map(r => <option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}</optgroup>}
                       {emuBoards.length > 0 && <optgroup label="Emulated Controllers">{emuBoards.map(b => <option key={`emu:${b.address}`} value={`emu:${b.address}`}>#{b.address} {b.model}</option>)}</optgroup>}
                     </select>
@@ -2049,9 +2738,12 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
         {selectedBlock.type === 'door' && (
           <>
-            <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.doorId || 1} onChange={e => updateBlock(selectedBlock.id, { doorId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-            <div><label className="text-xs text-hv-text-3 block mb-1">Event</label><select value={selectedBlock.eventType || 'lock'} onChange={e => updateBlock(selectedBlock.id, { eventType: e.target.value as any })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="lock">Lock</option><option value="dps">DPS</option><option value="rexIn">REX</option></select></div>
-            <div><label className="text-xs text-hv-text-3 block mb-1">Action</label><div className="grid grid-cols-3 gap-1">{['activate','deactivate','pulse'].map(action => <button key={action} onClick={() => updateBlock(selectedBlock.id, { action: action as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.action === action ? action === 'activate' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : action === 'deactivate' ? 'bg-hv-error-tint text-hv-error-fg ring-1 ring-inset ring-hv-error/40' : 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{action}</button>)}</div></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.doorId || 1} onChange={e => { const to = parseInt(e.target.value); updateBlock(selectedBlock.id, { doorId: to, ...(selectedBlock.eventType === 'io' ? { ioRef: remapIoRef(selectedBlock.doorId || 1, to, selectedBlock.ioRef) } : {}) }); } /* AETHER_DOOR_IO_WORKFLOWS: keep the Custom I/O */} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doorPickerOptions(selectedBlock.doorId || 1)}</select></div>
+            {/* AETHER_DOOR_IO_WORKFLOWS: Event also lists the door's Custom I/O (This door: slots 1-6) */}
+            <div><label className="text-xs text-hv-text-3 block mb-1">Event</label><select value={selectedBlock.eventType === 'io' ? customIoRefValue(selectedBlock.ioRef, (selectedBlock.doorId || 1) === THIS_DOOR_ID) : (selectedBlock.eventType || 'lock')} onChange={e => { const v = e.target.value; const ref = parseCustomIoRefValue(v); if (ref) updateBlock(selectedBlock.id, { eventType: 'io', ioRef: ref }); else updateBlock(selectedBlock.id, { eventType: v as any, ioRef: undefined, ...(selectedBlock.action === 'toggle' ? { action: 'pulse' as const } : {}) }); }} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="lock">Lock</option><option value="dps">DPS</option><option value="rexIn">REX</option>{(() => { const o = customIoOptions(selectedBlock.doorId || 1, selectedBlock.eventType === 'io' ? selectedBlock.ioRef : undefined, false); return o.length > 0 ? <optgroup label="Custom I/O">{o}</optgroup> : null; })()}</select>
+              {selectedBlock.eventType === 'io' && <p className="text-[10px] text-hv-text-3 mt-1">Relay Custom I/O are driven (REL n); OPTO / ADC inputs follow the panel and are skipped with a warning.{(selectedBlock.doorId || 1) === THIS_DOOR_ID ? ' The slot is looked up on the door running the event.' : ''}</p>}
+            </div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Action</label><div className={`grid ${selectedBlock.eventType === 'io' ? 'grid-cols-4' : 'grid-cols-3'} gap-1`}>{(selectedBlock.eventType === 'io' ? ['activate','deactivate','pulse','toggle'] : ['activate','deactivate','pulse']).map(action => <button key={action} onClick={() => updateBlock(selectedBlock.id, { action: action as any })} className={`px-2 py-1.5 rounded text-xs capitalize ${selectedBlock.action === action ? action === 'activate' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : action === 'deactivate' ? 'bg-hv-error-tint text-hv-error-fg ring-1 ring-inset ring-hv-error/40' : 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{action}</button>)}</div></div>
             {selectedBlock.action === 'pulse' && <div><label className="text-xs text-hv-text-3 block mb-1">Pulse Duration (ms)</label><input type="number" value={selectedBlock.pulseDuration || 500} onChange={e => updateBlock(selectedBlock.id, { pulseDuration: parseInt(e.target.value) || 500 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>}
           </>
         )}
@@ -2210,7 +2902,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
 
         {selectedBlock.type === 'waitInput' && (
           <>
-            <div><label className="text-xs text-hv-text-3 block mb-1">Input Type</label><select value={selectedBlock.waitInputType || 'input'} onChange={e => updateBlock(selectedBlock.id, { waitInputType: e.target.value as any, waitInputId: 1 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="input">General Input (local)</option><option value="controller_input">Controller Input (emulated)</option><option value="controller_output">Controller Output (emulated, monitor)</option><option value="door_dps">Door DPS</option><option value="door_rex">Door REX</option></select></div>
+            <div><label className="text-xs text-hv-text-3 block mb-1">Input Type</label><select value={selectedBlock.waitInputType || 'input'} onChange={e => updateBlock(selectedBlock.id, { waitInputType: e.target.value as any, waitInputId: 1 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="input">General Input (local)</option><option value="controller_input">Controller Input (emulated)</option><option value="controller_output">Controller Output (emulated, monitor)</option><option value="door_dps">Door DPS</option><option value="door_rex">Door REX</option><option value="door_io">Door Custom Input (OPTO / ADC)</option>{/* AETHER_DOOR_IO_WORKFLOWS */}</select></div>
             {(selectedBlock.waitInputType === 'controller_input' || selectedBlock.waitInputType === 'controller_output') ? (() => {
               const kind: 'input' | 'output' = selectedBlock.waitInputType === 'controller_output' ? 'output' : 'input';
               const currentAddr = Math.floor((selectedBlock.waitInputId || 0) / 100);
@@ -2255,8 +2947,20 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               );
             })()
             : selectedBlock.waitInputType === 'input' ? <div><label className="text-xs text-hv-text-3 block mb-1">Input</label><select value={selectedBlock.waitInputId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{inputs.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
-            : <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.waitInputDoorId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputDoorId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>}
-            <div><label className="text-xs text-hv-text-3 block mb-1">Wait For State</label><div className="grid grid-cols-3 gap-1">{['high','low','any_change'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { waitInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.waitInputState === state ? 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{state === 'any_change' ? 'Change' : state.toUpperCase()}</button>)}</div></div>
+            : selectedBlock.waitInputType === 'door_io' ? (   /* AETHER_DOOR_IO_WORKFLOWS: a door's Custom INPUT */
+              <>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.waitInputDoorId || 1} onChange={e => { const to = parseInt(e.target.value); updateBlock(selectedBlock.id, { waitInputDoorId: to, waitIoRef: remapIoRef(selectedBlock.waitInputDoorId || 1, to, selectedBlock.waitIoRef) }); }} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doorPickerOptions(selectedBlock.waitInputDoorId || 1)}</select></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">Custom Input</label><select value={customIoRefValue(selectedBlock.waitIoRef, (selectedBlock.waitInputDoorId || 1) === THIS_DOOR_ID)} onChange={e => updateBlock(selectedBlock.id, { waitIoRef: parseCustomIoRefValue(e.target.value) || undefined })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
+                  {!selectedBlock.waitIoRef && <option value="">— Select an input —</option>}
+                  {customIoOptions(selectedBlock.waitInputDoorId || 1, selectedBlock.waitIoRef, true)}
+                </select></div>
+                <div><label className="text-xs text-hv-text-3 block mb-1">EOL zone state (ADC inputs)</label><select value={selectedBlock.waitZoneState || ''} onChange={e => updateBlock(selectedBlock.id, { waitZoneState: (e.target.value || undefined) as any })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
+                  <option value="">— use Active / Inactive below —</option><option value="ALARM">ALARM</option><option value="NORMAL">NORMAL</option><option value="TROUBLE">TROUBLE</option><option value="TAMPER">TAMPER</option>
+                </select><p className="text-[10px] text-hv-text-3 mt-1">Active = OPTO ON / zone ALARM or TAMPER (the input's Reverse Sense flips it). A zone state is used only for ADC inputs.</p></div>
+              </>
+            )
+            : <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.waitInputDoorId || 1} onChange={e => updateBlock(selectedBlock.id, { waitInputDoorId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doorPickerOptions(selectedBlock.waitInputDoorId || 1)}</select></div>}
+            <div><label className="text-xs text-hv-text-3 block mb-1">Wait For State</label><div className="grid grid-cols-3 gap-1">{['high','low','any_change'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { waitInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.waitInputState === state ? 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{state === 'any_change' ? 'Change' : selectedBlock.waitInputType === 'door_io' ? (state === 'high' ? 'ACTIVE' : 'INACTIVE') /* AETHER_DOOR_IO_WORKFLOWS */ : state.toUpperCase()}</button>)}</div></div>
             <div><label className="text-xs text-hv-text-3 block mb-1">Timeout (ms, 0=infinite)</label><input type="number" value={selectedBlock.waitInputTimeout || 0} onChange={e => updateBlock(selectedBlock.id, { waitInputTimeout: parseInt(e.target.value) || 0 })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm" /></div>
             <div><label className="text-xs text-hv-text-3 block mb-1">On Timeout</label><select value={selectedBlock.waitInputTimeoutAction || 'continue'} onChange={e => updateBlock(selectedBlock.id, { waitInputTimeoutAction: e.target.value as any })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm"><option value="continue">Continue</option><option value="stop">Stop Workflow</option><option value="skip">Skip to Next Column</option></select></div>
           </>
@@ -2270,8 +2974,19 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
               <div><label className="text-xs text-hv-text-3 block mb-1">Level</label><div className="grid grid-cols-5 gap-1">{['info','success','warning','error','marker'].map(level => <button key={level} onClick={() => updateBlock(selectedBlock.id, { logLevel: level as any })} className={`px-1 py-1.5 rounded text-xs ${selectedBlock.logLevel === level ? level === 'success' ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : level === 'warning' ? 'bg-hv-warning-tint text-hv-warning-fg ring-1 ring-inset ring-hv-warning/40' : level === 'error' ? 'bg-hv-error-tint text-hv-error-fg ring-1 ring-inset ring-hv-error/40' : level === 'marker' ? 'bg-hv-brand-tint text-hv-brand-fg ring-1 ring-inset ring-hv-brand/40' : 'bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{level === 'info' ? '📝' : level === 'success' ? '✅' : level === 'warning' ? '⚠️' : level === 'error' ? '❌' : '📍'}</button>)}</div></div>
             ) : (
               <>
-                <div><label className="text-xs text-hv-text-3 block mb-1">Assert Input</label><select value={selectedBlock.assertInputId || 1} onChange={e => updateBlock(selectedBlock.id, { assertInputId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{[...inputs, ...controllerInputs, ...controllerOutputs.filter(o => o.id >= 100)].map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>
-                <div><label className="text-xs text-hv-text-3 block mb-1">Expected State</label><div className="grid grid-cols-2 gap-1">{['high','low'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { assertInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.assertInputState === state ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{state.toUpperCase()}</button>)}</div></div>
+                {/* AETHER_DOOR_IO_WORKFLOWS: assert a door Custom INPUT too */}
+                <div><label className="text-xs text-hv-text-3 block mb-1">Source</label><div className="grid grid-cols-2 gap-1">{([['input', 'Input'], ['door_io', 'Door Custom Input']] as const).map(([v, l]) => <button key={v} onClick={() => updateBlock(selectedBlock.id, { assertSource: v, ...(v === 'door_io' && !selectedBlock.assertInputState ? { assertInputState: 'high' as const } : {}) })} className={`px-2 py-1.5 rounded text-xs ${(selectedBlock.assertSource || 'input') === v ? 'bg-hv-box' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{l}</button>)}</div></div>
+                {selectedBlock.assertSource === 'door_io' ? (
+                  <>
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Door</label><select value={selectedBlock.assertDoorId || 1} onChange={e => { const to = parseInt(e.target.value); updateBlock(selectedBlock.id, { assertDoorId: to, assertIoRef: remapIoRef(selectedBlock.assertDoorId || 1, to, selectedBlock.assertIoRef) }); }} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{doorPickerOptions(selectedBlock.assertDoorId || 1)}</select></div>
+                    <div><label className="text-xs text-hv-text-3 block mb-1">Custom Input</label><select value={customIoRefValue(selectedBlock.assertIoRef, (selectedBlock.assertDoorId || 1) === THIS_DOOR_ID)} onChange={e => updateBlock(selectedBlock.id, { assertIoRef: parseCustomIoRefValue(e.target.value) || undefined })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
+                      {!selectedBlock.assertIoRef && <option value="">— Select an input —</option>}
+                      {customIoOptions(selectedBlock.assertDoorId || 1, selectedBlock.assertIoRef, true)}
+                    </select></div>
+                  </>
+                ) :
+                <div><label className="text-xs text-hv-text-3 block mb-1">Assert Input</label><select value={selectedBlock.assertInputId || 1} onChange={e => updateBlock(selectedBlock.id, { assertInputId: parseInt(e.target.value) })} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">{[...inputs, ...controllerInputs, ...controllerOutputs.filter(o => o.id >= 100)].map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>}
+                <div><label className="text-xs text-hv-text-3 block mb-1">Expected State</label><div className="grid grid-cols-2 gap-1">{['high','low'].map(state => <button key={state} onClick={() => updateBlock(selectedBlock.id, { assertInputState: state as any })} className={`px-2 py-1.5 rounded text-xs ${selectedBlock.assertInputState === state ? 'bg-hv-success-tint text-hv-success-fg ring-1 ring-inset ring-hv-success/40' : 'bg-hv-popup-panel hover:bg-hv-box'}`}>{selectedBlock.assertSource === 'door_io' ? (state === 'high' ? 'ACTIVE' : 'INACTIVE') : state.toUpperCase()}</button>)}</div></div>
               </>
             )}
           </>
@@ -2313,6 +3028,8 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   const ports = selEmu ? emuR.filter(r=>r.address===sel?.address).sort((x,y)=>(x.port??0)-(y.port??0)) : [];
                   return (<>
                     <select value={topV} onChange={e=>onTop(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
+                      <option value={THIS_DOOR_READER}>{THIS_DOOR_LABEL}</option>{/* AETHER_DOOR_WORKFLOWS */}
+                      {unlistedReaderOption(topV, topV === THIS_DOOR_READER || otherR.some(r => r.id === topV) || boards.some((b: any) => `emu:${b.address}` === topV))}
                       {otherR.length>0 && <optgroup label="Physical / OSDP">{otherR.map(r=><option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}</optgroup>}
                       {boards.length>0 && <optgroup label="Emulated Controllers">{boards.map(b=><option key={`emu:${b.address}`} value={`emu:${b.address}`}>#{b.address} {b.model}</option>)}</optgroup>}
                     </select>
@@ -2523,6 +3240,8 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
                   const ports = selEmu ? emuR.filter(r=>r.address===sel?.address).sort((x,y)=>(x.port??0)-(y.port??0)) : [];
                   return (<>
                     <select value={topV} onChange={e=>onTop(e.target.value)} className="w-full bg-hv-surface border border-hv-line rounded px-3 py-2 text-sm">
+                      <option value={THIS_DOOR_READER}>{THIS_DOOR_LABEL}</option>{/* AETHER_DOOR_WORKFLOWS */}
+                      {unlistedReaderOption(topV, topV === THIS_DOOR_READER || otherR.some(r => r.id === topV) || boards.some((b: any) => `emu:${b.address}` === topV))}
                       {otherR.length>0 && <optgroup label="Physical / OSDP">{otherR.map(r=><option key={r.id} value={r.id}>{r.name} ({r.type})</option>)}</optgroup>}
                       {boards.length>0 && <optgroup label="Emulated Controllers">{boards.map(b=><option key={`emu:${b.address}`} value={`emu:${b.address}`}>#{b.address} {b.model}</option>)}</optgroup>}
                     </select>
@@ -2599,9 +3318,20 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
             {restoreAvailable && workflow.length === 0 && (
               <button onClick={restoreLastWorkflow} className="px-3 py-1.5 bg-hv-brand hover:bg-hv-brand-hover rounded text-sm flex items-center gap-1" title="Restore your last unsaved workflow"><RotateCw className="w-4 h-4" /> Restore Last</button>
             )}
-            {isEmulating && <div className="flex items-center gap-2 px-3 py-1.5 bg-hv-success-strong/20 border border-hv-success rounded"><div className="w-2 h-2 bg-hv-success rounded-full animate-pulse" /><span className="text-sm text-hv-success-text">Column {currentColumnIndex + 1}/{workflow.length}</span></div>}
+            {isEmulating && <div className="flex items-center gap-2 px-3 py-1.5 bg-hv-success-strong/20 border border-hv-success rounded"><div className="w-2 h-2 bg-hv-success rounded-full animate-pulse" /><span className="text-sm text-hv-success-text">{runContextRef.current.label ? `Door event · Column ${doorRunCol + 1}/${runContextRef.current.cols}` /* AETHER_DOOR_WORKFLOWS */ : `Column ${currentColumnIndex + 1}/${workflow.length}`}</span></div>}
           </div>
         </div>
+        {doorEditCtx && (   /* AETHER_DOOR_WORKFLOWS: builder opened from a door's Custom Event */
+          <div className="mt-3 px-4 py-2 bg-hv-info-tint border border-hv-info/40 rounded-lg flex items-center gap-3 text-sm">
+            <DoorOpen className="w-4 h-4 text-hv-info-fg flex-shrink-0" />
+            <div className="flex-1 min-w-0 truncate">
+              <span className="font-semibold">Editing {doorEditCtx.eventName} for {doorEditCtx.doorName}</span>
+              <span className="text-hv-text-3"> — saved workflows are shared by every door{doorEditCtx.isNew ? '. Save to link it to this event.' : ''}</span>
+            </div>
+            <button onClick={() => { setDoorEditCtx(null); navigateToDoors(nodeScope(nodeId, ipAddress)); /* AETHER_DOOR_IO_WORKFLOWS */ }} className="px-3 py-1 bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 hover:bg-hv-info-tint-strong rounded text-xs font-semibold flex items-center gap-1 flex-shrink-0"><ArrowRight className="w-3.5 h-3.5 rotate-180" />Back to Doors</button>
+            <button onClick={() => setDoorEditCtx(null)} className="p-1 hover:bg-hv-popup-panel rounded flex-shrink-0" title="Close"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        )}
         {isEmulating && (
           <div className="mt-3 px-4 py-2.5 bg-hv-brand/15 border border-hv-brand/60 rounded-lg flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-hv-brand-fg flex-shrink-0 mt-0.5" />
@@ -2711,7 +3441,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
         <div className="flex items-center justify-center gap-4 flex-wrap">
           {!isEmulating && scheduledRunAt === null && (
             <>
-              <button onClick={runWorkflow} disabled={!connected || workflow.length === 0} className="px-8 py-3 bg-gradient-to-r from-hv-brand-text to-hv-brand text-[#101011] hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold text-lg flex items-center gap-3 shadow-[0_8px_22px_-8px_rgb(var(--hv-brand) / .65)]"><Play className="w-6 h-6" />Run Workflow</button>
+              <button onClick={() => runWorkflow()} /* AETHER_DOOR_WORKFLOWS: no click event as override */ disabled={!connected || workflow.length === 0} className="px-8 py-3 bg-gradient-to-r from-hv-brand-text to-hv-brand text-[#101011] hover:brightness-105 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold text-lg flex items-center gap-3 shadow-[0_8px_22px_-8px_rgb(var(--hv-brand) / .65)]"><Play className="w-6 h-6" />Run Workflow</button>
               <button onClick={openScheduleDialog} disabled={!connected || workflow.length === 0} className="px-6 py-3 bg-hv-popup-panel hover:bg-hv-box text-hv-text border border-hv-line disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2"><CalendarClock className="w-5 h-5" />Schedule Run</button>
               <div className="flex items-center bg-hv-surface rounded-lg border border-hv-line overflow-hidden">
                 <div className="px-3 py-2 bg-hv-popup-panel flex items-center gap-2 border-r border-hv-line"><Repeat className="w-5 h-5 text-hv-brand-fg" /><span className="text-sm font-medium text-hv-text-2">Repeat</span></div>
@@ -2737,7 +3467,9 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           )}
           {isEmulating && (
             <>
-              <div className="flex items-center gap-3 px-4 py-2 bg-hv-success-strong/15 border border-hv-success-strong rounded-lg"><div className="w-3 h-3 bg-hv-success rounded-full animate-pulse" /><span className="text-hv-success-text font-medium">Running: Column {currentColumnIndex + 1}/{workflow.length}{repeatCount > 0 && ` (${repeatCount + 1} total runs)`}</span></div>
+              <div className="flex items-center gap-3 px-4 py-2 bg-hv-success-strong/15 border border-hv-success-strong rounded-lg"><div className="w-3 h-3 bg-hv-success rounded-full animate-pulse" /><span className="text-hv-success-text font-medium">{runContextRef.current.label
+                ? `Running ${runContextRef.current.label}: Column ${doorRunCol + 1}/${runContextRef.current.cols}${runContextRef.current.repeat > 0 ? ` (${runContextRef.current.repeat + 1} total runs)` : ''}` /* AETHER_DOOR_WORKFLOWS */
+                : <>Running: Column {currentColumnIndex + 1}/{workflow.length}{repeatCount > 0 && ` (${repeatCount + 1} total runs)`}</>}</span></div>
               <button onClick={() => { setIsPaused(!isPaused); executionControlRef.current.isPaused = !isPaused; }} className="px-6 py-3 bg-hv-brand hover:bg-hv-brand-hover text-[#FFFFFF] rounded-lg font-bold flex items-center gap-2">{isPaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}{isPaused ? 'Resume' : 'Pause'}</button>
               <button onClick={stopWorkflow} className="px-6 py-3 bg-hv-error-strong hover:bg-hv-error-hover rounded-lg font-bold flex items-center gap-2"><StopCircle className="w-5 h-5" />Stop</button>
             </>
@@ -2896,7 +3628,7 @@ const EmulationWorkflow: React.FC<EmulationWorkflowProps> = ({
           </div>
         </div>
       )}
-      {showLoadDialog && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"><div className="bg-hv-surface rounded-xl p-6 w-96 border border-hv-line"><h3 className="text-lg font-bold mb-4">Load Workflow</h3><div className="max-h-80 overflow-y-auto space-y-2 mb-4">{savedWorkflows.length === 0 ? <p className="text-hv-text-3 text-center py-4">No saved workflows</p> : savedWorkflows.map(w => <div key={w.id} className="flex items-stretch gap-1 group"><button onClick={() => loadWorkflow(w.id)} className="flex-1 px-4 py-3 bg-hv-popup-panel hover:bg-hv-box rounded text-left min-w-0"><div className="font-semibold truncate">{w.name}</div><div className="text-xs text-hv-text-3">{new Date(w.created || w.createdAt).toLocaleDateString()}</div></button><button onClick={() => deleteWorkflow(w.id, w.name)} title={`Delete "${w.name}"`} className="px-3 bg-hv-popup-panel hover:bg-hv-error-hover/70 rounded flex items-center justify-center text-hv-text-3 hover:text-hv-text transition-colors"><Trash2 className="w-4 h-4" /></button></div>)}</div><button onClick={() => setShowLoadDialog(false)} className="w-full px-4 py-2 bg-hv-popup-panel hover:bg-hv-box rounded">Close</button></div></div>}
+      {showLoadDialog && <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"><div className="bg-hv-surface rounded-xl p-6 w-96 border border-hv-line"><h3 className="text-lg font-bold mb-4">Load Workflow</h3><div className="max-h-80 overflow-y-auto space-y-2 mb-4">{savedWorkflows.length === 0 ? <p className="text-hv-text-3 text-center py-4">No saved workflows</p> : savedWorkflows.map(w => <div key={w.id} className="flex items-stretch gap-1 group"><button onClick={() => loadFromDialog(w.id)} /* AETHER_DOOR_WORKFLOWS */ className="flex-1 px-4 py-3 bg-hv-popup-panel hover:bg-hv-box rounded text-left min-w-0"><div className="font-semibold truncate">{w.name}</div><div className="text-xs text-hv-text-3">{new Date(w.created || w.createdAt).toLocaleDateString()}</div></button><button onClick={() => deleteWorkflow(w.id, w.name)} title={`Delete "${w.name}"`} className="px-3 bg-hv-popup-panel hover:bg-hv-error-hover/70 rounded flex items-center justify-center text-hv-text-3 hover:text-hv-text transition-colors"><Trash2 className="w-4 h-4" /></button></div>)}</div><button onClick={() => setShowLoadDialog(false)} className="w-full px-4 py-2 bg-hv-popup-panel hover:bg-hv-box rounded">Close</button></div></div>}
     </div>
   );
 };

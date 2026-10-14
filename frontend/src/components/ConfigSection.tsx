@@ -31,7 +31,7 @@ interface ConfigSectionProps {
   onImportConfig?: (file: File) => void;
   ipAddress?: string;
   eolPanel?: React.ReactNode;
-  toolPanels?: { switch?: React.ReactNode; oncafe?: React.ReactNode; stream?: React.ReactNode; reports?: React.ReactNode; blueprint?: React.ReactNode };
+  toolPanels?: { switch?: React.ReactNode; oncafe?: React.ReactNode; stream?: React.ReactNode; reports?: React.ReactNode; blueprint?: React.ReactNode; kbstudio?: React.ReactNode };
   mode: Mode;
   page: string;
 }
@@ -45,11 +45,13 @@ export const SETUP_TABS = [
   { id: 'firmware', label: 'Device Firmware', description: 'Install Aether updates on this Pi' },
 ] as const;
 export const TOOL_TABS = [
+  // AETHER_TOOLS_MENU_79 (Update 79): menu order set by the user; Log Analytics lives under Reports only
+  { id: 'blueprint', label: 'Board Blueprints', description: 'Powered by HYDRA\nHybrid Diagrams & Routing for Access', sub: 'Powered by HYDRA', group: 'integrations' } /* AETHER_INTEGRATIONS_82 */ /* AETHER_HYDRA_81 */,
+  { id: 'kbstudio', label: 'KB Studio', description: 'Write and review OnCAFE knowledge base articles' },
   { id: 'oncafe', label: 'OnCAFE Console', description: 'Build OnCAFE console layouts' },
-  { id: 'stream', label: 'VMS Stream', description: 'Camera and VMS stream view' },
   { id: 'switch', label: 'Switch Ports', description: 'PoE switch port control' },
-  { id: 'blueprint', label: 'Board Blueprints', description: 'Powered by Hydra' },
-  { id: 'analytics', label: 'Log Analytics', description: 'Scan controller log bundles and grade test runs' },
+  { id: 'stream', label: 'VMS Stream', description: 'Camera and VMS stream view' },
+  { id: 'osdpacademy', label: 'OSDP Academy', description: 'Learn OSDP byte by byte: lessons, packet builder, live trace classroom and troubleshooting scenarios' }, // AETHER_OSDP_ACADEMY
 ] as const;
 export type SetupId = typeof SETUP_TABS[number]['id'];
 export type ToolId = typeof TOOL_TABS[number]['id'];

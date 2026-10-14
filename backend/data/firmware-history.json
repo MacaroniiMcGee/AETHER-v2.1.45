@@ -1,5 +1,20 @@
 [
   {
+    "ts": 1791754556782,
+    "result": "success",
+    "traceId": "fwt_20261011-212013_a00_x41p",
+    "reader": "direct (/dev/ttyACM5 @ 9600, addr 0x00)",
+    "readerId": "direct:/dev/ttyACM5@9600#0",
+    "port": "/dev/ttyACM5",
+    "baud": 9600,
+    "address": 0,
+    "filename": "library:fw_1790841745265_a8481d46",
+    "sizeBytes": 633248,
+    "fragments": 5757,
+    "finalStatus": 2,
+    "rebooting": true
+  },
+  {
     "ts": 1791254096919,
     "result": "success",
     "traceId": "fwt_20261006-021914_a00_3cld",

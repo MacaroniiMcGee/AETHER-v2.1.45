@@ -107,7 +107,7 @@ export interface NavItem {
   label: string;
   icon: React.ReactNode;
   badge?: React.ReactNode;
-  children?: { id: string; label: string; badge?: React.ReactNode }[];
+  children?: { id: string; label: string; badge?: React.ReactNode; sub?: string }[];   // AETHER_TOOLS_MENU_79: sub = small second line
 }
 
 export const SideNav: React.FC<{
@@ -141,9 +141,9 @@ export const SideNav: React.FC<{
                   return (
                     <li key={c.id}>
                       <button type="button" onClick={() => onSelect(item.id, c.id)} aria-current={cOn ? 'page' : undefined}
-                        className={`w-full h-9 flex items-center gap-1 pr-2 rounded-hv-xs text-sm text-left ${
+                        className={`w-full min-h-9 py-1 flex items-center gap-1 pr-2 rounded-hv-xs text-sm text-left ${
                           cOn ? 'text-hv-brand-fg font-semibold' : 'text-hv-text-2 hover:text-hv-text'}`}>
-                        <span className="flex-1 truncate">{c.label}</span>
+                        <span className="flex-1 min-w-0"><span className="block truncate">{c.label}</span>{c.sub && <span className="block truncate text-[10px] leading-tight font-normal text-hv-text-3">{c.sub}</span>}</span>
                         {c.badge}
                       </button>
                     </li>
@@ -170,7 +170,7 @@ export const PageHeader: React.FC<{ crumbs: string[]; title?: string; descriptio
           ))}
         </nav>
         {title && <h1 className="mt-1 text-2xl leading-8 font-bold text-hv-text">{title}</h1>}
-        {description && <p className="mt-1 text-sm leading-5 text-hv-text-2">{description}</p>}
+        {description && <p className="mt-1 text-sm leading-5 text-hv-text-2 whitespace-pre-line">{description}</p>}   {/* AETHER_HYDRA_81: a description may have a second line */}
       </div>
       {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
     </div>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OSDP Academy · AETHER</title>
+<meta name="description" content="Hands-on OSDP training for Aether: build frames, read captures, follow the live OSDP Trace and practise troubleshooting.">
+<script>
+// Theme: follow Aether (parent page) when embedded, else the saved choice (same key Aether uses).
+(function () {
+  function read() {
+    var t = null;
+    try { t = window.parent && window.parent !== window ? window.parent.document.documentElement.dataset.theme : null; } catch (e) {}
+    if (!t) { try { t = localStorage.getItem('hv-theme'); } catch (e) {} }
+    document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+  }
+  read();
+  window.addEventListener('storage', function (e) { if (e.key === 'hv-theme') read(); });
+  try { if (window.parent && window.parent !== window) window.parent.addEventListener('hv-theme', read); } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="hv-tokens.css?v=79db13d7">
+<link rel="stylesheet" href="style.css?v=79db13d7">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="?"><span class="mark" aria-hidden="true">Æ</span>AETHER <small>OSDP Academy</small></a>
+  <span class="spacer"></span>
+  <span id="liveChipTop" class="hide-sm"></span>
+  <button class="btn ghost sm" id="themeBtn" type="button" aria-label="Switch light or dark theme">Theme</button>
+</header>
+<div class="tabsbar">
+  <nav class="tabs" id="nav" role="tablist" aria-label="Academy sections"></nav>
+  <div class="tools">
+    <span id="liveChip"></span>
+    <label class="sr" for="edition">Edition</label>
+    <select id="edition" style="width:auto;min-height:28px;padding-top:2px;padding-bottom:2px;font-size:13px">
+      <option value="recommended">Field Academy</option>
+      <option value="current">Core Workshop</option>
+    </select>
+    <span id="progress" class="hide-sm"></span>
+  </div>
+</div>
+<main id="main" tabindex="-1"></main>
+<footer><span>AETHER · OSDP Academy v2.1 · SIA OSDP 2.2.2</span><span>Nothing here transmits to a reader. Live mode only reads Aether’s OSDP Trace.</span></footer>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="app.mjs?v=79db13d7"></script>
+</body>
+</html>

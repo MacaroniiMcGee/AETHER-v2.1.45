@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Wifi, WifiOff, Activity, Settings, FileText, PlayCircle, Circle, Radio, Building2, Cpu, Cloud, Terminal, Monitor, Network, Wrench, Gauge } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Wifi, WifiOff, Activity, Settings, FileText, PlayCircle, Circle, Radio, Building2, Cpu, Cloud, Terminal, Monitor, Network, Wrench, Gauge, Plug } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import OSDPSection from './OSDPSection';
 import ReadersSection from './ReadersSection';
@@ -20,6 +20,56 @@ import { TopBar, SideNav, PageHeader, useNavCollapsed, StatusDot } from './shell
 import type { ClusterNav, NavItem } from './shell/AppShell';
 import EOLCalibrationSection from './EOLCalibrationSection';
 import EmulatedBoardsSection from './EmulatedBoardsSection';
+import { onNavigate, nodeScope } from '../lib/workflowBridge';   // AETHER_DOOR_WORKFLOWS
+// AETHER_NODE_HOST (Update 69)
+// Backend host to use when none is configured: the host that served this page
+// (the Pi). Only a page that is itself on localhost/127.0.0.1 keeps
+// 'localhost' — from any other PC 'localhost' is that PC, not the Pi.
+export function isLoopbackHost(h: string | null | undefined): boolean {
+  const v = String(h || '').trim().toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  return v === 'localhost' || v === '::1' || /^127(\.\d{1,3}){3}$/.test(v);
+}
+export function defaultHost(): string {
+  const h = (typeof window !== 'undefined' && window.location?.hostname) || '';
+  if (!h || isLoopbackHost(h)) return 'localhost';
+  return h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;   // bare IPv6 -> URL form
+}
+// AETHER_LOGS_API (Update 69): pure helpers for the log upload queue
+// (module level so they can be unit-tested).
+export type LogKind = 'audit' | 'system' | 'emulation';
+export type QueuedLog = { id: string; timestamp: number; message: string; level: string; category?: string; repeat?: number; lastTs?: number };
+export const LOG_BATCH_MAX_COUNT = 50;
+export const LOG_BATCH_MAX_BYTES = 48 * 1024;
+export const LOG_COLLAPSE_MS = 2000;
+/** Per-iteration lines (emulation loop-backs can fire every ~50 ms): kept in the UI, never POSTed. */
+export function isLogChatter(message: string): boolean {
+  return /\blooping back\b/i.test(message);
+}
+/** Same level+message as the last queued entry within LOG_COLLAPSE_MS of its last
+ *  occurrence → bump its repeat count instead of queueing a new entry. */
+export function collapseLogInto(queue: QueuedLog[], entry: QueuedLog, windowMs = LOG_COLLAPSE_MS): boolean {
+  const last = queue[queue.length - 1];
+  if (!last || last.message !== entry.message || last.level !== entry.level) return false;
+  const lastSeen = last.lastTs ?? last.timestamp;
+  if (entry.timestamp - lastSeen > windowMs || entry.timestamp < lastSeen) return false;
+  last.repeat = (last.repeat || 1) + 1;
+  last.lastTs = entry.timestamp;
+  return true;
+}
+export const stripQueuedLog = ({ lastTs, ...rest }: QueuedLog) => rest;
+export const jsonBytes = (v: unknown): number => new TextEncoder().encode(JSON.stringify(v)).length;
+/** Split into batches of at most maxCount entries and ~maxBytes serialized. */
+export function splitLogBatches(entries: QueuedLog[], maxCount = LOG_BATCH_MAX_COUNT, maxBytes = LOG_BATCH_MAX_BYTES): QueuedLog[][] {
+  const out: QueuedLog[][] = [];
+  let cur: QueuedLog[] = [], curBytes = 2;
+  for (const e of entries) {
+    const b = jsonBytes(stripQueuedLog(e)) + 1;
+    if (cur.length && (cur.length >= maxCount || curBytes + b > maxBytes)) { out.push(cur); cur = []; curBytes = 2; }
+    cur.push(e); curBytes += b;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
 /** ---------- Types ---------- */
 type InputType =
   | 'None' | 'REX-Button' | 'Entry Sensor' | 'Lock Sensor'
@@ -27,8 +77,8 @@ type InputType =
 type OutputType =
   | 'None' | 'Strike Follower' | 'Lock'
   | 'Auto Door' | 'Sounder' | 'Strobe' | 'FAI' | 'General';
-type LogEntry = { time: string; message: string };
-type SystemLogEntry = { time: string; type: 'success'|'error'|'info'|'warn'|'io'|string; message: string };
+type LogEntry = { id?: string; time: string; timestamp?: number; message: string };
+type SystemLogEntry = { id?: string; time: string; timestamp?: number; type: 'success'|'error'|'info'|'warn'|'io'|string; message: string };
 type InputItem = { 
   id: number; 
   name: string; 
@@ -120,6 +170,31 @@ async function fetchJson(url: string, init?: RequestInit, timeoutMs = 8000) {
 /**
  * GPIO Control Function - Uses Sequent IOplus API
  */
+// AETHER_LIVE_INPUTS (Update 70): the page keeps the latest state the Pi sent for every
+// opto input and EOL zone, and works out each monitoring row from it at draw time. So a row
+// follows its current mapping straight away when you change Opto/Analog, channel or
+// supervision, instead of keeping whatever it showed before the change until the input moves.
+type LiveInput = { type: 'opto' | 'analog'; pin: number; state: number; voltage?: number; volts?: number; supervisionState?: string; timestamp?: number };
+type SupState = 'normal' | 'active' | 'trouble' | 'short';
+function outputFromLive(output: OutputItem, ev: LiveInput | undefined): { active: boolean; supervisionState: SupState } {
+  if (!ev) return { active: output.active, supervisionState: output.supervisionState || 'normal' };
+  const supervised = output.supervisionType === 'Supervised-NO' || output.supervisionType === 'Supervised-NC';
+  if (ev.type === 'analog' && supervised) {
+    const api = (ev.supervisionState || 'NORMAL').toUpperCase();
+    if (api === 'ALARM') return { active: true, supervisionState: 'active' };
+    if (api === 'TAMPER') return { active: true, supervisionState: 'short' };
+    if (api === 'TROUBLE') return { active: false, supervisionState: 'trouble' };
+    return { active: false, supervisionState: 'normal' };
+  }
+  if (supervised) return { active: ev.state === 1, supervisionState: ev.state === 1 ? 'active' : 'normal' };
+  return { active: output.supervisionType === 'NC' ? ev.state === 0 : ev.state === 1, supervisionState: 'normal' };
+}
+const ZONE_STATE_STYLE: Record<string, string> = {
+  NORMAL: 'bg-hv-popup-panel text-hv-text-2',
+  ALARM: 'bg-hv-success-strong/40 text-hv-success-text',
+  TAMPER: 'bg-hv-error-strong/40 text-hv-error-text',
+  TROUBLE: 'bg-hv-brand-hover/40 text-hv-brand-text',
+};
 async function postGpio(ipAddress: string, channel: number, state: number) {
   if (channel < 0 || channel > 7) {
     throw new Error(`Invalid channel ${channel}. Sequent IOplus only has channels 0-7.`);
@@ -180,10 +255,16 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
   /** ---------- Top-level state ---------- */
   const [connected, setConnected] = useState(false);
   // When running inside a cluster the IP is controlled externally.
-  const [ipAddress, setIpAddress] = useState(externalIp || 'localhost');
+  const [ipAddress, setIpAddress] = useState(externalIp || defaultHost());   // AETHER_NODE_HOST (Update 69)
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [activeTab, setActiveTab] = useState<'access-control'|'readers'|'emulation'|'automation'|'controller-emulator'|'setup'|'tools'|'reports'>('access-control');
+  const [activeTab, setActiveTab] = useState<'access-control'|'readers'|'emulation'|'automation'|'controller-emulator'|'setup'|'tools'|'integrations'|'reports'>('access-control');
   const [activeAccessControlTab, setActiveAccessControlTab] = useState<'control'|'doors'|'elevator'>('control');
+  // AETHER_DOOR_WORKFLOWS: Doors ⇄ Emulation hand-off ("Edit in builder" / "Back to Doors")
+  const navScopeRef = useRef(nodeScope(nodeId, ipAddress)); navScopeRef.current = nodeScope(nodeId, ipAddress);   // `${nodeId}|${ip}` in the cluster, ip standalone   // AETHER_DOOR_IO_WORKFLOWS: only this node's page switches
+  useEffect(() => onNavigate(() => navScopeRef.current, t => {
+    if (t?.tab === 'emulation') setActiveTab('emulation');
+    else if (t?.tab === 'access-control') { setActiveTab('access-control'); if (t.sub === 'doors') setActiveAccessControlTab('doors'); }
+  }), []);
   const [readersPage, setReadersPage] = useState<ReadersPage>(() => recallPage<ReadersPage>('aether.readers.tab', READER_PAGES, 'osdp', { builder: 'trace' }));
   const [setupPage, setSetupPage] = useState<SetupId>(() => recallPage<SetupId>('aether.config.tab', SETUP_TABS, 'pinout'));
   const [toolsPage, setToolsPage] = useState<ToolId>(() => recallPage<ToolId>('aether.tools.tab', TOOL_TABS, 'oncafe'));
@@ -226,6 +307,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
     { id: 7, name: 'Device Output 7', type: 'General', channel: 6, active: false, inputType: 'opto' },
     { id: 8, name: 'Device Output 8', type: 'General', channel: 7, active: false, inputType: 'opto' }
   ]);
+  const [liveInputs, setLiveInputs] = useState<Record<string, LiveInput>>({});   // AETHER_LIVE_INPUTS: 'opto:0'..'analog:7'
   const [controllerOutputs, setControllerOutputs] = useState<OutputItem[]>([
     { id: 1, name: 'Controller Output 1', type: 'None', channel: 0, active: false },
     { id: 2, name: 'Controller Output 2', type: 'None', channel: 1, active: false },
@@ -257,11 +339,112 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
   const [emulationLog, setEmulationLog] = useState<LogEntry[]>([]);
   const [systemLog, setSystemLog] = useState<SystemLogEntry[]>([]);
   /** ---------- Logging helpers ---------- */
+  // AETHER_LOGS_API (Update 69): every entry gets a numeric timestamp and a
+  // stable id, and is queued for POST /api/logs so audit/system/emulation logs
+  // survive a reload (Reports reads them back with GET /api/logs?type=).
+  // Fire-and-forget: batched every ~2 s or 50 entries / ~48 KB, one retry,
+  // then dropped; nothing is queued while disconnected. Identical consecutive
+  // lines within 2 s collapse into one entry with `repeat`, and per-iteration
+  // chatter (isLogChatter) stays in the UI only.
   const now = () => new Date().toLocaleString();
-  const logAudit = (message: string) => setAuditLog(prev => [{ time: now(), message }, ...prev].slice(0, 200));
-  const logEmulation = (message: string) => setEmulationLog(prev => [{ time: now(), message }, ...prev].slice(0, 200));
-  const logSystem = (type: SystemLogEntry['type'], message: string) =>
-    setSystemLog(prev => [{ time: now(), timestamp: Date.now(), type, message }, ...prev].slice(0, 300));
+  const connectedRef = useRef(false);
+  const apiBaseRef = useRef('');
+  connectedRef.current = connected;
+  apiBaseRef.current = `http://${ipAddress}:3001`;
+  const logSeqRef = useRef(0);
+  const logQueueRef = useRef<Record<LogKind, QueuedLog[]>>({ audit: [], system: [], emulation: [] });
+  const logGenRef = useRef<Record<LogKind, number>>({ audit: 0, system: 0, emulation: 0 });
+  const logInFlightRef = useRef<Record<LogKind, Set<AbortController>>>({ audit: new Set(), system: new Set(), emulation: new Set() });
+  const logFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const LOG_FLUSH_MS = 2000, LOG_QUEUE_CAP = 500;
+  const makeLogId = (kind: string) =>
+    `${nodeId || 'local'}-${kind}-${Date.now().toString(36)}-${(logSeqRef.current++).toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const postLogBatch = (base: string, type: LogKind, entries: QueuedLog[], opts: { keepalive?: boolean; attempt?: number; gen?: number } = {}) => {
+    const gen = opts.gen ?? logGenRef.current[type];
+    if (logGenRef.current[type] !== gen) return;   // type was cleared since this batch was queued
+    const attempt = opts.attempt || 0;
+    const ctrl = new AbortController();
+    const inflight = logInFlightRef.current[type];
+    inflight.add(ctrl);
+    const retry = () => {
+      if (attempt === 0 && logGenRef.current[type] === gen) {
+        setTimeout(() => postLogBatch(base, type, entries, { attempt: 1, gen }), LOG_FLUSH_MS);
+      }
+    };
+    fetch(`${base}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, entries: entries.map(stripQueuedLog) }),
+      // keepalive only for the unload flush: Chrome caps in-flight keepalive bodies at 64 KB.
+      keepalive: !!opts.keepalive,
+      signal: opts.keepalive ? undefined : ctrl.signal,
+    }).then(r => {
+      if (!r.ok && r.status >= 500) retry();
+    }).catch(() => {
+      if (!ctrl.signal.aborted) retry();
+    }).finally(() => inflight.delete(ctrl));
+  };
+  const flushLogQueue = (baseOverride?: string, unloading = false) => {
+    if (logFlushTimerRef.current) { clearTimeout(logFlushTimerRef.current); logFlushTimerRef.current = null; }
+    const q = logQueueRef.current;
+    const base = baseOverride || apiBaseRef.current;
+    let keepaliveBudget = unloading ? LOG_BATCH_MAX_BYTES + 8192 : 0;
+    (['audit', 'system', 'emulation'] as const).forEach(type => {
+      if (!q[type].length) return;
+      const pending = q[type];
+      q[type] = [];
+      for (const batch of splitLogBatches(pending, LOG_BATCH_MAX_COUNT, LOG_BATCH_MAX_BYTES)) {
+        const bytes = jsonBytes(batch);
+        const keepalive = keepaliveBudget >= bytes;
+        if (keepalive) keepaliveBudget -= bytes;
+        postLogBatch(base, type, batch, { keepalive });
+      }
+    });
+  };
+  const queueLog = (type: LogKind, entry: QueuedLog) => {
+    if (!connectedRef.current) return;
+    if (isLogChatter(entry.message)) return;
+    const q = logQueueRef.current;
+    if (entry.message.length > 1000) entry.message = entry.message.slice(0, 1000) + '…';
+    if (!collapseLogInto(q[type], entry)) q[type].push(entry);
+    if (q[type].length > LOG_QUEUE_CAP) q[type].splice(0, q[type].length - LOG_QUEUE_CAP);
+    if (q.audit.length + q.system.length + q.emulation.length >= LOG_BATCH_MAX_COUNT) flushLogQueue();
+    else if (!logFlushTimerRef.current) logFlushTimerRef.current = setTimeout(() => flushLogQueue(), LOG_FLUSH_MS);
+  };
+  /** Reports' Clear: drop queued and in-flight entries of one type so they don't come back after the DELETE. */
+  const clearQueuedLogs = (type: LogKind) => {
+    logGenRef.current[type]++;
+    logQueueRef.current[type] = [];
+    logInFlightRef.current[type].forEach(c => { try { c.abort(); } catch { /* ignore */ } });
+    logInFlightRef.current[type].clear();
+  };
+  // Send whatever is queued when the node goes away or the IP changes.
+  // The base is captured here so a queue built against the old IP goes to the old IP.
+  useEffect(() => {
+    const base = `http://${ipAddress}:3001`;
+    const onPageHide = () => flushLogQueue(base, true);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      flushLogQueue(base, true);
+    };
+  }, [ipAddress]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const logAudit = (message: string) => {
+    const entry = { id: makeLogId('audit'), time: now(), timestamp: Date.now(), message };
+    setAuditLog(prev => [entry, ...prev].slice(0, 200));
+    queueLog('audit', { id: entry.id, timestamp: entry.timestamp, message, level: 'info' });
+  };
+  const logEmulation = (message: string) => {
+    const entry = { id: makeLogId('emulation'), time: now(), timestamp: Date.now(), message };
+    setEmulationLog(prev => [entry, ...prev].slice(0, 200));
+    queueLog('emulation', { id: entry.id, timestamp: entry.timestamp, message, level: 'info' });
+  };
+  const logSystem = (type: SystemLogEntry['type'], message: string) => {
+    const entry = { id: makeLogId('system'), time: now(), timestamp: Date.now(), type, message };
+    setSystemLog(prev => [entry, ...prev].slice(0, 300));
+    // No per-frame callers exist today; 'debug' is the reserved noise level and stays local.
+    if (type !== 'debug') queueLog('system', { id: entry.id, timestamp: entry.timestamp, message, level: type, category: type });
+  };
   /** ---------- API fetchers ---------- */
   const fetchWiegandReaders = async () => {
     if (!connected) return;
@@ -337,6 +520,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
         const r = await fetch(`http://${ipAddress}:3001/api/health`);
         if (r.ok) {
           setConnected(true);
+          connectedRef.current = true;   // AETHER_LOGS_API: let the line below be persisted
           logSystem('success', `Connected to ${ipAddress}`);
           fetchWiegandReaders();
           fetchOsdpReadersIntoPool();   // #1 source fix: merge OSDP readers into the shared pool
@@ -348,6 +532,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
         logSystem('error', `Failed to connect to ${ipAddress}`);
       }
     } else {
+      flushLogQueue();   // AETHER_LOGS_API: send what is queued before going offline
       setConnected(false);
       logSystem('info', 'Disconnected');
     }
@@ -423,11 +608,28 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
     });
     newSocket.on('connect', () => {
       console.log('[WebSocket] Connected to backend');
+      setLiveInputs({});   // AETHER_LIVE_INPUTS: the Pi sends every current state on connect
       // NOTE: We no longer poll all inputs on connect to avoid I2C bus saturation
       // Input states will update via WebSocket 'input_state_change' events from backend
     });
     newSocket.on('disconnect', () => {
       console.log('[WebSocket] Disconnected from backend');
+      setLiveInputs({});
+    });
+    // AETHER_DOOR_BUTTONS (Update 74): Controls' relay inputs follow the real relays, whoever moved them
+    newSocket.on('relay_state_change', (m: { channel: number; state: number }) => {
+      if (!m || !Number.isInteger(Number(m.channel))) return;
+      setInputs(prev => {
+        let changed = false;
+        const next = prev.map(i => {
+          if (Number(i.channel) !== Number(m.channel)) return i;
+          const active = (i.restingState || 'NO') === 'NO' ? !!m.state : !m.state;
+          if (i.active === active) return i;
+          changed = true;
+          return { ...i, active };
+        });
+        return changed ? next : prev;
+      });
     });
     newSocket.on('input_state_change', (data: { 
       type: 'opto' | 'analog'; 
@@ -440,31 +642,14 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
       console.log('[WebSocket] Input state change:', data);
       
       const channel = data.pin;
+      if ((data.type === 'opto' || data.type === 'analog') && channel >= 0 && channel <= 7) {
+        setLiveInputs(prev => ({ ...prev, [`${data.type}:${channel}`]: data as LiveInput }));
+      }
       
       setOutputs(prev => prev.map(output => {
         if (output.channel !== channel) return output;
-        
-        const outputInputType = output.inputType || 'opto';
-        if (data.type !== outputInputType) return output;
-        
-        let newActive = output.active;
-        let newSupervisionState: 'normal' | 'active' | 'trouble' | 'short' = output.supervisionState || 'normal';
-        const gpioValue = data.state;
-        
-        if (data.type === 'analog' && (output.supervisionType === 'Supervised-NO' || output.supervisionType === 'Supervised-NC')) {
-          const apiState = (data.supervisionState || 'NORMAL').toUpperCase();
-          if (apiState === 'ALARM') { newSupervisionState = 'active'; newActive = true; }
-          else if (apiState === 'TAMPER') { newSupervisionState = 'short'; newActive = true; }
-          else if (apiState === 'TROUBLE') { newSupervisionState = 'trouble'; newActive = false; }
-          else { newSupervisionState = 'normal'; newActive = false; }
-        } else if (output.supervisionType === 'Supervised-NO' || output.supervisionType === 'Supervised-NC') {
-          newSupervisionState = gpioValue === 1 ? 'active' : 'normal';
-          newActive = newSupervisionState === 'active';
-        } else {
-          newActive = output.supervisionType === 'NC' ? gpioValue === 0 : gpioValue === 1;
-        }
-        
-        return { ...output, active: newActive, supervisionState: newSupervisionState };
+        if (data.type !== (output.inputType || 'opto')) return output;
+        return { ...output, ...outputFromLive(output, data as LiveInput) };
       }));
     });
     // ── Controller Emulator live I/O sync ────────────────────────────
@@ -596,14 +781,17 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
         emulationLog={emulationLog}
         systemLog={systemLog}
         onClearAudit={() => {
+          clearQueuedLogs('audit');   // AETHER_LOGS_API: queued/in-flight entries must not reappear
           setAuditLog([]);
           logSystem('info', 'Audit log cleared');
         }}
         onClearEmulation={() => {
+          clearQueuedLogs('emulation');   // AETHER_LOGS_API: queued/in-flight entries must not reappear
           setEmulationLog([]);
           logSystem('info', 'Emulation log cleared');
         }}
         onClearSystem={() => {
+          clearQueuedLogs('system');   // AETHER_LOGS_API: queued/in-flight entries must not reappear
           setSystemLog([]);
           logSystem('info', 'System log cleared');
         }}
@@ -619,21 +807,28 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
         .filter(r => r.id !== 'nfc' || READER_FEATURES.NFC)
         .map(r => ({ ...r, badge: r.id === 'osdp' && readerStats ? <NavBadge>{readerStats.osdp.connected}</NavBadge>
           : r.id === 'wiegand' && readerStats ? <NavBadge>{readerStats.wiegand.readers}</NavBadge> : undefined })) },
-    { id: 'emulation', label: 'Emulation', icon: <PlayCircle size={20} />,
-      badge: isEmulating ? <span className="ml-auto h-5 px-2 rounded-full bg-hv-success/15 text-hv-success-fg text-[11px] leading-5 font-semibold">Running</span> : undefined },
-    // Automation stays hidden from navigation (its render block below is kept).
+    // AETHER_AEGIS_NAV_83: AEGIS = Automation & Emulation for General Interactive Scenarios
+    { id: 'aegis', label: 'AEGIS', icon: <PlayCircle size={20} />, badge: isEmulating ? <span className="ml-auto h-5 px-2 rounded-full bg-hv-success/15 text-hv-success-fg text-[11px] leading-5 font-semibold">Running</span> : undefined, children: [
+      { id: 'emulation', label: 'Emulation' },
+      { id: 'automation', label: 'Automation' },
+    ] },
     { id: 'controller-emulator', label: 'Controller Emulator', icon: <Cpu size={20} /> },
-    { id: 'setup', label: 'Setup', icon: <Settings size={20} />, children: SETUP_TABS.map(t => ({ id: t.id, label: t.label })) },
-    { id: 'tools', label: 'Tools', icon: <Wrench size={20} />, children: TOOL_TABS.map(t => ({ id: t.id, label: t.label })) },
+    // AETHER_NAV_ORDER_82: Reports sits above Setup
     { id: 'reports', label: 'Reports', icon: <FileText size={20} /> },
+    { id: 'setup', label: 'Setup', icon: <Settings size={20} />, children: SETUP_TABS.map(t => ({ id: t.id, label: t.label })) },
+    // AETHER_INTEGRATIONS_82: tools with group integrations (Board Blueprints / HYDRA) get their own tab; menu second lines from AETHER_TOOLS_MENU_79
+    { id: 'tools', label: 'Tools', icon: <Wrench size={20} />, children: TOOL_TABS.filter(t => (t as any).group !== 'integrations').map(t => ({ id: t.id, label: t.label, sub: (t as any).sub })) },
+    { id: 'integrations', label: 'Integrations', icon: <Plug size={20} />, children: TOOL_TABS.filter(t => (t as any).group === 'integrations').map(t => ({ id: t.id, label: t.label, sub: (t as any).sub })) },
   ];
-  const navLabel = NAV.find(n => n.id === activeTab)?.label ?? 'Automation';
+  const navId = (activeTab === 'emulation' || activeTab === 'automation') ? 'aegis' : activeTab;   // AETHER_AEGIS_NAV_83
+  const navLabel = NAV.find(n => n.id === navId)?.label ?? 'Automation';
   const activeChild: string | undefined =
-    activeTab === 'access-control' ? activeAccessControlTab
+    (activeTab === 'emulation' || activeTab === 'automation') ? activeTab
+    : activeTab === 'access-control' ? activeAccessControlTab
     : activeTab === 'readers' ? readersPage
     : activeTab === 'setup' ? setupPage
-    : activeTab === 'tools' ? toolsPage : undefined;
-  const subLabel = activeChild ? NAV.find(n => n.id === activeTab)?.children?.find(c => c.id === activeChild)?.label : undefined;
+    : (activeTab === 'tools' || activeTab === 'integrations') ? toolsPage : undefined;
+  const subLabel = activeChild ? NAV.find(n => n.id === navId)?.children?.find(c => c.id === activeChild)?.label : undefined;
   const pageDescription: string | undefined =
     activeTab === 'access-control'
       ? ({ control: 'System inputs, outputs and controller GPIO', doors: 'Door simulation: locks, position and request-to-exit', elevator: 'Floor access control: relays and floor selection' } as const)[activeAccessControlTab]
@@ -645,8 +840,10 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
           formats: 'Build and analyze card formats for OSDP and Wiegand',
           nfc: 'PN532 NFC reader',
         } as Record<ReadersPage, string>)[readersPage]
+    : activeTab === 'emulation' ? 'AEGIS · Automation & Emulation for General Interactive Scenarios\nBuild, schedule and run test workflows'
+    : activeTab === 'automation' ? 'AEGIS · Automation & Emulation for General Interactive Scenarios\nRules that react to I/O, doors and cards'
     : activeTab === 'setup' ? SETUP_TABS.find(t => t.id === setupPage)?.description
-    : activeTab === 'tools' ? TOOL_TABS.find(t => t.id === toolsPage)?.description
+    : (activeTab === 'tools' || activeTab === 'integrations') ? TOOL_TABS.find(t => t.id === toolsPage)?.description
     : activeTab === 'reports' ? 'Audit, system and emulation logs, and log analytics'
     : undefined;
   const pageTitle = subLabel ?? (activeTab === 'reports' ? 'Reports' : undefined);
@@ -689,16 +886,23 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
       <div className="flex flex-1 min-h-0">
         <SideNav
           items={NAV}
-          active={activeTab}
+          active={navId}
           activeChild={activeChild}
           collapsed={navCollapsed}
           onSelect={(id, child) => {
+            if (id === 'aegis') {   // AETHER_AEGIS_CLICK_84: parent click opens the last AEGIS page
+              let pg = child;
+              if (!pg) { try { pg = sessionStorage.getItem('aether.aegis.tab') || undefined; } catch { /* */ } }
+              if (pg !== 'emulation' && pg !== 'automation') pg = 'emulation';
+              try { sessionStorage.setItem('aether.aegis.tab', pg); } catch { /* */ }
+              setActiveTab(pg as any); return;
+            }   // AETHER_AEGIS_NAV_83
             setActiveTab(id as any);
             if (!child) return;   // parent click: reopen the section's last page
             if (id === 'access-control') setActiveAccessControlTab(child as any);
             if (id === 'readers') { setReadersPage(child as ReadersPage); rememberPage('aether.readers.tab', child); }
             if (id === 'setup') { setSetupPage(child as SetupId); rememberPage('aether.config.tab', child); }
-            if (id === 'tools') { setToolsPage(child as ToolId); rememberPage('aether.tools.tab', child); }
+            if (id === 'tools' || id === 'integrations') { setToolsPage(child as ToolId); rememberPage('aether.tools.tab', child); }
           }}
         />
         <main className="flex-1 min-w-0 p-6">
@@ -764,7 +968,9 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                     <div className="space-y-3">
                       {outputs.map(output => {
                         const isSupervised = output.supervisionType === 'Supervised-NO' || output.supervisionType === 'Supervised-NC';
-                        const supervisionState = output.supervisionState || 'normal';
+                        const live = outputFromLive(output, liveInputs[`${output.inputType || 'opto'}:${output.channel}`]);
+                        const supervisionState = live.supervisionState;
+                        const isActive = live.active;
                         
                         const stateColors = {
                           normal: 'bg-hv-popup-panel text-hv-text-2',
@@ -788,7 +994,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                                   <div className={`w-4 h-4 rounded-full ${
                                     isSupervised 
                                       ? indicatorColors[supervisionState]
-                                      : (output.active ? 'bg-hv-success shadow-lg shadow-hv-success/40' : 'bg-hv-line-strong')
+                                      : (isActive ? 'bg-hv-success shadow-lg shadow-hv-success/40' : 'bg-hv-line-strong')
                                   }`} />
                                   <div>
                                     <div className="font-semibold">{output.name}</div>
@@ -811,17 +1017,61 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                               <div className={`px-4 py-2 rounded-lg font-semibold ${
                                 isSupervised 
                                   ? stateColors[supervisionState]
-                                  : (output.active ? 'bg-hv-success-strong/40 text-hv-success-text' : 'bg-hv-popup-panel text-hv-text-3')
+                                  : (isActive ? 'bg-hv-success-strong/40 text-hv-success-text' : 'bg-hv-popup-panel text-hv-text-3')
                               }`}>
                                 {isSupervised 
                                   ? supervisionState.toUpperCase()
-                                  : (output.active ? 'TRIGGERED' : 'WAITING')
+                                  : (isActive ? 'TRIGGERED' : 'WAITING')
                                 }
                               </div>
                             </div>
                           </div>
                         );
                       })}
+                    </div>
+                  </div>
+                </div>
+                {/* AETHER_LIVE_INPUTS: every opto input and EOL zone, whatever it is mapped to */}
+                <div className="backdrop-blur rounded-xl p-6 border" style={{ background: 'rgb(var(--hv-widget) / 0.55)', borderColor: 'rgb(var(--hv-line))' }}>
+                  <h2 className="text-2xl font-bold mb-1 flex items-center gap-2">
+                    <div className="w-3 h-3 bg-hv-info rounded-full animate-pulse" />
+                    Live Inputs
+                  </h2>
+                  <p className="text-xs text-hv-text-3 mb-4">
+                    {connected ? 'As read from the IOplus board. Opto inputs update within about half a second, EOL zones within about a second (up to 3 s if the one-call zone read is off).' : 'Connect to see live input states.'}   {/* AETHER_ZONE_FAST (Update 73) */}
+                  </p>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="text-sm font-semibold mb-2">Opto inputs (OPTO 1–8)</div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {Array.from({ length: 8 }, (_, ch) => {
+                          const ev = liveInputs[`opto:${ch}`];
+                          const on = ev?.state === 1;
+                          return (
+                            <div key={ch} data-live-opto={ch + 1} className="rounded-lg px-3 py-2 border text-center" style={{ background: 'rgb(var(--hv-surface) / 0.5)', borderColor: 'rgb(var(--hv-popup-panel))' }}>
+                              <div className="text-xs text-hv-text-3">OPTO {ch + 1}</div>
+                              <div className={`text-sm font-semibold ${!ev ? 'text-hv-text-3' : on ? 'text-hv-success-text' : 'text-hv-text-2'}`}>{!ev ? '—' : on ? 'ON' : 'OFF'}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold mb-2">EOL zones (ADC 1–8)</div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {Array.from({ length: 8 }, (_, ch) => {
+                          const ev = liveInputs[`analog:${ch}`];
+                          const st = (ev?.supervisionState || '').toUpperCase();
+                          const v = ev ? (typeof ev.volts === 'number' ? ev.volts : (ev.voltage || 0) / 1000) : null;
+                          return (
+                            <div key={ch} data-live-zone={ch + 1} className={`rounded-lg px-3 py-2 border text-center ${ev ? (ZONE_STATE_STYLE[st] || '') : ''}`} style={{ borderColor: 'rgb(var(--hv-popup-panel))' }}>
+                              <div className="text-xs opacity-80">ZONE {ch + 1}</div>
+                              <div className="text-sm font-semibold">{ev ? (st || '—') : '—'}</div>
+                              {v !== null && <div className="text-[11px] opacity-80">{v.toFixed(2)} V</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -866,6 +1116,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
             {activeAccessControlTab === 'doors' && (
               <DoorSection
                 ipAddress={ipAddress}
+                nodeId={nodeId}   /* AETHER_DOOR_IO_WORKFLOWS: bridge scope */
                 connected={connected}
                 socket={socket}
                 readerPool={readerPool}
@@ -925,6 +1176,8 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
             logEmulation={logEmulation}
             logSystem={logSystem}
             postGpio={postGpio}
+            legacyReaderPool={readerPool}
+            nodeId={nodeId}   /* AETHER_DOOR_IO_WORKFLOWS: bridge scope */   /* AETHER_DOOR_WORKFLOWS: map a door's legacy reader id by pins */
           />
         </div>
         {/* AUTOMATION TAB — hidden from the tab bar; kept so it can be restored */}
@@ -949,17 +1202,24 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
         {/* REPORTS — its own GNB item (AETHER-GNB-2DEPTH) */}
         {activeTab === 'reports' && reportsPanel}
         {/* SETUP and TOOLS — configuration pages and the hands-on tools, page picked in the GNB */}
-        {(activeTab === 'setup' || activeTab === 'tools') && (
+        {(activeTab === 'setup' || activeTab === 'tools' || activeTab === 'integrations') && (
           <ConfigSection
-            mode={activeTab}
+            mode={activeTab === 'setup' ? 'setup' : 'tools'}
             page={activeTab === 'setup' ? setupPage : toolsPage}
             eolPanel={<EOLCalibrationSection ipAddress={ipAddress} connected={connected} logSystem={logSystem} logAudit={logAudit} />}
             toolPanels={{
+              // OSDP Academy: standalone training page (frontend/public/osdp-training). AETHER_OSDP_ACADEMY
+              osdpacademy: (
+                <div style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 560 }}>
+                  <iframe src="/osdp-training/index.html?v=79db13d7" title="OSDP Academy"
+                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, display: 'block', background: 'rgb(var(--hv-surface))' }} />
+                </div>
+              ),
               // Board Blueprint Studio: a standalone page (frontend/public). It fills the
               // panel's width (beside the cluster sidebar) and may go full screen.
               blueprint: (
                 <div style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 560 }}>
-                  <iframe src="/board-blueprint-studio.html?v=3fa31dbd" title="Board Blueprint Studio" allowFullScreen
+                  <iframe src="/board-blueprint-studio.html?v=631550e4" title="Board Blueprint Studio" allowFullScreen
                     style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, display: 'block', background: 'rgb(var(--hv-surface))' }} />
                 </div>
               ),
@@ -973,6 +1233,15 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
                 </div>
               ),
               stream: <StreamToolPanel ipAddress={ipAddress} />,
+              // KB Studio: the OnCAFE knowledge base editor. The page in frontend/public is a
+              // small launcher; KB Studio itself loads from its service, so new versions never
+              // need an Aether update. People sign in with their own GitHub account inside it.
+              kbstudio: (
+                <div style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 560 }}>
+                  <iframe src="/kb-studio.html" title="OnCAFE KB Studio" allow="clipboard-read; clipboard-write"
+                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, display: 'block' }} />
+                </div>
+              ),
             }}
             inputs={inputs}
             outputs={outputs}

@@ -14,7 +14,7 @@
     {
       "id": "lab",
       "name": "Desk Test Switch - GS970M/10PS",
-      "host": "192.168.1.79",
+      "host": "192.168.1.188",
       "port": 22,
       "username": "manager",
       "credentialEnv": "SWITCH_PASS_LAB",

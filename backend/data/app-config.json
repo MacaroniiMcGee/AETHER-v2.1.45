@@ -1,0 +1,262 @@
+{
+  "version": "3.0",
+  "timestamp": "2026-10-11T21:58:11.945Z",
+  "inputs": [
+    {
+      "id": 1,
+      "name": "Device Input 1",
+      "type": "REX-Button",
+      "channel": 0,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 2,
+      "name": "Device Input 2",
+      "type": "REX-Button",
+      "channel": 1,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 3,
+      "name": "Device Input 3",
+      "type": "REX-Button",
+      "channel": 2,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 4,
+      "name": "Device Input 4",
+      "type": "REX-Button",
+      "channel": 3,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 5,
+      "name": "Device Input 5",
+      "type": "Entry Sensor",
+      "channel": 4,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 6,
+      "name": "Device Input 6",
+      "type": "Safety Beam",
+      "channel": 5,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 7,
+      "name": "Device Input 7",
+      "type": "General",
+      "channel": 6,
+      "active": false,
+      "restingState": "NO"
+    },
+    {
+      "id": 8,
+      "name": "Device Input 8",
+      "type": "General",
+      "channel": 7,
+      "active": false,
+      "restingState": "NO"
+    }
+  ],
+  "outputs": [
+    {
+      "id": 1,
+      "name": "Normally Opened UnSupervised",
+      "type": "Strike Follower",
+      "channel": 0,
+      "active": true,
+      "inputType": "analog",
+      "supervisionState": "normal",
+      "supervisionType": "NO"
+    },
+    {
+      "id": 2,
+      "name": "Device Output 2",
+      "type": "Strike Follower",
+      "channel": 1,
+      "active": false,
+      "inputType": "analog",
+      "supervisionState": "trouble",
+      "supervisionType": "Supervised-NO"
+    },
+    {
+      "id": 3,
+      "name": "Device Output 3",
+      "type": "Strike Follower",
+      "channel": 2,
+      "active": false,
+      "inputType": "analog",
+      "supervisionState": "trouble",
+      "supervisionType": "Supervised-NO"
+    },
+    {
+      "id": 4,
+      "name": "Device Output 4",
+      "type": "Strike Follower",
+      "channel": 3,
+      "active": false,
+      "inputType": "analog",
+      "supervisionState": "normal",
+      "supervisionType": "NC"
+    },
+    {
+      "id": 5,
+      "name": "Normally Opened Supervised",
+      "type": "Sounder",
+      "channel": 4,
+      "active": false,
+      "inputType": "analog",
+      "supervisionState": "normal",
+      "supervisionType": "NO"
+    },
+    {
+      "id": 6,
+      "name": "Device Output 6",
+      "type": "Strobe",
+      "channel": 5,
+      "active": false,
+      "inputType": "analog",
+      "supervisionState": "normal",
+      "supervisionType": "NC"
+    },
+    {
+      "id": 7,
+      "name": "Normally Opened Supervised (Shorted)",
+      "type": "General",
+      "channel": 6,
+      "active": true,
+      "inputType": "analog",
+      "supervisionState": "short",
+      "supervisionType": "NO"
+    },
+    {
+      "id": 8,
+      "name": "Device Output 8",
+      "type": "General",
+      "channel": 7,
+      "active": false,
+      "inputType": "analog",
+      "supervisionState": "normal",
+      "supervisionType": "Supervised-NO"
+    }
+  ],
+  "controllerOutputs": [
+    {
+      "id": 1,
+      "name": "Controller Output 1",
+      "type": "None",
+      "channel": 0,
+      "active": false
+    },
+    {
+      "id": 2,
+      "name": "Controller Output 2",
+      "type": "None",
+      "channel": 1,
+      "active": false
+    },
+    {
+      "id": 3,
+      "name": "Controller Output 3",
+      "type": "None",
+      "channel": 2,
+      "active": false
+    },
+    {
+      "id": 4,
+      "name": "Controller Output 4",
+      "type": "None",
+      "channel": 3,
+      "active": false
+    }
+  ],
+  "readerPool": [
+    {
+      "id": "reader1",
+      "name": "Wiegand Reader 1",
+      "type": "wiegand",
+      "enabled": true,
+      "d0": 17,
+      "d1": 27,
+      "assignedToDoor": 1,
+      "position": "in"
+    },
+    {
+      "id": "reader2",
+      "name": "Wiegand Reader 2",
+      "type": "wiegand",
+      "enabled": true,
+      "d0": 22,
+      "d1": 23,
+      "assignedToDoor": 2,
+      "position": "in"
+    },
+    {
+      "id": "reader3",
+      "name": "Wiegand Reader 3",
+      "type": "wiegand",
+      "enabled": false,
+      "d0": 24,
+      "d1": 25,
+      "assignedToDoor": null,
+      "position": null
+    },
+    {
+      "id": "reader4",
+      "name": "Wiegand Reader 4",
+      "type": "wiegand",
+      "enabled": false,
+      "d0": 5,
+      "d1": 6,
+      "assignedToDoor": null,
+      "position": null
+    }
+  ],
+  "credentialLibrary": [
+    {
+      "id": "card-1",
+      "name": "Default Card (26-bit)",
+      "format": "26-bit",
+      "facilityCode": "123",
+      "cardNumber": "12345"
+    },
+    {
+      "id": "card-2",
+      "name": "Admin Card (26-bit)",
+      "format": "26-bit",
+      "facilityCode": "123",
+      "cardNumber": "99999"
+    },
+    {
+      "id": "card-3",
+      "name": "Corp ID (34-bit)",
+      "format": "34-bit",
+      "facilityCode": "65535",
+      "cardNumber": "1234567"
+    },
+    {
+      "id": "card-4",
+      "name": "Gov ID (37-bit)",
+      "format": "37-bit",
+      "facilityCode": "511",
+      "cardNumber": "1234567"
+    },
+    {
+      "id": "card-5",
+      "name": "HID Mobile (48-bit)",
+      "format": "48-bit",
+      "facilityCode": "4095",
+      "cardNumber": "123456789"
+    }
+  ],
+  "savedAt": "2026-10-11T21:58:13.093Z"
+}

@@ -738,8 +738,9 @@ class SupervisionController {
       const zone = await this.readZone(board, ch);
       zones.push(zone);
       
-      // 100ms delay between reads to prevent I2C lockup
-      await new Promise(r => setTimeout(r, 100));
+      // AETHER_ZONE_FAST (Update 73): no extra sleep here any more: every read goes
+      // through lib/i2cBus, which already holds the bus idle I2C_MIN_GAP_MS (100 ms)
+      // after each call, across processes. This sleep doubled the scan time.
     }
     
     return zones;
@@ -754,8 +755,10 @@ class SupervisionController {
    * Now one scan is shared by everyone asking within STATUS_TTL_MS, and
    * callers arriving mid-scan wait for that scan instead of starting another.
    */
-  async getStatus() {
-    const STATUS_TTL_MS = 5000;
+  // AETHER_ZONE_FAST (Update 73): maxAgeMs lets the live zone monitor ask for a
+  // fresher scan than the 5 s everyone else shares.
+  async getStatus(maxAgeMs) {
+    const STATUS_TTL_MS = Number.isFinite(maxAgeMs) ? Math.max(0, maxAgeMs) : 5000;
     const now = Date.now();
     if (this._statusCache && now - this._statusCache.at < STATUS_TTL_MS) return this._statusCache.value;
     if (this._statusInFlight) return this._statusInFlight;
@@ -765,10 +768,42 @@ class SupervisionController {
     return this._statusInFlight;
   }
 
+  /** AETHER_ZONE_FAST: zone objects (same shape as readZone) from 8 voltages in mV; null = skip. */
+  zonesFromVoltages(board, mvList) {
+    const out = [];
+    (mvList || []).forEach((mv, i) => {
+      if (mv === null || mv === undefined || !Number.isFinite(Number(mv))) return;
+      const channel = i + 1, voltage = Math.round(Number(mv));
+      const state = this.getZoneState(voltage, board, channel);
+      const profile = this.getZoneProfile(board, channel);
+      out.push({ board, channel, zone: `${board}-${channel}`, voltage, volts: (voltage / 1000).toFixed(3), state,
+        severity: this.getSeverity(state), isAlarm: state === 'ALARM', isTamper: state === 'TAMPER', isTrouble: state === 'TROUBLE',
+        isNormal: state === 'NORMAL', profileId: profile.id, profileName: profile.name, timestamp: Date.now() });
+    });
+    return out;
+  }
+
+  /** AETHER_ZONE_FAST: share a complete set of fresh zones with every other reader of getStatus(). */
+  primeStatus(zones) {
+    if (!Array.isArray(zones) || zones.length !== this.zonesPerBoard) return;
+    this._statusCache = { at: Date.now(), value: this._buildStatus(zones, true) };
+  }
+
   async _scanStatus() {
     try {
       const zones = await this.readAllZones(0);
-      
+      return this._buildStatus(zones, true);   // log only when the counts change
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message,
+        timestamp: Date.now()
+      };
+    }
+  }
+
+  _buildStatus(zones, quiet) {
+    {
       const summary = {
         total: zones.length,
         normal: zones.filter(z => z.state === 'NORMAL').length,
@@ -779,12 +814,17 @@ class SupervisionController {
         error: zones.filter(z => z.state === 'ERROR').length
       };
       
-      // Color-coded console output
-      console.log(`${c.cyan}[Supervision] Status:${c.reset}`);
-      console.log(`  ${c.brightGreen}NORMAL: ${summary.normal}${c.reset}  |  ` +
-                  `${c.brightYellow}ALARM: ${summary.alarm}${c.reset}  |  ` +
-                  `${c.brightRed}TAMPER: ${summary.tamper}${c.reset}  |  ` +
-                  `${c.blue}TROUBLE: ${summary.trouble}${c.reset}`);
+ 
+      // Color-coded console output, only when the counts change (scans can now run every few seconds)
+      const sig = `${summary.normal}/${summary.alarm}/${summary.tamper}/${summary.trouble}/${summary.error}`;
+      if (!quiet || sig !== this._lastSummarySig) {
+        this._lastSummarySig = sig;
+        console.log(`${c.cyan}[Supervision] Status:${c.reset}`);
+        console.log(`  ${c.brightGreen}NORMAL: ${summary.normal}${c.reset}  |  ` +
+                    `${c.brightYellow}ALARM: ${summary.alarm}${c.reset}  |  ` +
+                    `${c.brightRed}TAMPER: ${summary.tamper}${c.reset}  |  ` +
+                    `${c.blue}TROUBLE: ${summary.trouble}${c.reset}`);
+      }
       
       return {
         success: true,
@@ -798,12 +838,6 @@ class SupervisionController {
           zones,
           summary
         }],
-        timestamp: Date.now()
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
         timestamp: Date.now()
       };
     }

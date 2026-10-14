@@ -126,7 +126,7 @@ module.exports = function(io, logSystem = () => {}, osdpManagerArg = null) {
     if (!dev) return res.status(404).json({ success: false, error: 'no device' });
     if (idx >= dev.numOutputs) return res.status(400).json({ success: false, error: 'idx out of range' });
     dev.outputs[idx] = val ? 1 : 0;
-    dev.emit('output-changed', { address: addr, outNum: idx, state: val ? 1 : 0, auto: false });
+    dev.emit('output-changed', { address: addr, outNum: idx, state: val ? 1 : 0, auto: false, via: 'api' });   // AETHER_DOOR_ACTIVITY: via 'api' = set from Aether, not the panel
     res.json({ success: true, outputs: Array.from(dev.outputs) });
   });
 

@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { isLockWatch, lockWatchFromEvent } from '../../lib/doorOutputs';   // AETHER_ANALOG_IN (Update 72)
 
 // ---------- Model ----------
 
@@ -175,6 +176,7 @@ function useLiveStreamData(backendUrl: string | null): StreamModel {
   const doorRuntime = useRef<Map<number, { openSince: number | null; stateSince: number; last: DoorState | null; lastCard: StreamDoor['lastCard']; prevCard?: StreamDoor['lastCard'] }>>(new Map());
   const emuDevices = useRef<Map<number, any>>(new Map());
   const hw = useRef<{ relays: (0 | 1 | null)[]; inputs: (0 | 1 | null)[] }>({ relays: Array(8).fill(null), inputs: Array(8).fill(null) });
+  const zonesRef = useRef<any[]>([]);   // last supervision scan (1-based channel), for analog-watched locks
   const frameCount = useRef(0);
   const nakCount = useRef(0);
   const totalFrames = useRef(0);
@@ -254,6 +256,7 @@ function useLiveStreamData(backendUrl: string | null): StreamModel {
       if (pin >= 0 && pin < 8) hw.current.relays[pin] = d.value ? 1 : 0;
     });
     socket.on('input_state_change', (d: any) => {
+      if (d?.type && d.type !== 'opto') return;   // AETHER_STREAM_OPTO (Update 69): zone events are not opto states
       const ch = Number(d?.channel ?? d?.pin);
       if (ch >= 0 && ch < 8) hw.current.inputs[ch] = (d?.state ?? d?.value) ? 1 : 0;
     });
@@ -365,6 +368,7 @@ function useLiveStreamData(backendUrl: string | null): StreamModel {
         const zones = sup.value.boards[0].zones.map((z: any) => ({
           channel: z.channel, state: z.state, mv: z.voltage, profile: z.profileName || '',
         }));
+        zonesRef.current = sup.value.boards[0].zones;
         setModel(m => ({ ...m, io: { ...m.io, zones } }));
       }
     };
@@ -418,7 +422,18 @@ function useLiveStreamData(backendUrl: string | null): StreamModel {
         const dpsCh = Number(d.dps?.channel ?? -1);
         const rexCh = Number(d.rexIn?.channel ?? -1);
         const pulseHeld = emulated && (lockPulse.current.get(`${Number(d.emuBoard)}:${lockCh}`) || 0) > now;
-        const unlocked = emulated ? (!!outVal(lockCh) || pulseHeld) : lockCh >= 0 ? hw.current.relays[lockCh] === 1 : !!d.lock?.active;
+        // AETHER_ANALOG_IN (Update 72): a watched Lock follows the panel's lock relay on OPTO n / ADC n
+        const watchedLock = (): boolean => {
+          if (d.lock?.hardwareType === 'opto-in') {
+            const v = hw.current.inputs[lockCh];
+            const r = v === null || v === undefined ? null : lockWatchFromEvent(d.lock, { type: 'opto', pin: lockCh, state: v });
+            return r ? r.active : !!d.lock?.active;
+          }
+          const z = zonesRef.current.find((x: any) => Number(x.channel) === lockCh + 1);
+          const r = z ? lockWatchFromEvent(d.lock, { type: 'analog', pin: lockCh, supervisionState: z.state, voltage: z.voltage, volts: z.volts }) : null;
+          return r ? r.active : !!d.lock?.active;
+        };
+        const unlocked = emulated ? (!!outVal(lockCh) || pulseHeld) : lockCh >= 0 ? (isLockWatch(d.lock) ? watchedLock() : hw.current.relays[lockCh] === 1) : !!d.lock?.active;
         const open = emulated ? !!inVal(dpsCh) : dpsCh >= 0 ? hw.current.inputs[dpsCh] === 1 : !!d.dps?.active;
         const rex = emulated ? !!inVal(rexCh) : rexCh >= 0 ? hw.current.inputs[rexCh] === 1 : !!d.rexIn?.active;
         // A board the panel isn't polling still has valid I/O; flag it instead of hiding state.

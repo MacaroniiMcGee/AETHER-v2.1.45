@@ -129,7 +129,7 @@ class IOplusController {
     
     try {
       await this.executeCommand(board, `relwr ${relay} ${state ? 1 : 0}`);
-      relayWriteHook();
+      relayWriteHook(pin, !!state);   // AETHER_DOOR_BUTTONS (Update 74): also tells every page
       
       console.log(`[IOplus] Relay ${pin} (Board ${board}, Relay ${relay}) -> ${state ? 'ON' : 'OFF'}`);
       
@@ -310,6 +310,26 @@ class IOplusController {
     const result = await this.executeCommand(0, `dacrd ${channel + 1}`);
     const voltage = parseFloat(result);
     return { success: true, channel, voltage: isNaN(voltage) ? 0 : voltage };
+  }
+
+  // ── Open-drain outputs (AETHER_OPEN_DRAIN, Update 69) ──────────────────
+  // O.D.-1..4 on the card. Each is a transistor switch to the card's GND (not
+  // a dry contact). `ioplus 0 odwr <1-4> <0-100>` sets a PWM duty in percent:
+  // Aether uses 100 = on (switched to GND) and 0 = off.
+  async setOD(channel, percent) {
+    if (channel < 0 || channel > 3) throw new Error(`Open-drain channel ${channel} out of range (0-3)`);
+    const p = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    await this.executeCommand(0, `odwr ${channel + 1} ${p}`);
+    console.log(`[IOplus] Open-drain ${channel} -> ${p}%`);
+    return { success: true, channel, percent: p, on: p > 0 };
+  }
+
+  async getOD(channel) {
+    if (channel < 0 || channel > 3) throw new Error(`Open-drain channel ${channel} out of range (0-3)`);
+    const result = await this.executeCommand(0, `odrd ${channel + 1}`);
+    const p = parseFloat(result);
+    const percent = isNaN(p) ? 0 : Math.max(0, Math.min(100, p));
+    return { success: true, channel, percent, on: percent > 0 };
   }
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -723,6 +743,20 @@ app.use('/api/supervision', supervisionRoutes);
 // Controller Emulator — downstream OSDP PD emulation
 const emulatorRoutes = require('./routes-emulator');
 app.use('/api/emulator', emulatorRoutes(io, (lvl, msg) => console.log(`[${lvl}] ${msg}`), () => osdpManager));
+// AETHER_DOOR_ACTIVITY: per-door activity log (GET /api/doors/activity, POST / DELETE
+// /api/doors/:id/activity, socket 'door_activity'). Fed below from the relay hook, the opto /
+// zone monitors and the Controller Emulator; a door config save re-reads the doors right away.
+let doorActivity = null;
+try {
+  doorActivity = require('./lib/doorActivity').createDoorActivity({
+    // AETHER_AEGIS_AUTOMATION: meta = { value, initial, key } from doorActivity; POSTed page entries have none
+    emit: (entry, meta) => { io.emit('door_activity', entry); feedAutomation('door_event', { ...entry, ...(meta || {}) }); },
+    onCleared: (doorId) => io.emit('door_activity_cleared', { doorId }),   // every open page drops that door's lines
+  });
+  app.use('/api/doors', doorActivity.router(express));
+  app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { try { doorActivity.invalidate(); } catch (_) {} }); next(); });
+  process.on('exit', () => { try { doorActivity.flushSync(); } catch (_) {} });
+} catch (e) { doorActivity = null; console.warn('[DoorActivity] not mounted:', e.message); }
 app.use('/api/doors', require('./routes-doors')());
 app.use('/api/switch', require('./routes-switch')(io, () => switchManager, logSystemEvent));
 app.use('/api/vms', require('./routes-vms')(io));   // Stream View / RTSP support
@@ -844,6 +878,18 @@ async function loadJson(file) { return JSON.parse(await fsp.readFile(file, 'utf8
 
 class GPIOEventEmitter extends EventEmitter {}
 const gpioEvents = new GPIOEventEmitter();
+
+// AETHER_AEGIS_AUTOMATION: hand an event the server already has to the automation rules
+// (relay writes, opto / zone monitor changes, door activity, card reads). Rules only ever
+// received Pi GPIO writes before, so nothing on the IOplus board could fire a rule. Never
+// throws, never waits, costs no I2C: the rules run on the next tick inside AutomationManager.
+function feedAutomation(type, data) {
+  try { if (automationManager && typeof automationManager.ingest === 'function') automationManager.ingest(type, data); }
+  catch (_) { /* automation never breaks the path that fed it */ }
+}
+function automationResetState(kind) {
+  try { if (automationManager && typeof automationManager.resetState === 'function') automationManager.resetState(kind); } catch (_) {}
+}
 
 // Initialize systems
 let automationManager = null;
@@ -979,6 +1025,7 @@ async function initializeSystems() {
         nfcManager.on('card_read', (cardEvent) => {
           console.log(`[NFC] Card read: ${cardEvent.uid}`);
           io.emit('nfc:card', cardEvent);
+          feedAutomation('card_read', { source: 'nfc', card: cardEvent && cardEvent.uid, uid: cardEvent && cardEvent.uid });   // AETHER_AEGIS_AUTOMATION
 
           try {
             logAccessEvent && logAccessEvent(`NFC card read - uid ${cardEvent.uid}`, {
@@ -1063,7 +1110,10 @@ async function initializeSystems() {
   }
 
   try {
-    automationManager = new AutomationManager(gpioEvents, wiegandManager, switchManager);
+    // AETHER_AEGIS_AUTOMATION: relay_set / relay_pulse actions write IOplus relays through the GPIO queue
+    automationManager = new AutomationManager(gpioEvents, wiegandManager, switchManager, {
+      setRelay: (ch, on) => gpioQueue.enqueue('setRelay', ch, !!on),
+    });
     await automationManager.initialize();
     console.log('[Automation] âœ“ System initialized successfully');
   } catch (err) {
@@ -1370,6 +1420,35 @@ app.get('/api/gpio/dac', async (_req, res) => {
     res.json({ success: true, channels: results });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── Open-drain output API (AETHER_OPEN_DRAIN, Update 69) ──────────────────
+// Built and supported, but not offered in the pages yet. Body: { channel 0-3,
+// on: true|false } or { channel, percent 0-100 }.
+app.get('/api/gpio/od/:channel', async (req, res) => {
+  const channel = parseInt(req.params.channel);
+  if (isNaN(channel) || channel < 0 || channel > 3) return res.status(400).json({ error: 'Open-drain channel must be 0-3' });
+  try { res.json(await gpioQueue.enqueue('getOD', channel)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/gpio/od', async (_req, res) => {
+  try {
+    const channels = [];
+    for (const ch of [0, 1, 2, 3]) channels.push(await gpioQueue.enqueue('getOD', ch));
+    res.json({ success: true, channels });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/gpio/od', async (req, res) => {
+  const { channel, on, percent } = req.body || {};
+  const ch = parseInt(channel);
+  if (isNaN(ch) || ch < 0 || ch > 3) return res.status(400).json({ error: 'channel must be 0-3' });
+  let p = percent !== undefined ? Number(percent) : (on === undefined ? NaN : (on ? 100 : 0));
+  if (!Number.isFinite(p) || p < 0 || p > 100) return res.status(400).json({ error: 'give on: true/false or percent 0-100' });
+  try {
+    const result = await gpioQueue.enqueue('setOD', ch, p);
+    io.emit('od_state_change', { channel: ch, on: result.on, percent: result.percent });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Board capabilities endpoint ───────────────────────────────────────────
@@ -1379,7 +1458,8 @@ app.get('/api/gpio/capabilities', (_req, res) => {
     board: 'Sequent IOplus',
     outputs: {
       relays: { count: 8, channels: [0,1,2,3,4,5,6,7], type: 'digital', description: 'Relay dry contacts (on/off)' },
-      dac: { count: 4, channels: [0,1,2,3], type: 'analog', description: 'DAC 0-10V analog outputs' }
+      dac: { count: 4, channels: [0,1,2,3], type: 'analog', description: 'DAC 0-10V analog outputs' },
+      openDrain: { count: 4, channels: [0,1,2,3], type: 'digital', description: 'Open-drain outputs (switch to GND, not a dry contact)', hidden: true }
     },
     inputs: {
       opto: { count: 8, channels: [0,1,2,3,4,5,6,7], type: 'digital', description: 'Opto-isolated digital inputs' },
@@ -1435,7 +1515,14 @@ const bulk = {
   inflight: { opto: null, relay: null },
 };
 bulk.relayGen = 0;
-relayWriteHook = () => { bulk.relayGen++; bulk.cache.relay = null; _gpioStatusCache = null; };
+relayWriteHook = (pin, state) => {
+  bulk.relayGen++; bulk.cache.relay = null; _gpioStatusCache = null;
+  // AETHER_DOOR_BUTTONS (Update 74): announce every relay write so pages that show a
+  // relay (Doors DPS / REX, Controls) follow it, whoever moved it.
+  if (Number.isInteger(pin)) io.emit('relay_state_change', { channel: pin, state: state ? 1 : 0, timestamp: Date.now() });
+  if (doorActivity) { try { doorActivity.onRelayWrite(pin, state); } catch (_) { /* AETHER_DOOR_ACTIVITY: never break a relay write */ } }
+  if (Number.isInteger(pin)) feedAutomation('relay_change', { channel: pin, value: state ? 1 : 0 });   // AETHER_AEGIS_AUTOMATION
+};
 const BULK_TTL_MS = 400;
 async function readBits(kind) {
   const c = bulk.cache[kind];
@@ -1471,6 +1558,159 @@ async function readChannel(kind, ch) {
 }
 
 app.get('/api/i2c/bulk', (req, res) => res.json({ enabled: bulk.enabled, verified: bulk.verified, cache: bulk.cache }));
+
+// ---- Live opto inputs (AETHER_OPTO_MONITOR, Update 68) ----
+// Pages (Controls monitoring inputs, Doors DPS/REX, Elevator controller grants, I/O Mapping)
+// listen for 'input_state_change', but nothing in this server sent it. This reads all 8
+// optos in one bulk read (shared with the 400 ms read cache above, so VMS Stream and the
+// Doors refresh cost nothing extra) and sends an event only when an input changes. A page
+// that connects gets the current states once. Reads only while a browser is connected,
+// skips a tick when the I2C queue is busy or the board is recovering, and backs off on
+// errors. OPTO_MONITOR=0 turns it off; OPTO_POLL_MS sets the interval (default 400).
+const OPTO_MONITOR_ON = process.env.OPTO_MONITOR !== '0';
+const OPTO_POLL_MS = Math.max(250, Number(process.env.OPTO_POLL_MS) || 400);
+const optoMon = { last: null, at: null, errors: 0, events: 0, timer: null };
+function emitOpto(target, ch, v, at) {
+  target.emit('input_state_change', { type: 'opto', pin: ch, channel: ch, state: v, rawState: v, timestamp: at });
+}
+async function optoTick() {
+  optoMon.timer = null;
+  let delay = OPTO_POLL_MS;
+  try {
+    if (io.engine.clientsCount === 0) {
+      if (optoMon.last !== null) automationResetState('opto');   // AETHER_AEGIS_AUTOMATION: stale states are "not met"
+      optoMon.last = null;                 // nobody watching: next viewer gets fresh states
+    } else if (gpioQueue.stats.boardHealthy && !gpioQueue.paused && gpioQueue.queue.length < 5) {
+      let bits = bulk.enabled.opto ? await readBits('opto') : null;
+      if (!bulk.enabled.opto) {            // bulk read unavailable: 8 single reads, so go slower
+        bits = 0;
+        for (let ch = 0; ch < 8; ch++) bits |= (await readChannel('opto', ch)) << ch;
+        delay = 3000;
+      }
+      const at = Date.now();
+      const changed = optoMon.last === null ? 0xff : (bits ^ optoMon.last);
+      for (let ch = 0; ch < 8; ch++) {
+        if ((changed >> ch) & 1) {
+          emitOpto(io, ch, (bits >> ch) & 1, at); if (optoMon.last !== null) optoMon.events++;
+          // AETHER_DOOR_ACTIVITY: the first read after nobody was watching is a snapshot, not a change
+          if (doorActivity) { try { doorActivity.onOpto(ch, (bits >> ch) & 1, { initial: optoMon.last === null, at }); } catch (_) {} }
+          feedAutomation('opto_change', { channel: ch, value: (bits >> ch) & 1, initial: optoMon.last === null });   // AETHER_AEGIS_AUTOMATION: first read = state only
+        }
+      }
+      optoMon.last = bits; optoMon.at = at; optoMon.errors = 0;
+    }
+  } catch (e) {
+    optoMon.errors++;
+    if (optoMon.errors === 1 || optoMon.errors % 20 === 0) console.warn(`[OptoMonitor] read failed (${optoMon.errors}x): ${e.message}`);
+    delay = Math.min(10000, OPTO_POLL_MS * 2 ** Math.min(optoMon.errors, 5));
+  }
+  optoMon.timer = setTimeout(optoTick, delay);
+}
+io.on('connection', (socket) => {
+  if (optoMon.last === null) return;       // the next tick (<= OPTO_POLL_MS) sends them
+  for (let ch = 0; ch < 8; ch++) emitOpto(socket, ch, (optoMon.last >> ch) & 1, optoMon.at);
+});
+if (OPTO_MONITOR_ON) optoMon.timer = setTimeout(optoTick, 2000);
+// ---- Live EOL zones (AETHER_ZONE_MONITOR, Update 69) ----
+// Analog inputs ADC-1..8 are EOL supervision zones. They are not read on a timer
+// anywhere; supervision.getStatus() scans all 8 on demand (8 adcrd reads on the
+// shared I2C gate, outside gpioQueue) and shares the result for 5 s. While a browser
+// is connected this uses that shared scan every 5 s, so it costs one 8-read scan per
+// 5 s in total (HAT Pinout and VMS Stream reuse the same scan). It skips a scan when
+// the I2C queue is busy, and sends 'input_state_change' {type:'analog'} when a zone's
+// state changes or its voltage moves by ZONE_DELTA_MV (default 200 mV), so analog
+// thresholds (e.g. Elevator) see the change. Changes are seen up to ~5 s late.
+// ZONE_MONITOR=0 turns it off; ZONE_POLL_MS sets the interval (min 5000).
+// AETHER_ZONE_FAST (Update 73): zones react much faster.
+//  - Fast path: all 8 zones in ONE bus call (lib/zoneFastRead.js, verified against the
+//    CLI before use) every ZONE_FAST_MS (default 500 ms, min 250). That is one call per
+//    tick instead of 8, so it costs less bus time than the old 5 s scan did.
+//  - Fallback (fast read unavailable or turned itself off): a FRESH 8-channel scan every
+//    ZONE_POLL_MS (default 3000, min 2000) instead of reusing a scan up to 5 s old.
+//  Relay writes still go first: a tick is skipped while the GPIO queue has work.
+const ZONE_MONITOR_ON = process.env.ZONE_MONITOR !== '0';
+const ZONE_POLL_MS = Math.max(2000, Number(process.env.ZONE_POLL_MS) || 3000);
+const ZONE_FAST_MS = Math.max(250, Number(process.env.ZONE_FAST_MS) || 500);
+const ZONE_DELTA_MV = Math.max(50, Number(process.env.ZONE_DELTA_MV) || 200);
+const zoneMon = { last: null, sent: null, at: null, errors: 0, events: 0, timer: null };  // last = latest scan, sent = last value sent per zone
+let _supervisionCtl = null;
+try { _supervisionCtl = require('./controllers/supervisionController'); } catch (_) { /* supervision unavailable */ }
+let _zoneFast = null;
+try {
+  const { ZoneFastRead } = require('./lib/zoneFastRead');
+  if (_supervisionCtl) _zoneFast = new ZoneFastRead({ i2cBus, readCliMv: (ch) => _supervisionCtl.readAnalogVoltage(0, ch) });
+} catch (e) { console.warn('[ZoneFast] unavailable:', e.message); }
+zoneMon.mode = 'scan';
+function zoneEvent(z, at) {
+  const ch = Number(z.channel) - 1;              // zones are 1-based; pages use 0-based channels
+  const state = String(z.state || 'UNKNOWN').toUpperCase();
+  return { type: 'analog', pin: ch, channel: ch, state: (state === 'ALARM' || state === 'TAMPER') ? 1 : 0,
+    voltage: Number(z.voltage) || 0, volts: z.volts, supervisionState: state, timestamp: at };
+}
+async function zoneTick() {
+  zoneMon.timer = null;
+  let delay = zoneMon.mode === 'fast' ? ZONE_FAST_MS : 1000;   // also the retry delay when the queue is busy
+  try {
+    if (io.engine.clientsCount === 0 || !_supervisionCtl) {
+      if (zoneMon.sent) automationResetState('zone');   // AETHER_AEGIS_AUTOMATION: stale states are "not met"
+      zoneMon.last = null; zoneMon.sent = null;
+    } else if (gpioQueue.stats.boardHealthy && !gpioQueue.paused && gpioQueue.queue.length < 2) {
+      let zones = null;
+      if (_zoneFast && await _zoneFast.ready()) {
+        try {
+          zones = _supervisionCtl.zonesFromVoltages(0, await _zoneFast.read());
+          _supervisionCtl.primeStatus(zones);          // HAT Pinout / VMS Stream get the fresh values too
+          zoneMon.mode = 'fast'; delay = ZONE_FAST_MS;
+        } catch (_) { zones = null; }                  // fall through to a normal scan
+      }
+      if (!zones) {
+        const t0 = Date.now();
+        const st = await _supervisionCtl.getStatus(0);   // always a fresh scan (joins one already running)
+        zones = (st && st.boards && st.boards[0] && st.boards[0].zones) || [];
+        zoneMon.mode = 'scan';
+        delay = Math.max(1000, ZONE_POLL_MS - (Date.now() - t0));   // a scan starts about every ZONE_POLL_MS, at least 1 s idle between
+      }
+      const at = Date.now();
+      const next = {};
+      for (const z of zones) {
+        if (!z || z.state === 'ERROR') continue;  // a failed read is not a state change
+        const ev = zoneEvent(z, at);
+        if (ev.pin < 0 || ev.pin > 7) continue;
+        next[ev.pin] = ev;
+        const prev = zoneMon.sent && zoneMon.sent[ev.pin];   // compare with what pages last got, so slow drift still counts
+        if (!prev || prev.supervisionState !== ev.supervisionState || Math.abs(ev.voltage - prev.voltage) >= ZONE_DELTA_MV) {
+          io.emit('input_state_change', ev);
+          if (doorActivity) { try { doorActivity.onZone(ev, { initial: !prev }); } catch (_) {} }   // AETHER_DOOR_ACTIVITY: first reading = snapshot
+          // AETHER_AEGIS_AUTOMATION: rules see supervision state changes only (not 200 mV drift); first reading = state only
+          if (!prev || prev.supervisionState !== ev.supervisionState) feedAutomation('zone_change', { ...ev, zone: ev.pin + 1, initial: !prev });
+          zoneMon.sent = { ...(zoneMon.sent || {}), [ev.pin]: ev };
+          if (prev) zoneMon.events++;
+        }
+      }
+      zoneMon.last = { ...(zoneMon.last || {}), ...next }; zoneMon.at = at; zoneMon.errors = 0;
+    }
+  } catch (e) {
+    zoneMon.errors++;
+    if (zoneMon.errors === 1 || zoneMon.errors % 20 === 0) console.warn(`[ZoneMonitor] scan failed (${zoneMon.errors}x): ${e.message}`);
+    delay = Math.min(60000, ZONE_POLL_MS * 2 ** Math.min(zoneMon.errors, 4));
+  }
+  zoneMon.timer = setTimeout(zoneTick, delay);
+}
+io.on('connection', (socket) => {
+  if (!zoneMon.last) return;
+  for (const ev of Object.values(zoneMon.last)) socket.emit('input_state_change', ev);
+});
+if (ZONE_MONITOR_ON && _supervisionCtl) zoneMon.timer = setTimeout(zoneTick, 3000);
+app.get('/api/gpio/zone-monitor', (_req, res) => res.json({
+  success: true, enabled: ZONE_MONITOR_ON && !!_supervisionCtl, mode: zoneMon.mode, intervalMs: zoneMon.mode === 'fast' ? ZONE_FAST_MS : ZONE_POLL_MS,
+  fast: _zoneFast ? _zoneFast.status() : null, deltaMv: ZONE_DELTA_MV,
+  zones: zoneMon.last ? Object.values(zoneMon.last).map(e => ({ channel: e.channel, state: e.supervisionState, volts: e.volts })) : null,
+  readAt: zoneMon.at, changesSent: zoneMon.events, consecutiveErrors: zoneMon.errors,
+}));
+app.get('/api/gpio/opto-monitor', (_req, res) => res.json({
+  success: true, enabled: OPTO_MONITOR_ON, intervalMs: OPTO_POLL_MS, clients: io.engine.clientsCount,
+  bits: optoMon.last, readAt: optoMon.at, changesSent: optoMon.events, consecutiveErrors: optoMon.errors,
+}));
 
 app.get('/api/gpio/opto/:channel', async (req, res) => {
   const channel = parseInt(req.params.channel);
@@ -1644,6 +1884,12 @@ app.post('/api/emulations', async (req, res) => {
     const _id = safeId(id || name);
     const file = path.join(SEQUENCES_DIR, `${_id}.json`);
     let payload = { id: _id, name: String(name), steps, createdAt: now, updatedAt: now };
+    // AETHER_DOOR_WORKFLOWS: keep the run settings the builder sends (door events run
+    // saved workflows with them; they were dropped before, so every run used 1 s / 0).
+    const { globalDelay, repeatCount, version } = req.body || {};
+    if (Number.isFinite(Number(globalDelay)) && globalDelay !== null && globalDelay !== '') payload.globalDelay = Math.max(0, Number(globalDelay));
+    if (Number.isFinite(Number(repeatCount)) && repeatCount !== null && repeatCount !== '') payload.repeatCount = Math.max(0, Math.floor(Number(repeatCount)));
+    if (typeof version === 'string') payload.version = version;
     try {
       const exists = await loadJson(file);
       payload.createdAt = exists.createdAt || now;
@@ -1697,6 +1943,10 @@ app.post('/api/emulations/import', async (req, res) => {
         createdAt: item.createdAt || now,
         updatedAt: now
       };
+      // AETHER_DOOR_WORKFLOWS: keep run settings on import too
+      if (Number.isFinite(Number(item.globalDelay)) && item.globalDelay !== null && item.globalDelay !== '') record.globalDelay = Math.max(0, Number(item.globalDelay));
+      if (Number.isFinite(Number(item.repeatCount)) && item.repeatCount !== null && item.repeatCount !== '') record.repeatCount = Math.max(0, Math.floor(Number(item.repeatCount)));
+      if (typeof item.version === 'string') record.version = item.version;
       await fsp.writeFile(file, JSON.stringify(record, null, 2));
       saved.push(_id);
     }
@@ -1783,12 +2033,64 @@ app.patch('/api/automation/rules/:id/disable', (req, res) => {
   }
 });
 
+// AETHER_AEGIS_AUTOMATION: the older page POSTed /toggle { enabled }, which did not exist.
+// The page now uses PATCH /enable and /disable; this alias keeps an old build working.
+app.post('/api/automation/rules/:id/toggle', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  try {
+    const en = req.body ? req.body.enabled : undefined;
+    const on = en === true || en === 'true' ? true : en === false || en === 'false' ? false : null;
+    if (on === null) return res.status(400).json({ success: false, error: 'enabled must be true or false' });
+    if (on) automationManager.enableRule(req.params.id); else automationManager.disableRule(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(404).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// AETHER_AEGIS_AUTOMATION: Run now (skips the rule's WHEN / IF; works for manual-only rules)
+app.post('/api/automation/rules/:id/run', async (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  const rule = automationManager.getRules().find(r => r.id === req.params.id);
+  if (!rule) {
+    return res.status(404).json({ success: false, error: `Rule "${req.params.id}" not found` });
+  }
+  if (!rule.enabled) {
+    return res.status(409).json({ success: false, error: 'Rule is disabled: enable it before running it' });
+  }
+  try {
+    // A rule with long waits keeps running after the answer: wait at most RUN_WAIT_MS for it.
+    const RUN_WAIT_MS = 10000;
+    const r = await Promise.race([
+      automationManager.runRule(req.params.id),
+      new Promise(resolve => { const t = setTimeout(() => resolve({ running: true }), RUN_WAIT_MS); if (t.unref) t.unref(); }),
+    ]);
+    if (r && r.running) return res.json({ success: true, ok: true, running: true, error: null });
+    res.json({ success: true, ok: !!(r && r.ok), skipped: !!(r && r.skipped), error: (r && r.error) || null });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e && e.message ? e.message : String(e) });
+  }
+});
+
+// AETHER_AEGIS_AUTOMATION: recent firings (newest first, kept in memory, last 300)
+app.get('/api/automation/log', (req, res) => {
+  if (!automationManager) {
+    return res.status(503).json({ success: false, error: 'Automation not initialized' });
+  }
+  res.json({ success: true, entries: automationManager.getLog(req.query.limit) });
+});
+
 app.post('/api/automation/reload', async (req, res) => {
   if (!automationManager) {
     return res.status(503).json({ success: false, error: 'Automation not initialized' });
   }
   try {
     await automationManager._loadRulesFromDisk();
+    automationManager._clearSchedules();   // AETHER_AEGIS_AUTOMATION: a reload used to leave the old timers running too (double runs)
     automationManager._applySchedules();
     const rules = automationManager.getRules();
     res.json({ success: true, reloadedRules: rules.length });
@@ -1934,6 +2236,7 @@ app.post('/api/wiegand/send', async (req, res) => {
     console.log(`[Wiegand] Sending ${formatId} FC ${fac} card ${crd} -> ${label}: ${enc.binary}`);
     const raw = await wiegandManager.sendRaw(targetReaderId, enc.binary);
     const result = { ...raw, formatId, format: enc.bits, facility: fac, card: crd, binary: enc.binary };
+    feedAutomation('card_read', { source: 'wiegand', readerId: targetReaderId, facility: fac, card: crd });   // AETHER_AEGIS_AUTOMATION
 
     try {
       logAccessEvent && logAccessEvent(`Door ${doorCfg ? doorCfg.door : targetReaderId} unlocked by Wiegand card ${crd}`, {
@@ -2044,6 +2347,7 @@ app.post('/api/wiegand/transmit', async (req, res) => {
     logAccessEvent && logAccessEvent(`Native Wiegand TX - d0:${d0} d1:${d1} ${fid} card:${card}`, { d0, d1, card: String(card), facility, bits: enc.bits, formatId: fid, method: 'native' });
   } catch (e) {}
   io.emit('vms:event', { at: Date.now(), kind: 'card', d0Pin: d0, text: `Wiegand card FC ${facility} #${card}`, where: `D0 GPIO ${d0}` });
+  feedAutomation('card_read', { source: 'wiegand', readerId: `gpio-${d0}`, facility: Number(facility), card: String(card) });   // AETHER_AEGIS_AUTOMATION
   res.json({ success: true, message: 'Wiegand transmission completed', result });
 });
 
@@ -2141,6 +2445,7 @@ app.post('/api/osdp/card-read', async (req, res) => {
     const cardFormat = format || 'wiegand26';
     
     const result = await osdpManager.sendCardRead(readerId, cardData, cardFormat);
+    feedAutomation('card_read', { source: 'osdp', readerId: String(readerId), facility: cardData.facility, card: cardData.card });   // AETHER_AEGIS_AUTOMATION
 
     try {
       logAccessEvent && logAccessEvent(`OSDP card-read API used - reader ${readerId} card ${card}`, {
@@ -2611,6 +2916,27 @@ if (osdpManager && typeof osdpManager.on === 'function') {
     try { osdpTrace.ingestRaw(direction, portPath, bytes, ts, 'emulator'); } catch (e) { /* never break I/O */ }
   });
 }
+// AETHER_TRACE_CTRL_EMU (Update 75): also feed the Controller Emulator's bus (the emulated
+// RI4S / RI2MS boards the panel polls). Only the reader emulation (osdpManager) was wired,
+// so OSDP Trace said "No traffic yet" while the panel was polling the emulated boards.
+try {
+  const ctrlEmu = require('./osdp/OSDPDeviceEmulator');
+  if (!ctrlEmu._traceWired) {
+    ctrlEmu._traceWired = true;
+    const prevEmit = ctrlEmu.emit;
+    ctrlEmu.emit = function (evt, payload) {
+      if (typeof prevEmit === 'function') prevEmit.call(this, evt, payload);
+      // AETHER_DOOR_ACTIVITY: emulated doors' Lock (board output) and DPS / REX (board inputs)
+      if (doorActivity && evt !== 'emulator-frame') { try { doorActivity.onEmulatorEvent(evt, payload); } catch (_) {} }
+      if (evt === 'emulator-frame' && payload && typeof payload.hex === 'string' && payload.hex.length >= 10) {
+        try {
+          osdpTrace.ingestFrame(payload.direction === 'in' ? 'rx' : 'tx', ctrlEmu.portPath || 'controller-emulator',
+            Buffer.from(payload.hex, 'hex'), Date.now(), 'emulator');
+        } catch (e) { /* never break the emulator */ }
+      }
+    };
+  }
+} catch (e) { console.warn('[Trace] controller emulator not wired:', e.message); }
 // Feed passive sniffer traffic in (observed frames are treated as PD→CP unless a poll).
 osdpSniffer.on('raw', ({ bytes, ts }) => { try { osdpTrace.ingestRaw('rx', osdpSniffer.portPath || 'sniffer', bytes, ts || Date.now(), 'sniffer'); } catch (e) {} });
 // Relay to the browser.

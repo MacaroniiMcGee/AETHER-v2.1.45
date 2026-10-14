@@ -106,11 +106,13 @@ function record(entry) {
 const GAP_S = (MIN_GAP_MS / 1000).toFixed(3);
 const IN_LOCK = `"$0" "$@"; rc=$?; sleep ${GAP_S}; exit $rc`;
 
-function execIoplus(args, timeoutMs) {
+// AETHER_ZONE_FAST (Update 73): `program` lets a caller run another short I2C
+// tool (one bulk ADC read) under the same lock and settle gap as ioplus.
+function execIoplus(args, timeoutMs, program = IOPLUS_BIN) {
   const [bin, argv, limit] = FLOCK
-    ? [FLOCK, ['-w', String(LOCK_WAIT_S), '-E', '75', LOCK_FILE, '/bin/sh', '-c', IN_LOCK, IOPLUS_BIN, ...args],
+    ? [FLOCK, ['-w', String(LOCK_WAIT_S), '-E', '75', LOCK_FILE, '/bin/sh', '-c', IN_LOCK, program, ...args],
        timeoutMs + LOCK_WAIT_S * 1000 + MIN_GAP_MS]
-    : [IOPLUS_BIN, args, timeoutMs];
+    : [program, args, timeoutMs];
   return new Promise((resolve, reject) => {
     execFile(bin, argv, { timeout: limit, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 }, (err, stdout, stderr) => {
       if (err) {
@@ -149,7 +151,7 @@ function run(args, opts = {}) {
     const s = src(source);
     let ok = false, out = '', errMsg = null, timedOut = false;
     try {
-      const r = await execIoplus(args.map(String), timeoutMs);
+      const r = await execIoplus(args.map(String), timeoutMs, opts.program || IOPLUS_BIN);
       out = r.stdout.trim();
       const errText = (r.stderr || '').trim();
       if (errText && !opts.allowStderr && !/warning/i.test(errText)) throw new Error(errText);
@@ -168,7 +170,7 @@ function run(args, opts = {}) {
       s.recent.push(t0); while (s.recent.length && s.recent[0] < t0 - 60000) s.recent.shift();
       if (ms > SLOW_MS) s.slow++;
       if (!ok) { s.errors++; if (timedOut) s.timeouts++; s.lastError = errMsg; }
-      record({ id, t: t0, waitMs: t0 - queuedAt, ms, source, cmd: args.join(' '), ok, out: ok ? out.slice(0, 40) : undefined, err: errMsg || undefined,
+      record({ id, t: t0, waitMs: t0 - queuedAt, ms, source, cmd: opts.label || args.join(' '), ok, out: ok ? out.slice(0, 40) : undefined, err: errMsg || undefined,
         route: origin ? origin.route : 'timer', client: origin ? origin.client : 'internal' });
       if (origin) {
         const k = `${origin.client} ${origin.route}`;

@@ -1,0 +1,62 @@
+<!doctype html>
+<!-- OnCAFE KB Studio — shareable launcher.
+     Send this one file to anyone, or embed it (Aether: Tools > KB Studio).
+     It always opens the current version of KB Studio from the KB Studio service,
+     so nothing else needs updating when KB Studio changes. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OnCAFE KB Studio</title>
+<style>
+  :root{color-scheme:dark;--bg:#1b1b1b;--fg:#e6e6e6;--fg2:#a0a0a0;--line:#3a3a3a;--accent:#f37321}
+  html,body{margin:0;height:100%;background:var(--bg);font:14px "Noto Sans",system-ui,sans-serif;color:var(--fg)}
+  iframe{border:0;width:100%;height:100%;display:block}
+  .msg{position:fixed;inset:0;display:grid;place-items:center;padding:16px}
+  .card{max-width:480px;width:100%;border:1px solid var(--line);border-radius:8px;padding:24px;background:#222}
+  h1{font-size:18px;margin:0 0 8px}
+  p{color:var(--fg2);line-height:1.5;margin:0 0 16px}
+  input{box-sizing:border-box;width:100%;padding:9px 10px;border-radius:4px;border:1px solid var(--line);background:#141414;color:var(--fg);font:inherit}
+  button{margin-top:12px;padding:8px 16px;border:0;border-radius:4px;background:var(--accent);color:#fff;font:600 14px inherit;cursor:pointer}
+  .err{color:#ff8a80;font-size:13px;min-height:18px;margin-top:8px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<script>
+  // The KB Studio service address. scripts/set_service_url.sh fills this in.
+  // Until it's set, the launcher asks for the address once and remembers it in this browser.
+  const SERVICE = "https://oncafe-kb-studio.YOUR-SUBDOMAIN.workers.dev";
+  const KEY = "kb-studio-service";
+  const store = { get(){ try { return localStorage.getItem(KEY) || ""; } catch { return ""; } }, set(v){ try { localStorage.setItem(KEY, v); } catch {} } };
+  const clean = u => String(u || "").trim().replace(/\/(app)?\/?$/, "");
+  const valid = u => /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(u);
+  const fromUrl = new URLSearchParams(location.search).get("service");
+  if (fromUrl && valid(clean(fromUrl))) store.set(clean(fromUrl));
+  const service = !SERVICE.includes("YOUR-SUBDOMAIN") ? SERVICE : store.get();
+
+  function open(base){
+    document.body.innerHTML = `<div class="msg" id="msg"><p>Opening KB Studio…<br><small>If nothing appears, <a target="_blank" rel="noopener" href="${base}/app">open it in a new tab</a>.</small></p></div>`;
+    const f = document.createElement("iframe");
+    f.src = base + "/app"; f.title = "OnCAFE KB Studio"; f.allow = "clipboard-read; clipboard-write";
+    f.onload = () => document.getElementById("msg")?.remove();
+    document.body.appendChild(f);
+  }
+  function ask(){
+    document.body.innerHTML = `<div class="msg"><form class="card" id="f">
+      <h1>Connect KB Studio</h1>
+      <p>Paste the KB Studio service address from the knowledge base owner. It looks like <b>https://oncafe-kb-studio.&lt;name&gt;.workers.dev</b>. You only do this once on this computer.</p>
+      <input id="u" type="url" placeholder="https://oncafe-kb-studio.example.workers.dev" aria-label="KB Studio service address" required>
+      <div class="err" id="e"></div>
+      <button type="submit">Open KB Studio</button></form></div>`;
+    document.getElementById("f").onsubmit = e => {
+      e.preventDefault();
+      const u = clean(document.getElementById("u").value);
+      if (!valid(u)) { document.getElementById("e").textContent = "Enter the full https:// address."; return; }
+      store.set(u); open(u);
+    };
+  }
+  document.addEventListener("DOMContentLoaded", () => valid(service) ? open(service) : ask());
+</script>
+</body>
+</html>
