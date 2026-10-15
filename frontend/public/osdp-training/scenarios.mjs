@@ -3,7 +3,7 @@
 // bytes AE 7E 00 are a locally administered value (bit 1 of the first octet
 // set), so they can never be a real company's OUI.
 
-import { build, hex } from './protocol.mjs?v=79db13d7';
+import { build, hex } from './protocol.mjs?v=198dc99a';
 
 const BASE = Date.UTC(2026, 9, 14, 12, 0, 0);
 const SIM_OUI = [0xae, 0x7e, 0x00];
@@ -85,7 +85,7 @@ export const scenarios = [
       return f.frames;
     },
     observe: 'CHLNG → CCRYPT → SCRYPT complete, then RMAC_I carries status 0xFF: the reader rejected the controller’s cryptogram. The controller starts over with SQN 0.',
-    causes: ['Panel and reader hold different SCBKs', 'Reader still on the default key (SCBK-D) while the panel uses a site key, or the reverse'],
+    causes: ['Panel and reader hold different SCBKs', 'Reader still on the default key (SCBK-D) while the panel uses a site key, or the reverse', 'Session or context problem (stale challenge, interrupted handshake) or an implementation fault — a rejected cryptogram does not by itself prove a key mismatch'],
     next: ['Confirm which key each side is configured for', 'Re-key the reader in physically secured install mode', 'Never paste key values into tickets or captures'] },
   { id: 'reboot', title: 'Reader reboot', symptom: 'Short burst of off-line/on-line events with no wiring change.',
     ask: 'Which reply tells you the reader restarted?',

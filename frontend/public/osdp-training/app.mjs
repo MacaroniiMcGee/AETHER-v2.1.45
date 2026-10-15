@@ -4,12 +4,16 @@
 // delegation through data-act / data-in attributes.
 
 import { hx, hex, h2, bytes, crc, checksum, build, parse, decodeFields, summary, entryFor, CMD, REP, short,
-  SPEC, EN, SCB_TYPES, BEHAVIORS, TIMING, capExplain, caps, enumText, pageRef, examplesFor } from './protocol.mjs?v=79db13d7';
-import { analyze, toMs, SEVERITY_ORDER, ruleText, expectedReplies } from './analyzer.mjs?v=79db13d7';
-import { lessons, quizzes, levels, mfgSteps } from './content.mjs?v=79db13d7';
-import { simulatedSession, scenarios } from './scenarios.mjs?v=79db13d7';
+  SPEC, EN, SCB_TYPES, BEHAVIORS, TIMING, capExplain, caps, enumText, pageRef, examplesFor } from './protocol.mjs?v=198dc99a';
+import { analyze, toMs, SEVERITY_ORDER, ruleText, expectedReplies } from './analyzer.mjs?v=198dc99a';
+import { lessons, mfgSteps } from './content.mjs?v=198dc99a';
+import { questions, levels } from './questions.mjs?v=198dc99a';
+import { renderTrainer, trainState, overallMastery } from './trainer.mjs?v=198dc99a';
+import { decodeVendor, validateContract, frameOffset, STATE4 } from './vendor.mjs?v=198dc99a';
+import FLEX8, { examples as FLEX8_EXAMPLES } from './flex8-contract.mjs?v=198dc99a';
+import { simulatedSession, scenarios } from './scenarios.mjs?v=198dc99a';
 
-const VERSION = '2.1';
+const VERSION = '2.2';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const store = {
@@ -29,9 +33,11 @@ const S = {
   search: '', hidePoll: false, onlyFlagged: false, addrFilter: 'all', listLimit: 400, sevFilter: 'problems',
   selected: 0, compare: [0, 1], replay: null, scenario: null, reveal: false, faultHex: '', mfgSchema: null,
   b: { address: 2, dir: 'c', code: 0x60, sequence: 1, crc: true, scb: 'none', payload: '' },
+  baud: 9600, tsMode: 'unknown', blind: false, revealed: new Set(),
 };
 const progress = Object.assign({ lessons: [], answers: {}, scenarios: [] }, store.get('aether-osdp-academy', {}));
 const saveProgress = () => { store.set('aether-osdp-academy', progress); renderProgress(); };
+if (!progress.train?.migrated && progress.answers && Object.keys(progress.answers).length) { trainState(progress); store.set('aether-osdp-academy', progress); }  // v2.1 → v2.2 records, by stable id
 
 // capture model
 let uidSeq = 0;
@@ -55,7 +61,7 @@ function pushFrames(list) {
 }
 const parsed = new WeakMap();
 function P(f) { if (!parsed.has(f)) { let p = null; try { p = parse(f.fullHex); } catch (e) { p = null; } parsed.set(f, p); } return parsed.get(f); }
-function coach() { if (C.dirty || !C.coach) { C.coach = analyze(C.frames); C.dirty = false; C.byIdx = new Map(); for (const x of C.coach.findings) if (x.idx != null) { if (!C.byIdx.has(x.idx)) C.byIdx.set(x.idx, []); C.byIdx.get(x.idx).push(x); } } return C.coach; }
+function coach() { if (C.dirty || !C.coach) { C.coach = analyze(C.frames, { baud: S.baud, tsMode: S.tsMode }); C.dirty = false; C.byIdx = new Map(); for (const x of C.coach.findings) if (x.idx != null) { if (!C.byIdx.has(x.idx)) C.byIdx.set(x.idx, []); C.byIdx.get(x.idx).push(x); } } return C.coach; }
 setFrames(simulatedSession().map((f) => record(f, 'simulation')), 'Simulated session · generated training traffic');
 
 // ── utilities ──────────────────────────────────────────────────────────────
@@ -74,7 +80,7 @@ const fmtTime = (ms, base) => { if (ms == null || !Number.isFinite(ms)) return '
 // ── shell ──────────────────────────────────────────────────────────────────
 const PAGES = [
   ['overview', 'Launchpad'], ['lessons', 'Lessons'], ['builder', 'Packet builder'], ['captures', 'Capture classroom'],
-  ['faults', 'Troubleshooting', true], ['bits', 'Bit bench'], ['quiz', 'Knowledge checks', true], ['manufacturer', 'Vendor lab'],
+  ['faults', 'Troubleshooting', true], ['bits', 'Bit bench'], ['quiz', 'Training'], ['manufacturer', 'Vendor lab'],
   ['reference', 'Spec reference'], ['integration', 'Aether integration'],
 ];
 function navigate(p) {
@@ -92,13 +98,16 @@ function render() {
   (PAGE_RENDER[S.page] || overview)();
 }
 function renderProgress() {
-  const total = lessons.length + quizzes.length + scenarios.length;
-  const n = progress.lessons.length + Object.values(progress.answers).filter(Boolean).length + progress.scenarios.length;
-  $('progress').innerHTML = `<span class="badge" title="Lessons reviewed, questions answered correctly and scenarios solved on this browser">${n}/${total} milestones</span>`;
+  const t = trainState(progress);
+  const qOk = questions.filter((q) => t.q[`${q.id}@${q.v}`]?.ok).length;
+  const total = lessons.length + questions.length + scenarios.length;
+  const n = progress.lessons.length + qOk + progress.scenarios.length;
+  const m = overallMastery(t);
+  $('progress').innerHTML = `<span class="badge${m.mastered ? ' ok' : ''}" title="Lessons reviewed, questions answered correctly and scenarios solved on this browser${m.mastered ? ' · mastery rule met' : ''}">${n}/${total} milestones${m.mastered ? ' · mastered' : ''}</span>`;
 }
 function renderLiveChip() {
   const st = LIVE.status;
-  const html = st === 'off' ? '' : `<span class="badge ${st === 'live' ? 'ok' : st === 'error' ? 'error' : 'warn'}"><span class="dot ${st === 'live' ? 'ok pulse' : st === 'error' ? 'error' : 'warn'}"></span>${st === 'live' ? `Live · ${LIVE.got}` : st === 'error' ? 'Live error' : st === 'polling' ? `Live (polling) · ${LIVE.got}` : 'Connecting…'}</span>`;
+  const html = st === 'off' ? '' : `<span class="badge ${st === 'live' ? 'ok' : st === 'error' ? 'error' : 'warn'}"><span class="dot ${st === 'live' ? 'ok pulse' : st === 'error' ? 'error' : 'warn'}"></span>${st === 'live' ? `Live · ${LIVE.got}` : st === 'error' ? 'Live error' : st === 'polling' ? `Live (polling) · ${LIVE.got}` : 'Connecting…'}</span>${LIVE.err && st !== 'error' ? `<span class="small muted" style="margin-left:6px">${esc(LIVE.err)}</span>` : ''}`;
   $('liveChip').innerHTML = html; $('liveChipTop').innerHTML = '';
 }
 $('edition').onchange = (e) => { S.edition = e.target.value; navigate(S.page); };
@@ -178,7 +187,7 @@ ACT.byte = (t) => {
 
 // ── Launchpad ──────────────────────────────────────────────────────────────
 function overview() {
-  const lessonDone = progress.lessons.length, qDone = Object.values(progress.answers).filter(Boolean).length, scDone = progress.scenarios.length;
+  const lessonDone = progress.lessons.length, tr = trainState(progress), qDone = questions.filter((q) => tr.q[`${q.id}@${q.v}`]?.ok).length, scDone = progress.scenarios.length;
   $('main').innerHTML = `
   <section class="hero">
     <div class="row between"><div class="eyebrow">AETHER OSDP Academy · SIA OSDP 2.2.2</div><span class="badge brand">${rec() ? 'Field Academy' : 'Core Workshop'} · v${VERSION}</span></div>
@@ -189,7 +198,7 @@ function overview() {
       <div class="step ${lessonDone >= lessons.length ? 'done' : ''}"><b>1 · Learn the language</b><span>${lessonDone}/${lessons.length} lessons reviewed</span></div>
       <div class="step"><b>2 · Build the message</b><span>Packet builder with every 2.2.2 field</span></div>
       <div class="step ${scDone >= scenarios.length ? 'done' : ''}"><b>3 · Investigate</b><span>${rec() ? `${scDone}/${scenarios.length} scenarios solved` : 'Capture classroom + coach'}</span></div>
-      <div class="step ${qDone >= quizzes.length ? 'done' : ''}"><b>4 · Prove it</b><span>${rec() ? `${qDone}/${quizzes.length} checks correct` : 'Field Academy edition'}</span></div>
+      <div class="step ${overallMastery(tr).mastered ? 'done' : ''}"><b>4 · Prove it</b><span>${qDone}/${questions.length} questions · ${overallMastery(tr).mastered ? 'mastery met' : 'assessment + practical'}</span></div>
     </div>
   </section>
   <div class="cards">
@@ -202,12 +211,10 @@ function overview() {
     <div class="panel"><div class="eyebrow">Take a frame apart</div><h2>Every byte has a place and a job.</h2><p>This is a POLL from the controller to reader 2. Click any byte.</p><div id="ovInsp"></div></div>
     <div class="panel"><div class="eyebrow">What’s new in v${VERSION}</div>
       <ul class="small" style="padding-left:18px;margin:0;color:var(--c2);line-height:22px">
-        <li>Decoder rebuilt on the same SIA OSDP 2.2.2 field tables as Aether’s OSDP Trace — every command and reply, with page references.</li>
-        <li>Conversation coach: sequence, retries, BUSY, NAK handling, 200 ms reply deadline, Secure Channel order, file-transfer flow.</li>
-        <li>Live from Aether: follows the Pi’s OSDP Trace; imports trace exports and saved captures.</li>
-        <li>Eleven troubleshooting scenarios, four new lessons (timing, conversation rules, file transfer, Aether’s trace) and 18 new knowledge checks.</li>
-        <li>Aether’s HV look in dark and light, following the app’s theme.</li>
-        <li>Fixes: buzzer tone 0x00 is “no tone (deprecated)”, PDID serial is one 32-bit number, FMT marked deprecated, fictional vendor moved off 00 00 00 (assigned to Xerox).</li>
+        <li><b>Training</b>: ${questions.length} questions in five sections with stable ids, generated variants, click-the-bytes evidence, construction challenges graded field by field, Practice and Assessment modes, delayed review, mastery per skill and a mixed final practical.</li>
+        <li>Coach fixes: state kept per port + address; no “Secure Channel up” without status 0x01 and the observed steps; frames with structural problems are not interpreted; the last unanswered command shows as capture-ended; same sequence with changed bytes is flagged; timing shows measured vs estimated wire turnaround for your baud and timestamp meaning.</li>
+        <li>Vendor lab: request, reply and event schemas with signed values, enums, bit masks and four-state inputs; FLEX8-OUT4 fictional teaching contract.</li>
+        <li>Blind mode in the capture classroom: names stay hidden until you reveal each frame.</li>
       </ul>
       ${notice('Starter traffic is simulated, not hardware evidence. Import a real capture or turn on Live from Aether to replace it. Nothing in the Academy transmits to a reader.')}
     </div>
@@ -410,7 +417,7 @@ ACT.cq = () => { const ok = $('cq').value !== '' && +$('cq').value === Math.ceil
 // ── Capture classroom ─────────────────────────────────────────────────────
 function renderCaptures() {
   const co = coach();
-  const addrs = co.perAddress.map((a) => a.address).sort((a, b) => a - b);
+  const addrs = [...new Set(co.perAddress.map((a) => a.address))].sort((a, b) => a - b);
   $('main').innerHTML = head('Capture classroom', 'Turn a trace into a lesson.', 'Import a capture, follow Aether live, or use the simulated session. Select a frame to take it apart; the coach checks the whole conversation against the spec.') + `
   <div class="panel">
     <div class="row between">
@@ -435,7 +442,7 @@ function renderCaptures() {
         <input type="search" placeholder="Search name, address or hex" value="${esc(S.search)}" data-in="capsearch" aria-label="Search frames" style="flex:1;min-width:160px">
         <select data-ch="capaddr" aria-label="Address" style="width:auto"><option value="all">All addresses</option>${addrs.map((a) => `<option value="${a}" ${String(a) === S.addrFilter ? 'selected' : ''}>Address ${a}</option>`).join('')}</select>
       </div>
-      <div class="row" style="margin-bottom:10px"><label class="check"><input type="checkbox" data-ch="hidepoll" ${S.hidePoll ? 'checked' : ''}>Hide POLL / ACK</label><label class="check"><input type="checkbox" data-ch="onlyflag" ${S.onlyFlagged ? 'checked' : ''}>Only frames the coach flagged</label></div>
+      <div class="row" style="margin-bottom:10px"><label class="check"><input type="checkbox" data-ch="hidepoll" ${S.hidePoll ? 'checked' : ''}>Hide POLL / ACK</label><label class="check"><input type="checkbox" data-ch="onlyflag" ${S.onlyFlagged ? 'checked' : ''}>Only frames the coach flagged</label><label class="check" title="Hide decoded names and explanations until you reveal each frame"><input type="checkbox" data-ch="blind" ${S.blind ? 'checked' : ''}>Blind</label></div>
       ${rec() ? `<div class="row" style="margin-bottom:10px"><button class="btn sm" data-act="replay">${S.replay ? 'Pause replay' : '▶ Replay'}</button><button class="btn sm ghost" data-act="step" data-d="-1">← Prev</button><button class="btn sm ghost" data-act="step" data-d="1">Next →</button><select id="speed" aria-label="Replay speed" style="width:auto;min-height:28px;font-size:13px"><option value="900">1 frame/s</option><option value="250">4 frames/s</option></select><span class="small muted">↑/↓ keys move too</span></div>` : ''}
       <div class="caplist" id="caplist" tabindex="0" aria-label="Frames"></div>
     </div>
@@ -474,7 +481,8 @@ function renderCapList() {
     const f = C.frames[i], p = P(f), fl = C.byIdx.get(i) || [];
     const worst = fl.reduce((w, x) => (SEVERITY_ORDER[x.severity] < SEVERITY_ORDER[w] ? x.severity : w), 'ok');
     const mark = C.marks.has(f.uid) ? '★' : worst === 'error' ? '<span class="dot error"></span>' : worst === 'warn' ? '<span class="dot warn"></span>' : '';
-    return `<button class="caprow" role="option" data-act="pick" data-i="${i}" aria-selected="${i === S.selected}"><span class="n">#${i + 1}</span><span class="tm">${fmtTime(toMs(f.ts), t0)}</span><span class="dir ${p?.reply ? 'r' : ''}">${p ? (p.reply ? '←' : '→') : '?'}</span><span class="a">${p ? p.address : '–'}</span><span class="s">${p ? `s${p.sequence}` : ''}</span><span class="nm">${esc(p?.entry[0] || 'INCOMPLETE')}</span><span class="sum">${esc(p ? summary(p) : f.dataHex ? `payload-only ${f.dataHex}` : 'not a complete frame')}</span><span>${mark}</span></button>`;
+    const hide = S.blind && !S.revealed.has(f.uid);
+    return `<button class="caprow" role="option" data-act="pick" data-i="${i}" aria-selected="${i === S.selected}"><span class="n">#${i + 1}</span><span class="tm">${fmtTime(toMs(f.ts), t0)}</span><span class="dir ${p?.reply && !hide ? 'r' : ''}">${hide ? '·' : p ? (p.reply ? '←' : '→') : '?'}</span><span class="a">${hide ? '·' : p ? p.address : '–'}</span><span class="s">${hide ? '' : p ? `s${p.sequence}` : ''}</span><span class="nm">${hide ? '•••' : esc(p?.entry[0] || 'INCOMPLETE')}</span><span class="sum mono">${hide ? esc((f.fullHex || '').slice(0, 47)) : esc(p ? summary(p) : f.dataHex ? `payload-only ${f.dataHex}` : 'not a complete frame')}</span><span>${hide ? '' : mark}</span></button>`;
   }).join('') + (idx.length > shown.length ? `<div class="more"><button class="btn sm" data-act="more">Show ${Math.min(400, idx.length - shown.length)} more</button></div>` : '')
     : `<div class="empty">${C.frames.length ? 'No frames match the filters.' : LIVE.status !== 'off' ? 'Waiting for traffic on Aether’s OSDP Trace…' : 'No frames yet. Import a capture, paste one, or load the simulated session.'}</div>`;
   const s = el.querySelector('[aria-selected="true"]'); if (s && s.scrollIntoView) s.scrollIntoView({ block: 'nearest' });
@@ -483,6 +491,11 @@ function showCapture() {
   const f = C.frames[S.selected], box = $('capInsp'); if (!box) return;
   if (!f) { box.innerHTML = '<div class="empty">Select a frame.</div>'; return; }
   const p = P(f);
+  if (S.blind && !S.revealed.has(f.uid)) {
+    box.innerHTML = `<h3 style="margin:0">Frame #${S.selected + 1} — blind</h3><p class="small">Decode it yourself: direction, address, sequence, check mode, command and what the data means. Then reveal.</p><div class="bytes">${String(f.fullHex || '').split(' ').filter(Boolean).map((b, o) => `<span class="byte k-blind">${esc(b)}<small>+${o}</small></span>`).join('')}</div><div class="row"><button class="btn primary" data-act="capReveal">Reveal decode</button>${rec() ? '<button class="btn" data-act="capquiz">Quiz me on this frame</button>' : ''}</div><div id="capQuiz"></div>`;
+    if ($('capNote')) $('capNote').value = C.notes[f.uid] || '';
+    return;
+  }
   if (p) mountInspector(box, p, 'cap', f);
   else { let msg = 'Not a frame'; try { parse(f.fullHex); } catch (e) { msg = e.message; } box.innerHTML = notice(esc(msg), 'error') + `<pre>${esc(f.fullHex || f.dataHex || '(no bytes)')}</pre><p class="small">Payload-only or damaged records are kept as they are; the Academy never invents a header for them.</p>`; }
   const fl = C.byIdx.get(S.selected) || [];
@@ -496,16 +509,24 @@ function renderCoach() {
   const co = coach(), st = co.stats;
   const list = co.findings.filter((x) => S.sevFilter === 'all' || (S.sevFilter === 'problems' ? x.severity === 'error' || x.severity === 'warn' : x.severity === 'info' || x.severity === 'ok'));
   const counts = { error: 0, warn: 0, info: 0, ok: 0 }; co.findings.forEach((x) => counts[x.severity]++);
+  if (S.blind) { el.innerHTML = `<div class="head"><div><div class="eyebrow">Conversation coach</div><h3>Hidden in Blind mode</h3></div></div><p class="small muted">The coach names messages, so it stays hidden until you turn Blind off.</p>`; return; }
   el.innerHTML = `<div class="head"><div><div class="eyebrow">Conversation coach</div><h3>${counts.error + counts.warn ? `${counts.error + counts.warn} thing${counts.error + counts.warn === 1 ? '' : 's'} to look at` : 'No rule problems found'}</h3></div>
     <div class="btngroup" role="group" aria-label="Show findings">${[['problems', `Problems (${counts.error + counts.warn})`], ['notes', `Notes (${counts.info + counts.ok})`], ['all', 'All']].map(([k, l]) => `<button data-act="sev" data-k="${k}" aria-pressed="${S.sevFilter === k}">${l}</button>`).join('')}</div></div>
-    <div class="stats">${[['Frames', st.frames], ['Commands', st.commands], ['Replies', st.replies], ['No reply', st.timeouts], ['NAK', st.naks], ['Bad frames', st.bad], ['Reply avg', st.replyAvg == null ? '—' : `${st.replyAvg} ms`], ['Reply max', st.replyMax == null ? '—' : `${st.replyMax} ms`]].map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')}</div>
+    <div class="stats">${[['Frames', st.frames], ['Commands', st.commands], ['Replies', st.replies], ['No reply', st.timeouts], ['NAK', st.naks], ['Bad frames', st.bad], ['Reply avg Δ', st.replyAvg == null ? '—' : `${st.replyAvg} ms`], ['Reply max Δ', st.replyMax == null ? '—' : `${st.replyMax} ms`], ['Turnaround ≥', st.turnaroundMax == null ? '—' : `${Math.round(st.turnaroundMax)} ms`]].map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')}</div>
     <div class="grid2 even">
       <div class="findings">${list.length ? list.slice(0, 300).map((x) => `<button class="finding" data-act="finding" data-i="${x.idx ?? ''}"><span>${sevBadge(x.severity)}<br><span class="rule">${x.idx == null ? 'capture' : `#${x.idx + 1}`}</span></span><span><b>${esc(x.title)}</b> — ${esc(x.text)}<br><span class="rule">rule: ${esc(x.rule)}</span></span></button>`).join('') : `<div class="empty">${S.sevFilter === 'problems' ? 'Nothing breaks the spec’s behaviour rules in this capture.' : 'No notes.'}</div>`}</div>
-      <div><div class="tablewrap"><table class="t"><thead><tr><th>Address</th><th>Cmds</th><th>Replies</th><th>No reply</th><th>NAK</th><th>Slowest</th></tr></thead><tbody>${co.perAddress.sort((a, b) => a.address - b.address).map((a) => `<tr><td class="k">${a.address}</td><td>${a.commands}</td><td>${a.replies}</td><td>${a.timeouts}</td><td>${a.naks}</td><td>${a.maxReplyMs ? `${a.maxReplyMs} ms` : '—'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No frames</td></tr>'}</tbody></table></div>
+      <div><div class="tablewrap"><table class="t"><thead><tr>${new Set(co.perAddress.map((a) => a.port)).size > 1 ? '<th>Port</th>' : ''}<th>Address</th><th>Cmds</th><th>Replies</th><th>No reply</th><th>NAK</th><th title="Measured timestamp delta / estimated wire turnaround (lower bound)">Slowest</th></tr></thead><tbody>${co.perAddress.sort((a, b) => String(a.port).localeCompare(String(b.port)) || a.address - b.address).map((a) => `<tr>${new Set(co.perAddress.map((x) => x.port)).size > 1 ? `<td class="k">${esc(a.port)}</td>` : ''}<td class="k">${a.address}</td><td>${a.commands}</td><td>${a.replies}</td><td>${a.timeouts}</td><td>${a.naks}</td><td>${a.maxReplyMs ? `${a.maxReplyMs} ms${a.maxTurnaroundMs != null ? ` / ≥${Math.round(a.maxTurnaroundMs)} ms` : ''}` : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">No frames</td></tr>'}</tbody></table></div>
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><label class="field" style="flex-direction:row;align-items:center;gap:6px">Baud <select data-ch="cbaud" style="width:auto">${[9600, 19200, 38400, 57600, 115200].map((b) => `<option ${S.baud === b ? 'selected' : ''}>${b}</option>`).join('')}</select></label>
+        <label class="field" style="flex-direction:row;align-items:center;gap:6px">Timestamps mark <select data-ch="ctsmode" style="width:auto">${[['unknown', 'unknown'], ['start', 'frame start'], ['end', 'frame end']].map(([k, l]) => `<option value="${k}" ${S.tsMode === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+      <p class="small muted" style="margin-top:6px">Reply Δ = difference between capture timestamps. Turnaround = estimated gap from the command’s last byte to the reply’s first (8N1 at the chosen baud); a reply is graded late only when the lower bound exceeds 200 ms.</p>
       <p class="small muted" style="margin-top:8px">Findings are observations about this capture against SIA OSDP 2.2.2 behaviour rules, not a diagnosis. Click one to jump to its frame; open the Spec reference for the full rule.</p></div>
     </div>`;
 }
 ACT.sev = (t) => { S.sevFilter = t.dataset.k; renderCoach(); };
+INP.blind = (t) => { S.blind = t.checked; S.revealed = new Set(); renderCaptures(); };
+ACT.capReveal = () => { const f = C.frames[S.selected]; if (f) S.revealed.add(f.uid); renderCapList(); showCapture(); };
+INP.cbaud = (t) => { S.baud = +t.value; C.dirty = true; renderCaptures(); };
+INP.ctsmode = (t) => { S.tsMode = t.value; C.dirty = true; renderCaptures(); };
 ACT.finding = (t) => { if (t.dataset.i === '') return; S.selected = +t.dataset.i; if (!visibleIdx().includes(S.selected)) { S.search = ''; S.hidePoll = false; S.onlyFlagged = false; S.addrFilter = 'all'; renderCaptures(); } else { renderCapList(); showCapture(); } $('capInsp')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); };
 ACT.pick = (t) => { S.selected = +t.dataset.i; renderCapList(); showCapture(); };
 ACT.more = () => { S.listLimit += 400; renderCapList(); };
@@ -619,7 +640,7 @@ function importText(text, name) {
 }
 
 // ── live from Aether ──────────────────────────────────────────────────────
-const LIVE = { gen: 0, status: 'off', err: '', got: 0, mode: 'now', paused: false, pending: [], lastId: 0, sock: null, timer: null };
+const LIVE = { gen: 0, status: 'off', err: '', got: 0, mode: 'now', paused: false, pending: [], lastId: 0, sock: null, timer: null, catching: false, held: [], fails: 0 };
 export function liveBase() {
   const o = store.get('academy.api', ''); if (o) { try { return new URL(String(o)).origin; } catch { return null; } }
   if (location.protocol === 'file:') return null;
@@ -647,44 +668,71 @@ async function liveStart() {
   const base = liveBase();
   if (base == null) { LIVE.status = 'error'; LIVE.err = 'Live mode needs the Academy to be opened from Aether (http://<pi>:3001/osdp-training/) or an Aether address set on the Aether integration page.'; render(); return; }
   const gen = ++LIVE.gen; const stale = () => gen !== LIVE.gen || LIVE.status === 'off';
-  LIVE.status = 'connecting'; LIVE.err = ''; LIVE.got = 0; LIVE.paused = false; LIVE.pending = []; render();
-  const catchUp = async () => {  // frames missed between the snapshot and a (re)connect
-    try { const j = await (await fetch(`${base}/api/osdp/trace/snapshot?since=${LIVE.lastId}`, { cache: 'no-store' })).json(); if (stale()) return;
-      if (j.lastId < LIVE.lastId) { LIVE.lastId = 0; return; }
-      const fr = (j.frames || []).filter((f) => f.id > LIVE.lastId); if (fr.length) { LIVE.lastId = fr[fr.length - 1].id; liveIngest(fr.map(fromTrace)); } } catch { /* next event will do */ }
+  LIVE.status = 'connecting'; LIVE.err = ''; LIVE.got = 0; LIVE.paused = false; LIVE.pending = []; LIVE.catching = false; LIVE.held = []; LIVE.fails = 0; render();
+  const snap = async (since) => { const r = await fetch(`${base}/api/osdp/trace/snapshot?since=${since}`, { cache: 'no-store' }); if (!r.ok) throw Error(`HTTP ${r.status}`); const j = await r.json(); if (!j || !j.success) throw Error('no trace snapshot'); return j; };
+  // Fetch everything after LIVE.lastId. Socket frames that arrive meanwhile are held and merged by id,
+  // so frames sent during a reconnect are neither lost nor duplicated. A lower counter on the Pi means
+  // its trace restarted (service/Pi restart or clear): continue from the new count.
+  let inflight = null;
+  const merge = (fr) => {
+    const from = LIVE.lastId, seen = new Set();
+    const all = [...fr, ...LIVE.held].filter((f) => f && Number.isFinite(f.id) && f.id > from && !seen.has(f.id) && seen.add(f.id)).sort((a, b) => a.id - b.id);
+    LIVE.catching = false; LIVE.held = [];
+    if (all.length) { LIVE.lastId = all[all.length - 1].id; liveIngest(all.map(fromTrace)); }
+  };
+  const pull = () => inflight || (inflight = (async () => {
+    LIVE.catching = true;
+    try {
+      let j = await snap(LIVE.lastId); if (stale()) return false;
+      if ((j.lastId || 0) < LIVE.lastId) { j = await snap(0); if (stale()) return false; LIVE.lastId = 0; toast('Aether’s trace counter restarted on the Pi — continuing from the new count.'); }
+      merge(j.frames || []); return true;
+    } catch { return false; }  // keep holding socket frames; lastId does not move, so nothing is skipped
+    finally { inflight = null; }
+  })());
+  // after a (re)connect: retry the catch-up with backoff; after 5 failures release held frames and say a gap is possible
+  const catchUp = async () => {
+    for (let k = 0, d = 1000; k < 5; k++, d = Math.min(d * 2, 8000)) {
+      if (stale()) return; if (await pull()) return;
+      await new Promise((r) => setTimeout(r, d));
+    }
+    if (stale()) return;
+    merge([]); toast('Could not fetch the frames sent while the live link was down — the classroom may have a gap there.');
+  };
+  // held frames are bounded like the rest of the classroom
+  const hold = (f) => { LIVE.held.push(f); if (LIVE.held.length > MAX_FRAMES) { C.dropped += LIVE.held.length - MAX_FRAMES; LIVE.held.splice(0, LIVE.held.length - MAX_FRAMES); } };
+  const startPolling = (why) => {
+    if (stale() || LIVE.status === 'polling') return;
+    try { LIVE.sock?.disconnect(); } catch { /* */ } LIVE.sock = null;
+    LIVE.status = 'polling'; LIVE.err = why || ''; render();
+    const poll = async () => {
+      if (stale()) return;
+      const ok = await pull(); if (stale()) return;
+      LIVE.fails = ok ? 0 : LIVE.fails + 1;
+      const was = LIVE.err; LIVE.err = LIVE.fails >= 3 ? `Aether has not answered ${LIVE.fails} polls in a row — still retrying.` : '';
+      if (was !== LIVE.err) renderLiveChip();
+      LIVE.timer = setTimeout(poll, LIVE.fails >= 3 ? 5000 : document.hidden ? 5000 : 2000);
+    };
+    poll();
   };
   try {
-    const r = await fetch(`${base}/api/osdp/trace/snapshot?since=${LIVE.mode === 'buffer' ? 0 : 2147483647}`, { cache: 'no-store' });
-    if (!r.ok) throw Error(`Aether answered HTTP ${r.status}. This Aether may predate the OSDP Trace.`);
-    const j = await r.json(); if (stale()) return; if (!j.success) throw Error('Aether did not return a trace snapshot');
+    const j = await snap(LIVE.mode === 'buffer' ? 0 : 2147483647); if (stale()) return;
     LIVE.lastId = j.lastId || 0;
     setFrames([], `Live · Aether OSDP Trace (${j.source || 'trace'})${base ? ` · ${base.replace(/^https?:\/\//, '')}` : ''}`);
     if (LIVE.mode === 'buffer') { const fr = (j.frames || []).slice(-2000); LIVE.got = 0; liveIngest(fr.map(fromTrace)); }
-  } catch (e) { if (stale()) return; LIVE.status = 'error'; LIVE.err = `Could not reach Aether’s OSDP Trace${base ? ` at ${base}` : ''}: ${e.message}`; render(); return; }
+  } catch (e) { if (stale()) return; LIVE.status = 'error'; LIVE.err = `Could not reach Aether’s OSDP Trace${base ? ` at ${base}` : ''}: ${/^HTTP/.test(e.message) ? `Aether answered ${e.message}. This Aether may predate the OSDP Trace.` : e.message}`; render(); return; }
   try {
     if (!window.io) await loadScript(`${base}/socket.io/socket.io.js`);
     if (stale()) return;
     const s = window.io(base || undefined, { transports: ['websocket', 'polling'] }); LIVE.sock = s;
-    s.on('connect', () => { if (stale()) { s.disconnect(); return; } LIVE.status = 'live'; renderLiveChip(); if (S.page === 'captures') renderCaptures(); catchUp(); });
-    s.on('disconnect', () => { if (LIVE.status !== 'off') { LIVE.status = 'connecting'; renderLiveChip(); } });
-    s.on('osdp-trace-frame', (f) => { if (f.id <= LIVE.lastId) return; LIVE.lastId = f.id; liveIngest([fromTrace(f)]); });
-    s.on('osdp-trace-cleared', () => { LIVE.lastId = 0; toast('Aether’s trace was cleared on the Pi; the classroom keeps what it has.'); });
+    let errs = 0;
+    s.on('connect', () => { if (stale()) { s.disconnect(); return; } errs = 0; LIVE.status = 'live'; LIVE.err = ''; renderLiveChip(); if (S.page === 'captures') renderCaptures(); catchUp(); });
+    s.on('connect_error', (e) => { if (stale()) return; errs++; LIVE.err = `Live link retrying (${errs}): ${e?.message || 'connection error'}`; renderLiveChip(); if (errs >= 4) startPolling('The live link would not connect, so the Academy is polling Aether every 2 s instead.'); else if (s.active === false) setTimeout(() => { if (!stale() && LIVE.sock === s) s.connect(); }, 2000); });  // refused by the server: Socket.IO does not retry on its own
+    s.on('disconnect', (reason) => { if (stale()) return; LIVE.status = 'connecting'; renderLiveChip(); if (reason === 'io server disconnect') setTimeout(() => { if (!stale()) s.connect(); }, 1000); });  // a server-side kick does not auto-reconnect
+    s.on('osdp-trace-frame', (f) => { if (stale() || !f) return; if (LIVE.catching) { hold(f); return; } if (f.id <= LIVE.lastId) return; LIVE.lastId = f.id; liveIngest([fromTrace(f)]); });
+    s.on('osdp-trace-cleared', () => { if (stale()) return; LIVE.lastId = 0; toast('Aether’s trace was cleared on the Pi; the classroom keeps what it has.'); });
   } catch {
-    if (stale()) return;
     // Socket.IO client not available: poll the snapshot instead (heavier, so every 2 s).
-    LIVE.status = 'polling'; render();
-    const poll = async () => {
-      if (stale()) return;
-      try {
-        const j = await (await fetch(`${base}/api/osdp/trace/snapshot?since=${LIVE.lastId}`, { cache: 'no-store' })).json();
-        if (stale()) return;
-        if (j.lastId < LIVE.lastId) LIVE.lastId = 0;
-        const fr = (j.frames || []).filter((f) => f.id > LIVE.lastId); if (fr.length) LIVE.lastId = fr[fr.length - 1].id;
-        liveIngest(fr.map(fromTrace));
-      } catch { /* keep trying */ }
-      LIVE.timer = setTimeout(poll, document.hidden ? 5000 : 2000);
-    };
-    poll();
+    startPolling('');
   }
 }
 function liveStop() {
@@ -751,27 +799,8 @@ ACT.frsv = () => faultEdit((b) => { b[4] |= 0x10; });
 ACT.ffix = () => faultEdit((b) => { const n = b[4] & 4 ? 2 : 1, body = b.slice(0, -n); b.length = 0; if (n === 2) { const c = crc(body); b.push(...body, c & 255, c >> 8); } else b.push(...body, checksum(body)); }, 'Check bytes recalculated — LEN and meaning problems may remain');
 ACT.fexport = () => download('osdp-support-worksheet.json', { origin: 'offline-fault-exercise', fullHex: $('faultIn').value, reasoning: $('faultReason').value, scenario: S.scenario });
 
-// ── Knowledge checks ──────────────────────────────────────────────────────
-function renderQuiz() {
-  const ids = quizzes.map((q, i) => i).filter((i) => quizzes[i].level === S.quizLevel), idx = ids[S.quizIndex % ids.length], q = quizzes[idx];
-  const picked = S.quizPicked;
-  $('main').innerHTML = head('Field Academy · knowledge checks', 'Build confidence one layer at a time.', 'Five levels from bits to vendor evidence. Every answer explains itself; repeat as often as you like.') + `
-  <div class="btngroup" role="group" aria-label="Level">${levels.map((l, i) => { const lv = quizzes.map((x, k) => k).filter((k) => quizzes[k].level === i + 1); const done = lv.filter((k) => progress.answers[k]).length; return `<button data-act="qlevel" data-l="${i + 1}" aria-pressed="${S.quizLevel === i + 1}">${i + 1} · ${l} <span class="muted">${done}/${lv.length}</span></button>`; }).join('')}</div>
-  <div class="grid2" style="margin-top:16px">
-    <div class="panel"><span class="badge">Level ${S.quizLevel} · question ${(S.quizIndex % ids.length) + 1} of ${ids.length}</span>
-      <h2 style="margin-top:14px">${esc(q.q)}</h2>
-      ${q.options.map((a, i) => `<button class="answer ${picked == null ? '' : i === q.answer ? 'right' : i === picked ? 'wrong' : ''}" data-act="qanswer" data-i="${i}" ${picked != null ? 'aria-disabled="true"' : ''}><span class="key">${String.fromCharCode(65 + i)}</span>${esc(a)}</button>`).join('')}
-      <div id="qfb">${picked == null ? '' : notice(`<b>${picked === q.answer ? 'Correct.' : 'Not quite.'}</b> ${esc(q.why)}`, picked === q.answer ? 'ok' : 'warn')}</div>
-      <div class="row"><button class="btn ${picked == null ? 'ghost' : 'primary'}" data-act="qnext">Next question →</button></div></div>
-    <div class="panel"><h3>From memory to evidence</h3><p>After a level, open a capture and use “Quiz me on this frame”. It checks your reading of address, direction, sequence and check mode against the actual bytes.</p><button class="btn" data-act="go" data-to="captures">Practise on a capture</button><hr>
-      <h4>Your record</h4>${levels.map((l, i) => { const lv = quizzes.map((x, k) => k).filter((k) => quizzes[k].level === i + 1); const done = lv.filter((k) => progress.answers[k]).length; return `<div class="small" style="margin:8px 0 4px">${i + 1} · ${l} — ${done}/${lv.length}</div><div class="bar"><i style="width:${(done / lv.length) * 100}%"></i></div>`; }).join('')}
-      <p class="small muted" style="margin-top:12px">Stored on this browser. A learning aid, not a certification.</p></div>
-  </div>`;
-  S._qidx = idx;
-}
-ACT.qlevel = (t) => { S.quizLevel = +t.dataset.l; S.quizIndex = 0; S.quizPicked = null; renderQuiz(); };
-ACT.qanswer = (t) => { if (S.quizPicked != null) return; S.quizPicked = +t.dataset.i; if (S.quizPicked === quizzes[S._qidx].answer) { progress.answers[S._qidx] = true; saveProgress(); } renderQuiz(); };
-ACT.qnext = () => { S.quizIndex++; S.quizPicked = null; renderQuiz(); };
+// ── Training (questions, practice, assessment, mastery) — see trainer.mjs ──
+function renderQuiz() { renderTrainer({ main: $('main'), progress, saveProgress, esc, notice, head, kindOf, toast, download }); }
 
 // ── Vendor lab ────────────────────────────────────────────────────────────
 const SAMPLE_SCHEMA = { name: 'Fictional training profile selector', vendorHex: 'AE7E00', model: 'TRAINING-PD', firmware: 'simulated-1.0', document: 'AETHER fictional exercise, rev 2 (not a real product command)', subcommand: 1, requestLength: 5,
@@ -789,6 +818,13 @@ function renderMfg() {
       <label class="field">Captured MFG frame<textarea id="mcap" placeholder="Paste a complete MFG frame"></textarea></label>
       <div class="row" style="margin-top:8px"><button class="btn primary" data-act="mdecode" id="mdecode">Decode with schema</button><span class="small muted" id="mschemaName">${S.mfgSchema ? esc(S.mfgSchema.name) : 'No schema loaded'}</span></div><div id="mres"></div></div>
   </div>
+  <div class="panel" style="margin-top:16px"><div class="row between"><div><h3 style="margin:0">Reply &amp; event contracts</h3><p class="small" style="margin:4px 0 0">Request, reply and event schemas with signed values, enums, bit masks and four-state inputs. Undocumented bytes are always kept and listed.</p></div>
+      <div class="row"><button class="btn sm" data-act="vflex">Load FLEX8-OUT4 (fictional)</button><span class="btn sm filebtn">Import contract<input type="file" accept=".json" data-ch="vcontract" aria-label="Import contract"></span></div></div>
+    <div id="vcName" class="small muted" style="margin-top:6px">${S.vContract ? esc(S.vContract.name) : 'No contract loaded'}</div>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap">${FLEX8_EXAMPLES.map((e, i) => `<button class="btn sm ghost" data-act="vex" data-i="${i}">${esc(e.name)}</button>`).join('')}</div>
+    <div class="form" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))"><label class="field">Device model (scope)<input id="vmodel" value="${esc(S.vContract?.model || '')}"></label><label class="field">Firmware (scope)<input id="vfw" value="${esc(S.vContract?.firmware || '')}"></label></div>
+    <label class="field">Frame<textarea id="vframe" placeholder="Paste a complete MFG (0x80) or MFGREP (0x90) frame"></textarea></label>
+    <div class="row" style="margin-top:8px"><button class="btn primary" data-act="vdecode">Decode with contract</button></div><div id="vres" style="margin-top:10px"></div></div>
   <div class="cards" style="margin-top:16px">${mfgSteps.map(([t, p]) => `<div class="card"><h4 style="margin:0">${esc(t)}</h4><p>${esc(p)}</p></div>`).join('')}</div>
   <div class="panel" style="margin-top:16px"><h3>Assignments</h3><div class="tablewrap"><table class="t"><thead><tr><th>Assignment</th><th>What to do</th><th>Evidence to keep</th></tr></thead><tbody>
     <tr><td>Find the vendor boundary</td><td>Select an MFG frame; locate the 3 OUI bytes, the Command_ID and the opaque rest.</td><td>Original frame and the reader’s PDID.</td></tr>
@@ -798,6 +834,23 @@ function renderMfg() {
     <tr><td>Prove persistence</td><td>Apply an approved operation through Aether, capture again after a restart.</td><td>The vendor’s persistence statement and before/after captures.</td></tr></tbody></table></div></div>`;
   ACT.mbuild();
 }
+ACT.vflex = () => { S.vContract = FLEX8; renderMfg(); toast('FLEX8-OUT4 fictional contract loaded'); };
+INP.vcontract = async (t) => { try { const c = JSON.parse(await t.files[0].text()); const v = validateContract(c); if (!v.ok) throw Error(v.errors.slice(0, 4).join('; ')); S.vContract = c; renderMfg(); toast(v.warnings.length ? `Loaded with ${v.warnings.length} warning(s)` : 'Contract loaded'); } catch (e) { toast(e.message); } };
+ACT.vex = (t) => { if (!S.vContract) S.vContract = FLEX8; const e = FLEX8_EXAMPLES[+t.dataset.i]; renderMfg(); $('vframe').value = e.fullHex; ACT.vdecode(); };
+ACT.vdecode = () => {
+  const out = $('vres');
+  try {
+    if (!S.vContract) throw Error('Load a contract first.');
+    const scope = { model: $('vmodel').value.trim() || undefined, firmware: $('vfw').value.trim() || undefined };
+    const p = parse($('vframe').value);
+    const r = decodeVendor(p, S.vContract, scope);
+    const flag = (f) => ({ 'reserved-bit-set': '<span class="badge warn">reserved bit set</span>', inferred: '<span class="badge">inferred offset</span>', 'not-applicable': '<span class="badge">not applicable</span>', 'unknown-enum': '<span class="badge warn">undocumented value</span>', 'out-of-range': '<span class="badge error">out of range</span>' }[f] || `<span class="badge">${esc(f)}</span>`);
+    const head2 = r.status === 'decoded' ? notice(esc(r.reason), 'ok') : notice(`<b>${esc(r.status)}</b> — ${esc(r.reason || '')}`, r.status === 'out-of-scope' || r.status === 'no-match' ? 'warn' : 'error');
+    const rows = (r.rows || []).map((x) => `<tr><td>${esc(x.name)}</td><td class="v">+${x.dataOffset} <span class="muted">(frame ${x.frameOffsets.join(',')})</span></td><td class="v">${esc(x.raw)}</td><td>${esc(x.display)} ${(x.flags || []).map(flag).join(' ')}${(x.notes || []).map((n) => `<div class="small muted">${esc(n)}</div>`).join('')}</td></tr>`).join('');
+    const unk = (r.unknown || []).length ? `<p class="small" style="margin-top:8px"><b>Undocumented bytes kept as-is:</b> ${r.unknown.map((u) => `<span class="mono">+${u.dataOffset}=${esc(u.raw)}</span>`).join(' ')}</p>` : '';
+    out.innerHTML = head2 + (rows ? `<div class="tablewrap"><table class="t"><thead><tr><th>Field</th><th>DATA offset</th><th>Bytes</th><th>Meaning</th></tr></thead><tbody>${rows}</tbody></table></div>` : '') + unk + ((r.notes || []).length ? `<ul class="small muted" style="padding-left:18px;margin:8px 0 0">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '');
+  } catch (e) { out.innerHTML = notice(esc(e.message), 'error'); }
+};
 ACT.mbuild = () => { try { const v = bytes($('mv').value), s = bytes($('ms').value), d = bytes($('md').value); if (v.length !== 3 || s.length !== 1) throw Error('The OUI needs 3 bytes and the Command_ID 1 byte.'); const p = parse(build({ address: 2, command: 0x80, payload: [...v, ...s, ...d] })); mountInspector($('mout'), p, 'mfg'); $('mcap').value = hex(p.b); } catch (e) { $('mout').innerHTML = notice(esc(e.message), 'error'); } };
 INP.mflags = () => { $('mflags').textContent = hx(($('mble').checked ? 1 : 0) | ($('mwal').checked ? 2 : 0)); };
 ACT.mapply = () => { $('md').value = $('mflags').textContent; ACT.mbuild(); };

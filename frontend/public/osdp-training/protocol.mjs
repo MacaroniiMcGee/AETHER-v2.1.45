@@ -7,7 +7,7 @@
 //
 // Nothing here transmits anything. This module has no DOM or network access.
 
-import SPEC from './spec-data.mjs?v=79db13d7';
+import SPEC from './spec-data.mjs?v=198dc99a';
 export { SPEC };
 
 export const EN = SPEC.enums;
@@ -393,7 +393,7 @@ export function summary(p) {
     case 'CHLNG': return 'Secure Channel step 1: controller challenge';
     case 'CCRYPT': return 'Secure Channel step 2: reader cryptogram';
     case 'SCRYPT': return 'Secure Channel step 3: controller cryptogram';
-    case 'RMAC_I': return `Secure Channel step 4: ${p.sb[2] === 0xff ? 'REJECTED' : 'session established'}`;
+    case 'RMAC_I': return `Secure Channel step 4: ${p.sb[2] === 0x01 ? 'cryptogram accepted (MACs not verified here)' : p.sb[2] === 0xff ? 'cryptogram rejected' : `unsupported status ${h2(p.sb[2])}`}`;
     case 'FILETRANSFER': return d.length >= 11 ? `File fragment at ${le(d, 5, 4)} of ${le(d, 1, 4)} bytes` : 'File transfer (short)';
     case 'FTSTAT': { if (d.length < 7) return 'File transfer status (short)'; let s = d[3] | (d[4] << 8); if (s & 0x8000) s -= 65536; return `File transfer status ${s}`; }
     default: return entryFor(p.command, p.reply)[1];
