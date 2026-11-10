@@ -59,3 +59,11 @@ backend/uploads/
 
 # Device firmware jobs and backups
 .device-firmware/
+
+# SUNAPI Console: camera passwords and captures (AETHER_SUNAPI)
+backend/data/sunapi/
+
+# HTTPS keys and Cloudflare token (AETHER_HTTPS; normally in /var/lib/aether/https)
+backend/data/https/
+backend/vendor/acme/
+backend/data/analytics/

@@ -8,7 +8,7 @@ import {
 // Types
 type LogEntry = {
   id?: string;
-  time: string;
+  time?: string;
   timestamp?: number;
   message: string;
   type?: string;
@@ -17,9 +17,10 @@ type LogEntry = {
   details?: any;
 };
 type SystemLogEntry = {
+  id?: string;
   time: string;
   timestamp?: number;
-  type: 'success' | 'error' | 'warning' | 'info' | 'io' | 'door';
+  type: 'success' | 'error' | 'warning' | 'warn' | 'info' | 'io' | 'door' | string;
   message: string;
   details?: any;
 };
@@ -47,6 +48,50 @@ const getApiUrl = (): string => {
   }
   return `${window.location.protocol}//${window.location.hostname}:3001`;
 };
+// AETHER_LOGS_API (Update 69) helpers.
+// Timestamps: numeric ms are kept; server-native entries (ISO string) are
+// Date.parse'd. The old code re-parsed the toLocaleString() display string,
+// which is NaN on non-US locales, so the default "Today" filter hid every row.
+const toMs = (v: any): number | undefined => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 1e11) return n;
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return t;
+  }
+  return undefined;
+};
+// Entries use 'warn'; the filter/counters use 'warning'.
+const normLevel = (v: any): LogEntry['level'] => {
+  switch (String(v || '').toLowerCase()) {
+    case 'warn': case 'warning': return 'warning';
+    case 'error': return 'error';
+    case 'success': return 'success';
+    default: return 'info';
+  }
+};
+const fmtTime = (ms?: number, fallback?: string) =>
+  ms !== undefined ? new Date(ms).toLocaleString() : (fallback || '-');
+type LogTab = 'audit' | 'emulation' | 'system';
+/** Normalise one in-memory or server entry for display on a tab. */
+const normaliseEntry = (raw: any, tab: LogTab, idx: number, origin: string): LogEntry => {
+  const ts = toMs(raw.timestamp) ?? toMs(raw.time);
+  // System entries carry their category in `type` (success/error/warn/io/…)
+  // in the browser, and in `category` (or level) once they come back from the server.
+  const kind = tab === 'system'
+    ? String(raw.category || (raw.type && raw.type !== 'system' ? raw.type : '') || raw.level || 'info')
+    : tab;
+  const level = normLevel(raw.level ?? (tab === 'system' ? raw.type : undefined));
+  return {
+    ...raw,
+    id: raw.id || `${origin}-${tab}-${ts ?? 'x'}-${idx}`,
+    timestamp: ts,
+    time: fmtTime(ts, raw.time),
+    type: kind === 'warn' ? 'warning' : kind,
+    level,
+  };
+};
 const Reports: React.FC<ReportsProps> = ({
   apiUrl: propApiUrl, // Renamed to distinguish from computed value
   auditLog,
@@ -69,52 +114,43 @@ const Reports: React.FC<ReportsProps> = ({
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(false);
   const [serverLogs, setServerLogs] = useState<LogEntry[]>([]);
+  const [serverLogsTab, setServerLogsTab] = useState<string>('');
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [stats, setStats] = useState<LogStats | null>(null);
-  // Combine and process logs
+  // Combine and process logs (AETHER_LOGS_API): the server copy of the active
+  // tab merged with the in-memory copy, deduped by id.
+  const tabLogs = useMemo(() => {
+    if (activeTab === 'analytics') return [] as LogEntry[];
+    const tab = activeTab as LogTab;
+    const local = tab === 'audit' ? auditLog : tab === 'emulation' ? emulationLog : systemLog;
+    const byId = new Map<string, LogEntry>();
+    if (serverLogsTab === tab) {
+      serverLogs.forEach((l, i) => { const e = normaliseEntry(l, tab, i, 'srv'); byId.set(e.id!, e); });
+    }
+    (local as any[]).forEach((l, i) => { const e = normaliseEntry(l, tab, i, 'mem'); byId.set(e.id!, e); });
+    return Array.from(byId.values());
+  }, [activeTab, auditLog, emulationLog, systemLog, serverLogs, serverLogsTab]);
+
+  // Type filter options come from what is actually on this tab.
+  const typeOptions = useMemo(
+    () => Array.from(new Set(tabLogs.map(l => l.type).filter(Boolean) as string[])).sort(),
+    [tabLogs]
+  );
+
+  // Any filter change goes back to page 1.
+  useEffect(() => { setCurrentPage(1); }, [activeTab, searchTerm, filterType, filterLevel, dateRange]);
+  // A type that does not exist on the new tab would hide everything.
+  useEffect(() => { setFilterType('all'); }, [activeTab]);
+
   const processedLogs = useMemo(() => {
-    let logs: LogEntry[] = [];
-    
-    switch (activeTab) {
-      case 'audit':
-        logs = auditLog.map((log, idx) => ({ 
-          ...log, 
-          id: `audit-${idx}`,
-          type: 'audit',
-          level: 'info' as const,
-          timestamp: new Date(log.time).getTime()
-        }));
-        break;
-      case 'emulation':
-        logs = emulationLog.map((log, idx) => ({ 
-          ...log, 
-          id: `emulation-${idx}`,
-          type: 'emulation',
-          level: 'info' as const,
-          timestamp: new Date(log.time).getTime()
-        }));
-        break;
-      case 'system':
-        logs = systemLog.map((log, idx) => ({ 
-          ...log, 
-          id: `system-${idx}`,
-          level: log.type === 'error' ? 'error' : 
-                 log.type === 'warning' ? 'warning' : 
-                 log.type === 'success' ? 'success' : 'info',
-          timestamp: new Date(log.time).getTime()
-        }));
-        break;
-    }
-    // Add server logs if available
-    if (serverLogs.length > 0 && activeTab === 'audit') {
-      logs = [...serverLogs, ...logs];
-    }
+    let logs: LogEntry[] = tabLogs.slice();
     // Apply filters
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       logs = logs.filter(log => 
-        log.message.toLowerCase().includes(search) ||
+        String(log.message || '').toLowerCase().includes(search) ||
         log.type?.toLowerCase().includes(search) ||
-        JSON.stringify(log.details).toLowerCase().includes(search)
+        (log.details !== undefined && JSON.stringify(log.details).toLowerCase().includes(search))
       );
     }
     if (filterType !== 'all') {
@@ -127,7 +163,9 @@ const Reports: React.FC<ReportsProps> = ({
     const now = Date.now();
     const dayMs = 86400000;
     logs = logs.filter(log => {
-      const logTime = log.timestamp || new Date(log.time).getTime();
+      if (dateRange === 'all') return true;
+      const logTime = log.timestamp;
+      if (logTime === undefined) return true;   // undated rows are never hidden by a range
       switch (dateRange) {
         case 'today':
           return now - logTime < dayMs;
@@ -142,17 +180,20 @@ const Reports: React.FC<ReportsProps> = ({
     // Sort by newest first
     logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     return logs;
-  }, [activeTab, auditLog, emulationLog, systemLog, serverLogs, searchTerm, filterType, filterLevel, dateRange]);
+  }, [tabLogs, searchTerm, filterType, filterLevel, dateRange]);
 
   // Unfiltered counts for the selector cards. Deliberately NOT the filtered
   // total: a card showing 0 because of an active search would look like the log
   // is empty when it isn't.
+  // The active tab's count includes entries restored from the server.
   const cardCounts = useMemo(() => ({
-    audit: auditLog.length,
-    system: systemLog.length,
-    emulation: emulationLog.length,
-    systemErrors: systemLog.filter(l => l.type === 'error').length,
-  }), [auditLog, systemLog, emulationLog]);
+    audit: activeTab === 'audit' ? tabLogs.length : auditLog.length,
+    system: activeTab === 'system' ? tabLogs.length : systemLog.length,
+    emulation: activeTab === 'emulation' ? tabLogs.length : emulationLog.length,
+    systemErrors: activeTab === 'system'
+      ? tabLogs.filter(l => l.level === 'error').length
+      : systemLog.filter(l => l.type === 'error').length,
+  }), [activeTab, tabLogs, auditLog, systemLog, emulationLog]);
 
   // Pagination
   const totalPages = Math.ceil(processedLogs.length / itemsPerPage);
@@ -165,8 +206,8 @@ const Reports: React.FC<ReportsProps> = ({
     const calculateStats = () => {
       const now = Date.now();
       const dayMs = 86400000;
-      const todayLogs = processedLogs.filter(log => 
-        now - (log.timestamp || new Date(log.time).getTime()) < dayMs
+      const todayLogs = processedLogs.filter(log =>
+        log.timestamp !== undefined && now - log.timestamp < dayMs
       );
       const byType: Record<string, number> = {};
       const byHour: Record<string, number> = {};
@@ -177,8 +218,10 @@ const Reports: React.FC<ReportsProps> = ({
         const type = log.type || 'unknown';
         byType[type] = (byType[type] || 0) + 1;
         // Count by hour (last 24 hours)
-        const hour = new Date(log.time).getHours();
-        byHour[hour] = (byHour[hour] || 0) + 1;
+        if (log.timestamp !== undefined) {
+          const hour = new Date(log.timestamp).getHours();
+          byHour[hour] = (byHour[hour] || 0) + 1;
+        }
         // Count errors and warnings
         if (log.level === 'error') errors++;
         if (log.level === 'warning') warnings++;
@@ -196,17 +239,19 @@ const Reports: React.FC<ReportsProps> = ({
   }, [processedLogs]);
   // Fetch logs from server
   const fetchServerLogs = useCallback(async () => {
-    if (!apiUrl) return;
-    
+    if (!apiUrl || activeTab === 'analytics') return;
+    const tab = activeTab;
     setLoading(true);
     try {
-      const response = await fetch(`${apiUrl}/api/logs?type=${activeTab}&limit=1000`);
-      if (response.ok) {
-        const data = await response.json();
-        setServerLogs(data.logs || []);
-      }
-    } catch (error) {
+      const response = await fetch(`${apiUrl}/api/logs?type=${tab}&limit=1000`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      setServerLogs(Array.isArray(data.logs) ? data.logs : []);
+      setServerLogsTab(tab);
+      setFetchError(null);
+    } catch (error: any) {
       console.error('Failed to fetch server logs:', error);
+      setFetchError(`Could not load saved ${tab} log from the Pi (${error?.message || 'network error'}). Showing this session only.`);
     } finally {
       setLoading(false);
     }
@@ -227,7 +272,7 @@ const Reports: React.FC<ReportsProps> = ({
       // CSV format
       const headers = ['Time', 'Type', 'Level', 'Message', 'Details'];
       const rows = processedLogs.map(log => [
-        log.time,
+        log.timestamp !== undefined ? new Date(log.timestamp).toISOString() : (log.time || ''),
         log.type || '',
         log.level || '',
         log.message,
@@ -248,6 +293,8 @@ const Reports: React.FC<ReportsProps> = ({
   };
   // Clear logs
   const clearLogs = () => {
+    // AETHER_LOGS_API: the parent's onClear* first drops queued/in-flight
+    // uploads of this type, then the Pi's copy is deleted so nothing reappears.
     switch (activeTab) {
       case 'audit':
         onClearAudit?.();
@@ -258,6 +305,11 @@ const Reports: React.FC<ReportsProps> = ({
       case 'system':
         onClearSystem?.();
         break;
+    }
+    if (apiUrl && activeTab !== 'analytics') {
+      fetch(`${apiUrl}/api/logs?type=${activeTab}`, { method: 'DELETE' })
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); setFetchError(null); })
+        .catch((e: any) => setFetchError(`Cleared here, but the Pi's ${activeTab} log was not cleared (${e?.message || 'network error'}).`));
     }
     setServerLogs([]);
   };
@@ -307,14 +359,16 @@ const Reports: React.FC<ReportsProps> = ({
               <Filter size={18} />
               Filters
             </button>
-            <button
-              onClick={fetchServerLogs}
-              disabled={loading}
-              className="px-4 py-2 bg-hv-line hover:bg-hv-line-strong rounded-lg flex items-center gap-2"
-            >
-              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-              Refresh
-            </button>
+            {activeTab !== 'analytics' && (
+              <button
+                onClick={fetchServerLogs}
+                disabled={loading}
+                className="px-4 py-2 bg-hv-line hover:bg-hv-line-strong rounded-lg flex items-center gap-2"
+              >
+                <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            )}
           </div>
         </div>
 
@@ -406,12 +460,9 @@ const Reports: React.FC<ReportsProps> = ({
                 className="w-full bg-hv-line border border-hv-line-strong rounded-lg px-4 py-2"
               >
                 <option value="all">All Types</option>
-                <option value="access">Access</option>
-                <option value="door">Door</option>
-                <option value="system">System</option>
-                <option value="io">I/O</option>
-                <option value="wiegand">Wiegand</option>
-                <option value="osdp">OSDP</option>
+                {typeOptions.map(t => (
+                  <option key={t} value={t}>{t === 'io' ? 'I/O' : t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -442,6 +493,13 @@ const Reports: React.FC<ReportsProps> = ({
               </select>
             </div>
           </div>
+        </div>
+      )}
+      {fetchError && activeTab !== 'analytics' && (
+        <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-hv-warning-tint ring-1 ring-inset ring-hv-warning/40 text-sm text-hv-warning-fg">
+          <AlertTriangle size={16} />
+          <span className="flex-1">{fetchError}</span>
+          <button onClick={() => setFetchError(null)} aria-label="Dismiss" className="p-1 rounded hover:bg-hv-line"><X size={14} /></button>
         </div>
       )}
       {/* Stats Summary */}
@@ -555,6 +613,7 @@ const Reports: React.FC<ReportsProps> = ({
                       <td className="px-4 py-3 text-sm">
                         <div className="max-w-md truncate" title={log.message}>
                           {log.message}
+                          {(log as any).repeat > 1 && <span className="ml-2 text-xs text-hv-text-3">×{(log as any).repeat}</span>}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm">

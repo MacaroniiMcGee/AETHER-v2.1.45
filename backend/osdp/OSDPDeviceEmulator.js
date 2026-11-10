@@ -310,7 +310,18 @@ class OSDPDeviceEmulator {
             addr,
             hex: reply.toString('hex'),
           });
-          this.emit('emulator-device-update', dev.snapshot());
+          // AETHER_DOOR_BUTTONS (Update 74): after a poll reply, send the board update only when
+          // its I/O changed, or once a second (poll counters / last-poll time). It used to go to
+          // every browser after every reply (~10/s), and pages refetched status on each one.
+          {
+            const snap = dev.snapshot();
+            const sig = JSON.stringify([snap.online, snap.inputs, snap.outputs, snap.tamperActive, snap.powerFailActive]);
+            const now = Date.now();
+            if (dev._updSig !== sig || now - (dev._updAt || 0) >= 1000) {
+              dev._updSig = sig; dev._updAt = now;
+              this.emit('emulator-device-update', snap);
+            }
+          }
           if (isUSB) {
             const t = setTimeout(() => this.port.set({ rts: false }, () => {}), 4);
             if (t.unref) t.unref();

@@ -1,0 +1,107 @@
+{
+  "id": "Main_Entrance___Standard_Exit_Event",
+  "name": "Main Entrance · Standard Exit Event",
+  "steps": [
+    {
+      "id": "col-cv1-rtdnyo",
+      "blocks": [
+        {
+          "id": "block-cv2-b3pvaw",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 0.1
+        }
+      ]
+    },
+    {
+      "id": "col-cv3-frwy93",
+      "blocks": [
+        {
+          "id": "block-cv4-9uls20",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "rexIn",
+          "action": "activate",
+          "pulseDuration": 500
+        }
+      ]
+    },
+    {
+      "id": "col-cv5-a1hesw",
+      "blocks": [
+        {
+          "id": "block-cv6-hascwa",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 1
+        }
+      ]
+    },
+    {
+      "id": "col-cv7-88z2rn",
+      "blocks": [
+        {
+          "id": "block-cv8-hzsocf",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "dps",
+          "action": "activate",
+          "pulseDuration": 500
+        }
+      ]
+    },
+    {
+      "id": "col-cv9-wpl90a",
+      "blocks": [
+        {
+          "id": "block-cva-dnq0kx",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 5
+        }
+      ]
+    },
+    {
+      "id": "col-cvb-9bi0yk",
+      "blocks": [
+        {
+          "id": "block-cvc-s7y6fi",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "rexIn",
+          "action": "deactivate",
+          "pulseDuration": 500
+        }
+      ]
+    },
+    {
+      "id": "col-cvd-9ywwp2",
+      "blocks": [
+        {
+          "id": "block-cve-fvqvum",
+          "type": "wait",
+          "waitType": "seconds",
+          "waitValue": 0.1
+        }
+      ]
+    },
+    {
+      "id": "col-cvf-qm3ple",
+      "blocks": [
+        {
+          "id": "block-cvg-4e5uah",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "dps",
+          "action": "deactivate",
+          "pulseDuration": 500
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-10-11T20:06:37.300Z",
+  "updatedAt": "2026-10-11T20:06:37.300Z",
+  "globalDelay": 0,
+  "repeatCount": 0,
+  "version": "workflow-v2"
+}

@@ -15,7 +15,7 @@ import {
   Wifi, WifiOff, Server, LayoutGrid, Circle, Cpu, AlertTriangle,
   GripVertical
 } from 'lucide-react';
-import IOAccessEmulator from '../components/IOAccessEmulator';
+import IOAccessEmulator, { defaultHost, isLoopbackHost } from '../components/IOAccessEmulator';
 import { TopBar } from '../components/shell/AppShell';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -52,13 +52,49 @@ function makeId() {
   return `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// AETHER_NODE_HOST (Update 69)
+// The default node used to be stored as 'localhost'. Opened from any other
+// PC, http://localhost:3001 points at THAT PC, gets blocked and the node shows
+// Offline. The default is now the host the page was served from (the Pi);
+// only a page that is itself on localhost keeps 'localhost'. Stored loopback
+// entries are rewritten to the page host when the page is not on loopback;
+// real IPs are left alone. defaultHost()/isLoopbackHost() live in
+// IOAccessEmulator because its own fallback uses them as well.
+export function migrateLoopbackNodes<T extends { ip: string }>(nodes: T[]): { nodes: T[]; changed: boolean } {
+  const host = defaultHost();
+  if (host === 'localhost') return { nodes, changed: false };
+  const norm = (ip: string) => String(ip || '').trim().toLowerCase();
+  // A node already pointing at the page host makes the loopback one a duplicate: drop it.
+  let hostTaken = nodes.some(n => n && typeof n.ip === 'string' && norm(n.ip) === norm(host));
+  let changed = false;
+  const out: T[] = [];
+  for (const n of nodes) {
+    if (n && typeof n.ip === 'string' && isLoopbackHost(n.ip)) {
+      changed = true;
+      if (hostTaken) continue;
+      hostTaken = true;   // a second loopback entry would also be a duplicate
+      out.push({ ...n, ip: host });
+    } else {
+      out.push(n);
+    }
+  }
+  return { nodes: out, changed };
+}
+
 function loadNodes(): ClusterNode[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_CLUSTER);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const { nodes, changed } = migrateLoopbackNodes<ClusterNode>(parsed);
+        if (changed && nodes.length) { try { saveNodes(nodes); } catch { /* ignore */ } }
+        if (nodes.length) return nodes;
+      }
+    }
   } catch { /* ignore */ }
-  // Default: one node pointing at localhost
-  return [{ id: makeId(), name: 'Pi Unit 1', ip: 'localhost', color: 'blue' }];
+  // Default: one node pointing at the Pi that served this page
+  return [{ id: makeId(), name: 'Pi Unit 1', ip: defaultHost(), color: 'blue' }];
 }
 
 function saveNodes(nodes: ClusterNode[]) {

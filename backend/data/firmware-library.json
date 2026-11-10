@@ -63,5 +63,31 @@
     "approvedAt": null,
     "approvedBy": null,
     "notes": null
+  },
+  {
+    "id": "fw_1792183110295_dac065f5",
+    "filename": "CHAN3_APEX_profile.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1792183110295_dac065f5__CHAN3_APEX_profile.bin",
+    "sizeBytes": 6992,
+    "sha256": "dac065f5f4223a3a77d02d2843b36f04e9601f61fa8b81f18848884840d509c1",
+    "addedAt": "2026-10-16T20:38:30.295Z",
+    "model": "CHAN3 ",
+    "version": "5.4.10",
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": null
+  },
+  {
+    "id": "fw_1793212410411_a96384ce",
+    "filename": "apex_osdp_addy_0.bin",
+    "storedPath": "/home/aether/Desktop/Aether/M1.2.2/backend/data/firmware-library/fw_1793212410411_a96384ce__apex_osdp_addy_0.bin",
+    "sizeBytes": 32,
+    "sha256": "a96384ce69df428b1198e2eaae97422c020b2afe7d68f3a85af61f97833ab889",
+    "addedAt": "2026-10-28T18:33:30.411Z",
+    "model": "APEX OSDP Address 0",
+    "version": "APEX",
+    "approvedAt": null,
+    "approvedBy": null,
+    "notes": "APEX Only"
   }
 ]

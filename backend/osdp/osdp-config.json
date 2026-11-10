@@ -19,7 +19,7 @@
     },
     {
       "port": "/dev/ttyACM5",
-      "baudRate": 9600
+      "baudRate": 38400
     },
     {
       "port": "/dev/ttyACM2",
@@ -31,7 +31,7 @@
     },
     {
       "port": "/dev/ttyACM4",
-      "baudRate": 9600
+      "baudRate": 38400
     },
     {
       "port": "/dev/ttyACM6",
@@ -174,7 +174,7 @@
         "amber": 0
       },
       "buzzerState": false,
-      "baudRate": 9600
+      "baudRate": 38400
     },
     {
       "id": "osdp-reader-1787336245571",
@@ -302,7 +302,7 @@
         "amber": 0
       },
       "buzzerState": false,
-      "baudRate": 9600
+      "baudRate": 38400
     },
     {
       "id": "osdp-reader-1787336367306",
@@ -625,6 +625,55 @@
       "name": "1",
       "address": 0,
       "serialPort": "/dev/ttyACM8",
+      "enabled": true,
+      "secureChannel": false,
+      "capabilities": [
+        "LED",
+        "BUZZER",
+        "CARD",
+        "KEYPAD"
+      ],
+      "status": "idle",
+      "lastCard": null,
+      "lastKeypad": null,
+      "lastActivity": null,
+      "ledState": {
+        "red": 0,
+        "green": 0,
+        "amber": 0
+      },
+      "buzzerState": false
+    },
+    {
+      "id": "osdp-reader-1792031304139",
+      "name": "ACM5Address1",
+      "address": 1,
+      "serialPort": "/dev/ttyACM5",
+      "enabled": true,
+      "secureChannel": false,
+      "capabilities": [
+        "LED",
+        "BUZZER",
+        "CARD",
+        "KEYPAD"
+      ],
+      "status": "idle",
+      "lastCard": null,
+      "lastKeypad": null,
+      "lastActivity": null,
+      "ledState": {
+        "red": 0,
+        "green": 0,
+        "amber": 0
+      },
+      "buzzerState": false,
+      "baudRate": 38400
+    },
+    {
+      "id": "osdp-reader-1792081756624",
+      "name": "ACM5 -1",
+      "address": 1,
+      "serialPort": "/dev/ttyACM4",
       "enabled": true,
       "secureChannel": false,
       "capabilities": [

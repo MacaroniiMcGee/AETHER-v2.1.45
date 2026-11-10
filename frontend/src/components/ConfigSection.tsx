@@ -12,8 +12,10 @@ import NetworkPage from './config/NetworkPage';
 import SystemPage from './config/SystemPage';
 import PinoutPages from './config/PinoutPages';
 import DeviceFirmwareTool from './DeviceFirmwareTool';
+import HttpsSetupPanel from './config/HttpsSetupPanel';   // AETHER_HTTPS
 import AnalyticsTool from './analytics/AnalyticsTool';   // AETHER-ANALYTICS
 import { T } from './config/ui';
+import SunapiConsole from './sunapi/SunapiConsole';   // AETHER_SUNAPI
 
 type Item = { id: number; name: string; type: string; channel: number; active: boolean; [k: string]: any };
 
@@ -31,7 +33,7 @@ interface ConfigSectionProps {
   onImportConfig?: (file: File) => void;
   ipAddress?: string;
   eolPanel?: React.ReactNode;
-  toolPanels?: { switch?: React.ReactNode; oncafe?: React.ReactNode; stream?: React.ReactNode; reports?: React.ReactNode; blueprint?: React.ReactNode };
+  toolPanels?: { switch?: React.ReactNode; oncafe?: React.ReactNode; stream?: React.ReactNode; reports?: React.ReactNode; blueprint?: React.ReactNode; kbstudio?: React.ReactNode };
   mode: Mode;
   page: string;
 }
@@ -43,13 +45,20 @@ export const SETUP_TABS = [
   { id: 'network', label: 'Network', description: 'Addresses and interfaces of this Pi' },
   { id: 'system', label: 'System & Backup', description: 'Services, backup and restore' },
   { id: 'firmware', label: 'Device Firmware', description: 'Install Aether updates on this Pi' },
+  { id: 'https', label: 'HTTPS & Domain', description: 'Secure address for this Pi: a Let\'s Encrypt certificate through Cloudflare' }, // AETHER_HTTPS
+  { id: 'howtokb', label: 'Aether How-to KBs', description: 'How-to, reference and troubleshooting articles for Aether' }, // AETHER_HOWTO_KB
 ] as const;
 export const TOOL_TABS = [
+  // AETHER_TOOLS_MENU_79 (Update 79): menu order set by the user; Log Analytics lives under Reports only
+  { id: 'blueprint', label: 'Board Blueprints', description: 'Powered by HYDRA\nHybrid Diagrams & Routing for Access', sub: 'Powered by HYDRA', group: 'integrations' } /* AETHER_INTEGRATIONS_82 */ /* AETHER_HYDRA_81 */,
+  { id: 'kbstudio', label: 'KB Studio', description: 'Write and review OnCAFE knowledge base articles' },
   { id: 'oncafe', label: 'OnCAFE Console', description: 'Build OnCAFE console layouts' },
-  { id: 'stream', label: 'VMS Stream', description: 'Camera and VMS stream view' },
+  { id: 'eol-library', label: 'EOL Resistors', description: 'Dual-EOL wiring diagrams and resistor pack builds' },
   { id: 'switch', label: 'Switch Ports', description: 'PoE switch port control' },
-  { id: 'blueprint', label: 'Board Blueprints', description: 'Powered by Hydra' },
-  { id: 'analytics', label: 'Log Analytics', description: 'Scan controller log bundles and grade test runs' },
+  { id: 'stream', label: 'VMS Stream', description: 'Camera and VMS stream view' },
+  { id: 'osdpacademy', label: 'OSDP Academy', description: 'Learn OSDP byte by byte: lessons, packet builder, live trace classroom and troubleshooting scenarios' }, // AETHER_OSDP_ACADEMY,
+  { id: 'sunapi', label: 'SUNAPI Console', description: 'Hanwha cameras, recorders and access control over SUNAPI — scan, explore, and send to many devices at once' },   // AETHER_SUNAPI
+  { id: 'qrcreds', label: 'QR Credentials', description: 'Test OSDP QR readers and bridge rotating QR badges to the panel' }, // AETHER_QR_CREDENTIALS
 ] as const;
 export type SetupId = typeof SETUP_TABS[number]['id'];
 export type ToolId = typeof TOOL_TABS[number]['id'];
@@ -96,9 +105,18 @@ const ConfigSection: React.FC<ConfigSectionProps> = ({
         {tab === 'pinout' && <PinoutPages api={api} />}
         {tab === 'eol' && eolPanel}
         {tab === 'firmware' && <DeviceFirmwareTool backendUrl={api} />}
+        {/* AETHER_HOWTO_KB: the KB is a standalone page in frontend/public, shown in a frame. */}
+        {tab === 'howtokb' && (
+          <div style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 560 }}>
+            <iframe src="/aether-kb.html" title="Aether How-to KBs" allow="clipboard-write"
+              style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, display: 'block', background: 'rgb(var(--hv-surface))' }} />
+          </div>
+        )}
+        {tab === 'https' && <HttpsSetupPanel api={api} />}
       </>)}
       {mode === 'tools' && tool === 'analytics' && <AnalyticsTool backendUrl={api} />}
       {mode === 'tools' && tool !== 'analytics' && toolPanels[tool as keyof typeof toolPanels]}
+      {mode === 'tools' && page === 'sunapi' && <SunapiConsole />}{/* AETHER_SUNAPI */}
     </div>
   );
 };

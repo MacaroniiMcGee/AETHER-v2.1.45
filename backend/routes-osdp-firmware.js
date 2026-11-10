@@ -37,6 +37,7 @@ const { SerialPort } = require('serialport');
 const OSDPFirmwareUploader    = require('./osdp/OSDPFirmwareUploader');
 const OSDPFirmwareScanner     = require('./osdp/OSDPFirmwareScanner');
 const OSDPFirmwareIdentifier  = require('./osdp/OSDPFirmwareIdentifier');
+const OSDPComset              = require('./osdp/OSDPComset');   // AETHER-COMSET
 // AETHER-TRACE: OSDP bus trace logger for firmware uploads
 const { store: traceStore } = require('./osdp/OSDPTraceRecorder');
 
@@ -765,6 +766,104 @@ module.exports = function attachFirmwareRoutes(app, osdpManager, io) {
         }
       }
     }
+  });
+
+  // ---- Change address / baud with osdp_COMSET (0x6E) — AETHER-COMSET -----
+  //
+  // Body: { port, baud?, address (0..126) | broadcast:true, newAddress, newBaud, verify?=true }
+  // Sends a seq-0 POLL, then COMSET, reads the osdp_COM reply, then (verify)
+  // POLLs the reader at its new address/baud. Returns every step and every
+  // byte on the wire.
+  //
+  app.post('/api/osdp/firmware-comset', express.json(), async (req, res) => {
+    const body = req.body || {};
+    const portPath   = normalizePort(body.port);
+    const broadcast  = body.broadcast === true;
+    const address    = broadcast ? 0x7F : parseAddress(body.address);
+    const newAddress = parseAddress(body.newAddress);
+    const baudRate   = parseBaud(body.baud);
+    const newBaud    = Number(body.newBaud);
+    const verify     = body.verify !== false;
+    if (!portPath)          return res.status(400).json({ success: false, error: 'port is required' });
+    if (address == null)    return res.status(400).json({ success: false, error: 'current address is required (0..126), or broadcast' });
+    if (newAddress == null) return res.status(400).json({ success: false, error: 'new address must be 0..126 (127 is broadcast and cannot be assigned)' });
+    if (!OSDPComset.VALID_BAUDS.includes(newBaud)) {
+      return res.status(400).json({ success: false, error: `new baud must be one of ${OSDPComset.VALID_BAUDS.join(', ')}` });
+    }
+    if (activeUpload) {
+      return res.status(409).json({ success: false, error: 'A firmware upload is in progress' });
+    }
+
+    let portReleased = false;
+    let restoreBaud  = baudRate;
+    try {
+      const rel = await releaseEmulatorPort(osdpManager, portPath);
+      portReleased = rel.wasOwned;
+      if (rel.baudRate) restoreBaud = rel.baudRate;
+    } catch (e) {
+      return res.status(500).json({ success: false, error: `Failed to release port: ${e.message}` });
+    }
+
+    const wire = [];
+    const t0 = Date.now();
+    const cp = new OSDPComset({ portPath, baudRate, address, wire, t0 });
+    let result = null;
+    try {
+      await cp.open();
+      result = await cp.change({ newAddress, newBaud });
+    } catch (e) {
+      result = { steps: [{ name: 'Open port', ok: false, error: e.message }], com: null, failed: 'open' };
+    } finally {
+      try { await cp.close(); } catch (_) {}
+    }
+
+    // Where should the reader be now? Prefer what it told us in osdp_COM.
+    const expect = result.com || { address: newAddress, baud: newBaud };
+    let check = null, stillAtOld = null;
+    const refused = result.steps.find(st => st.nak != null);   // a NAK means nothing was changed
+    if (verify && !refused && result.failed !== 'open' && result.failed !== 'resync') {
+      await new Promise(r => setTimeout(r, 300));
+      check = await OSDPComset.probe({
+        portPath, baudRate: expect.baud, address: expect.address, wire, t0,
+        label: `Check: POLL address ${expect.address} at ${expect.baud} baud`,
+      });
+      const unchanged = expect.address === (address & 0x7F) && expect.baud === baudRate;
+      if (!check.ok && !unchanged) {
+        stillAtOld = await OSDPComset.probe({
+          portPath, baudRate, address, wire, t0, tries: 1,
+          label: `Check: is it still at the old settings (${broadcast ? 'broadcast' : address} at ${baudRate} baud)?`,
+        });
+      }
+    }
+
+    if (portReleased) {
+      try {
+        await new Promise(r => setTimeout(r, 200));
+        await reopenEmulatorPort(osdpManager, portPath, restoreBaud);
+      } catch (e) {
+        console.warn(`[OSDP-FW] Could not reopen ${portPath} after COMSET: ${e.message}`);
+      }
+    }
+
+    let outcome;
+    if (result.failed === 'open' || result.failed === 'resync') outcome = 'no-reader';
+    else if (refused) outcome = 'refused';
+    else if (check && check.ok) outcome = result.com && !result.steps[1].matches ? 'changed-other' : 'changed';
+    else if (stillAtOld && stillAtOld.ok) outcome = 'unchanged';
+    else if (!verify) outcome = result.com ? 'sent' : 'unknown';
+    else outcome = 'lost';
+
+    console.log(`[OSDP-FW] COMSET ${portPath} ${broadcast ? 'broadcast' : address}@${baudRate} → ${newAddress}@${newBaud}: ${outcome}`);
+    return res.json({
+      success: outcome === 'changed' || outcome === 'changed-other' || outcome === 'sent',
+      outcome,
+      port: portPath,
+      from: { address: broadcast ? 'broadcast' : address, baud: baudRate },
+      requested: { address: newAddress, baud: newBaud },
+      com: result.com,
+      steps: [...result.steps, ...(check ? [check] : []), ...(stillAtOld ? [stillAtOld] : [])],
+      wire,
+    });
   });
 
   // ---- Firmware library: list -------------------------------------------

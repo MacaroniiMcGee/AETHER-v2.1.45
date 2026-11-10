@@ -7,6 +7,7 @@ import InteractiveReader from './InteractiveReader';
 import OsdpTraceTool from './OsdpTraceTool';
 import CredentialQuickPills from './CredentialQuickPills';
 import OSDPFirmwareWizard from './OSDPFirmwareWizard';
+import OSDPComsetPanel from './OSDPComsetPanel'; // AETHER-COMSET
 import OSDPBusManager from './OSDPBusManager';
 import CollapsibleSection from './CollapsibleSection';
 import OSDPSnifferTool from './OSDPSnifferTool';
@@ -1456,7 +1457,7 @@ export default function OSDPSection({ ipAddress, connected, onLog }: OSDPSection
       )}
       {/* AETHER-GNB-2DEPTH: OSDP maintenance tools (same components Readers → Tools used) */}
       {mode === 'enroll' && <OsdpEnroll api={apiUrl} formats={formatLib.formats} reload={formatLib.reload} />}
-      {mode === 'firmware' && <OSDPFirmwareWizard readers={readers as any} />}
+      {mode === 'firmware' && <><OSDPFirmwareWizard readers={readers as any} /><OSDPComsetPanel /></>}
       {mode === 'bus' && <OSDPBusManager apiUrl={apiUrl} onLog={(m: any) => onLog?.(typeof m === 'string' ? m : String(m))} />}
       {/* History Tab — unchanged */}
       {mode === 'history' && (

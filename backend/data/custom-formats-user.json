@@ -310,6 +310,66 @@
       },
       "createdAt": "2026-10-07T21:44:52.052Z",
       "updatedAt": "2026-10-07T21:44:52.052Z"
+    },
+    {
+      "id": "user_hid_h10301_26_bit_copy_26",
+      "name": "HID H10301 (26-bit) (copy)",
+      "description": "",
+      "map": {
+        "bits": 26,
+        "fields": [
+          {
+            "key": "facility",
+            "start": 2,
+            "len": 8
+          },
+          {
+            "key": "card",
+            "start": 10,
+            "len": 16
+          }
+        ],
+        "parity": [
+          {
+            "bit": 1,
+            "type": "even",
+            "covers": [
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13
+            ]
+          },
+          {
+            "bit": 26,
+            "type": "odd",
+            "covers": [
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ]
+          }
+        ]
+      },
+      "createdAt": "2026-10-11T17:57:30.293Z",
+      "updatedAt": "2026-10-11T17:57:30.293Z"
     }
   ]
 }

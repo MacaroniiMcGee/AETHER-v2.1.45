@@ -1,0 +1,24 @@
+{
+  "id": "Door_Forced_Event",
+  "name": "Door Forced Event",
+  "steps": [
+    {
+      "id": "col-1791749346533",
+      "blocks": [
+        {
+          "id": "block-1791749346533-i05wb19sa",
+          "type": "door",
+          "doorId": -1,
+          "eventType": "dps",
+          "action": "pulse",
+          "pulseDuration": 5000
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-10-11T20:09:40.135Z",
+  "updatedAt": "2026-10-11T20:09:40.135Z",
+  "globalDelay": 1000,
+  "repeatCount": 0,
+  "version": "workflow-v2"
+}

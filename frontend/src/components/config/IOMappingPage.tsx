@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { T, Card, inputCls, inputStyle, Dot } from './ui';
+import { parseSavedDoorConfig, collectDoorOutputUsers, DoorOutputUser, collectDoorInputUsers } from '../../lib/doorOutputs';   // AETHER_ANALOG_IN: + collectDoorInputUsers
 
 type Item = { id: number; name: string; type: string; channel: number; active: boolean; [k: string]: any };
 
@@ -31,14 +32,19 @@ export default function IOMappingPage({ api, inputs, outputs, controllerOutputs,
   }, [api]);
 
   const aux = controllerOutputs.filter(o => o.id < 100);
+  const doorUsers: DoorOutputUser[] = useMemo(() => collectDoorOutputUsers(parseSavedDoorConfig({ config: doorCfg })?.doors || []), [doorCfg]);
+  const otherDoorOutputs = doorUsers.filter(x => x.kind !== 'relay' || x.stackLevel);
+  // AETHER_ANALOG_IN: Aether inputs doors watch (watched Locks, custom input I/O)
+  const doorInputs = useMemo(() => collectDoorInputUsers(parseSavedDoorConfig({ config: doorCfg })?.doors || []), [doorCfg]);
 
   // Who else switches each HAT relay (1-8)
   const usage = useMemo(() => {
     const u: Record<number, Use[]> = {};
     const add = (relay1: number, x: Use) => { if (relay1 >= 1 && relay1 <= 8) (u[relay1] ||= []).push(x); };
-    for (const d of doorCfg?.doors || []) {
-      if (d.enabled === false || (d.ioSource && d.ioSource !== 'physical')) continue;
-      if (d.lock && typeof d.lock.channel === 'number' && !(d.lock.stackLevel > 0)) add(d.lock.channel + 1, { who: `${d.name} strike`, kind: 'door' });
+    // AETHER_DOOR_OUTPUTS (Update 69): Lock, DPS and REX are all outputs; count
+    // those on relays here (analog / open-drain ones are listed below the strip).
+    for (const x of doorUsers) {
+      if (x.kind === 'relay' && !x.stackLevel) add(x.channel + 1, { who: x.user, kind: 'door' });
     }
     const so = doorCfg?.systemOutputs || {};
     for (const [k, label] of [['powerFault', 'Power fault'], ['batteryFault', 'Battery fault'], ['tamper', 'System tamper'], ['fai', 'Fire alarm']] as const) {
@@ -46,11 +52,17 @@ export default function IOMappingPage({ api, inputs, outputs, controllerOutputs,
     }
     try {
       const el = JSON.parse(localStorage.getItem('aether.elevator.v2') || 'null');
-      for (const f of el?.floors || []) if (f.relay > 0) add(f.relay, { who: `Elevator floor ${f.id} tracking`, kind: 'elevator' });
+      for (const f of el?.floors || []) {
+        if (!f || typeof f !== 'object') continue;
+        // AETHER_ELEV_TRACK (Update 71): v3 configs keep tracking in f.track; only relays are drawn here
+        const t = f.track;
+        const relay1 = t && typeof t === 'object' ? (t.kind === 'relay' ? Number(t.channel) + 1 : 0) : f.relay;
+        if (relay1 > 0) add(relay1, { who: `Elevator floor ${f.id} tracking`, kind: 'elevator' });
+      }
     } catch { /* none */ }
     for (const o of aux) add(o.channel + 1, { who: o.name, kind: 'controller' });
     return u;
-  }, [doorCfg, aux]);
+  }, [doorCfg, aux, doorUsers]);
 
   const conflicts = Object.entries(usage).filter(([, l]) => l.length > 1);
   const relayName = (n1: number) => inputs.find(i => i.channel === n1 - 1)?.name;
@@ -85,6 +97,11 @@ export default function IOMappingPage({ api, inputs, outputs, controllerOutputs,
             );
           })}
         </div>
+        {otherDoorOutputs.length > 0 && (
+          <p className="text-xs mt-3" style={{ color: T.dim }}>
+            Door outputs not on a relay: {otherDoorOutputs.map(x => `${x.label} · ${x.user}`).join(', ')}.
+          </p>
+        )}
         {conflicts.length > 0 && (
           <p className="text-xs mt-3" style={{ color: T.text2 }}>
             A relay used twice switches whenever <em>either</em> user switches it. Move one of them to a free relay on the Doors page, the Elevator page (Settings), or below.
@@ -135,6 +152,11 @@ export default function IOMappingPage({ api, inputs, outputs, controllerOutputs,
             </tbody>
           </table>
         </div>
+        {doorInputs.length > 0 && (   /* AETHER_ANALOG_IN */
+          <p className="text-[11px] px-4 py-2 border-t" style={{ color: T.dim, borderColor: T.line }}>
+            Door inputs: {doorInputs.map(x => `${x.label} · ${x.user}`).join(', ')}.
+          </p>
+        )}
         <p className="text-[11px] px-4 py-2 border-t" style={{ color: T.dim, borderColor: T.line }}>Supervised inputs use the analog channel and the EOL calibration profile (EOL Calibration tab).</p>
       </Card>
 

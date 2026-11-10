@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101011">
+<title>Aether Badge</title>
+<!-- AETHER_QR_CREDENTIALS: phone badge. Opened from the enrollment link; keeps the badge in this browser. -->
+<style>
+@font-face { font-family: "Noto Sans"; font-weight: 400; src: url(/hv-fonts/noto-sans-latin-400-normal.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: "Noto Sans"; font-weight: 600; src: url(/hv-fonts/noto-sans-latin-600-normal.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: "Noto Sans"; font-weight: 700; src: url(/hv-fonts/noto-sans-latin-700-normal.woff2) format("woff2"); font-display: swap; }
+:root { --bg:#EEEFF1; --card:#FFFFFF; --text:#000000; --text2:#000000C4; --text3:#0000007D; --line:#00000014; --brand:#F37321; --err:#E42525; --ok:#008847; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#101011; --card:#202021; --text:#FFFFFF; --text2:#FFFFFFC4; --text3:#FFFFFF7D; --line:#FFFFFF14; --err:#FA4D4D; --ok:#00B960; color-scheme: dark; } }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 "Noto Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+main { max-width: 420px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-height: 100%; }
+.top { display: flex; align-items: center; justify-content: space-between; }
+.app { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); font-weight: 700; }
+.state { font-size: 12px; color: var(--text3); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.name { font-size: 26px; font-weight: 700; line-height: 1.15; margin: 0; overflow-wrap: anywhere; }
+.dept { color: var(--text2); margin-top: 2px; }
+.qr { background: #fff; border-radius: 12px; padding: 10px; width: 100%; aspect-ratio: 1; display: grid; place-items: center; }
+.qr canvas { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+.timer { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; }
+.bar { flex: 1; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 100%; background: var(--brand); }
+.meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+.meta dt { color: var(--text3); } .meta dd { margin: 0; font-variant-numeric: tabular-nums; }
+.tip { font-size: 13px; color: var(--text3); }
+.msg { text-align: center; padding: 28px 18px; }
+.msg h1 { font-size: 20px; margin: 0 0 6px; } .msg p { margin: 0; color: var(--text2); }
+.msg.err h1 { color: var(--err); }
+.list { display: flex; flex-direction: column; gap: 8px; }
+button { font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 14px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.offline { color: var(--err); }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+<script src="/qr/qrcode.js"></script>
+<script src="/qr/qr-code-maker.js"></script>
+</head>
+<body>
+<main id="app">
+  <div class="top"><span class="app">Aether badge</span><span class="state" id="state"></span></div>
+  <div id="view"><div class="card msg"><h1>Loading badge…</h1></div></div>
+  <p class="tip" id="tip"></p>
+</main>
+<script>
+(function () {
+  'use strict';
+  var STORE = 'aether-qr-badges';
+  // Same origin when the backend serves this page; otherwise the backend on :3001.
+  var API = '';
+  function detectApi() {
+    return fetch('/api/qr/clock', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (!(j && j.success)) throw new Error('not here'); })
+      .catch(function () { API = location.protocol + '//' + location.hostname + ':3001'; });
+  }
+  var view = document.getElementById('view'), stateEl = document.getElementById('state'), tipEl = document.getElementById('tip');
+  var badge = null, lastWin = -1, timer = null;
+
+  function load() { try { return JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { return {}; } }
+  function save(all) { try { localStorage.setItem(STORE, JSON.stringify(all)); return true; } catch (e) { return false; } }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function message(title, body, err) {
+    var c = el('div', 'card msg' + (err ? ' err' : '')); c.appendChild(el('h1', null, title)); c.appendChild(el('p', null, body));
+    view.replaceChildren(c);
+  }
+  function now() { return Date.now() + (badge && badge.offset || 0); }
+
+  function draw(canvas, text) {
+    var q = qrcode(0, 'M'); q.addData(text, 'Alphanumeric'); q.make();
+    var n = q.getModuleCount(), quiet = 4, s = 10, size = (n + quiet * 2) * s;
+    canvas.width = size; canvas.height = size;
+    var g = canvas.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, size, size); g.fillStyle = '#000';
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) if (q.isDark(r, c)) g.fillRect((c + quiet) * s, (r + quiet) * s, s, s);
+  }
+
+  function show(b) {
+    badge = b;
+    var c = el('div', 'card');
+    var head = el('div'); head.appendChild(el('h1', 'name', b.name)); if (b.dept) head.appendChild(el('div', 'dept', b.dept));
+    var box = el('div', 'qr'); var cv = el('canvas'); cv.id = 'qr'; cv.setAttribute('aria-label', 'Access code'); box.appendChild(cv);
+    var t = el('div', 'timer'); var bar = el('div', 'bar'); var fill = el('i'); fill.id = 'fill'; bar.appendChild(fill);
+    var secs = el('span', null, ''); secs.id = 'secs'; t.appendChild(bar); t.appendChild(secs);
+    var meta = el('dl', 'meta');
+    [['Card', b.formatName + ' · FC ' + b.fc + ' · ' + b.card], ['Valid to', new Date(b.expiresAt).toLocaleDateString()], ['Badge', '#' + b.id]]
+      .forEach(function (p) { meta.appendChild(el('dt', null, p[0])); meta.appendChild(el('dd', null, p[1])); });
+    c.appendChild(head); c.appendChild(box); c.appendChild(t); c.appendChild(meta);
+    view.replaceChildren(c);
+    tipEl.textContent = 'Turn screen brightness up and hold the code 10–20 cm from the reader. A new code appears every ' + b.windowSec + ' s; a screenshot stops working.';
+    lastWin = -1; tick();
+    if (timer) clearInterval(timer);
+    timer = setInterval(tick, 250);
+    keepAwake();
+    syncClock();
+  }
+
+  function tick() {
+    if (!badge) return;
+    var ws = badge.windowSec, t = now() / 1000, win = Math.floor(t / ws);
+    if (win !== lastWin) { lastWin = win; draw(document.getElementById('qr'), AetherQr.makeToken(badge.id, badge.secret, win)); }
+    var left = ws - (t % ws);
+    document.getElementById('fill').style.width = (left / ws * 100) + '%';
+    document.getElementById('secs').textContent = Math.ceil(left) + ' s';
+  }
+
+  // Keep the phone's clock in step with Aether's and pick up a changed code lifetime.
+  function syncClock() {
+    var t0 = Date.now();
+    fetch(API + '/api/qr/clock', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || !j.success || !badge) return;
+      badge.offset = Math.round(j.serverTime + (Date.now() - t0) / 2 - Date.now());
+      if (j.windowSec && j.windowSec !== badge.windowSec) { badge.windowSec = j.windowSec; lastWin = -1; }
+      var all = load(); if (all[badge.id]) { all[badge.id].offset = badge.offset; all[badge.id].windowSec = badge.windowSec; save(all); }
+      stateEl.textContent = 'Clock synced with Aether'; stateEl.className = 'state';
+    }).catch(function () { stateEl.textContent = 'Aether not reachable: using this phone’s clock'; stateEl.className = 'state'; });
+  }
+
+  var lock = null;
+  function keepAwake() {
+    try { if (navigator.wakeLock && !lock) navigator.wakeLock.request('screen').then(function (l) { lock = l; l.addEventListener('release', function () { lock = null; }); }).catch(function () {}); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { keepAwake(); syncClock(); } });
+
+  function pickFromStore(wantId) {
+    var all = load(), ids = Object.keys(all);
+    if (wantId && all[wantId]) return show(all[wantId]);
+    if (ids.length === 1) return show(all[ids[0]]);
+    if (!ids.length) return message('No badge on this phone', 'Open the badge link from Tools › QR Credentials in Aether.', false);
+    var c = el('div', 'card'); c.appendChild(el('h1', 'name', 'Choose a badge'));
+    var list = el('div', 'list');
+    ids.forEach(function (id) { var bt = el('button', null, all[id].name + ' · #' + id); bt.onclick = function () { history.replaceState(null, '', '#' + id); show(all[id]); }; list.appendChild(bt); });
+    c.appendChild(list); view.replaceChildren(c);
+  }
+
+  detectApi().then(start);
+  function start() {
+  var hash = decodeURIComponent((location.hash || '').slice(1));
+  if (/^\d+$/.test(hash) || !hash) { pickFromStore(hash); return; }
+  // An enrollment link: claim the badge once, keep it in this browser.
+  message('Adding badge…', 'Contacting Aether.');
+  fetch(API + '/api/qr/enroll/' + encodeURIComponent(hash), { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || !j.success) {
+        var all = load(); var ids = Object.keys(all);
+        if (ids.length) { pickFromStore(); stateEl.textContent = 'That link was already used; showing the badge saved here.'; return; }
+        return message('This link no longer works', (j && j.error) || 'Ask for a new link in Aether.', true);
+      }
+      var b = j.badge; b.offset = Math.round(b.serverTime - Date.now());
+      var all2 = load(); all2[b.id] = b;
+      if (!save(all2)) stateEl.textContent = 'This browser won’t store the badge (private mode?). Keep this tab open.';
+      history.replaceState(null, '', '#' + b.id);
+      show(b);
+    })
+    .catch(function () { message('Can’t reach Aether', 'Join the same network as the Aether Pi, then open the link again. It has not been used yet.', true); });
+  }
+})();
+</script>
+</body>
+</html>

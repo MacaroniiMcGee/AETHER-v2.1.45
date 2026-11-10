@@ -1,6 +1,6 @@
 {
   "version": "3.0",
-  "timestamp": "2026-09-25T06:18:56.119Z",
+  "timestamp": "2026-10-11T23:50:21.011Z",
   "systemOutputs": {
     "powerFault": {
       "name": "Power Fault",
@@ -37,41 +37,59 @@
       "emuReaderPort": 0,
       "lock": {
         "name": "Door Strike",
-        "hardwareType": "relay",
-        "channel": 0,
-        "active": false
+        "hardwareType": "analog-in",
+        "channel": 7,
+        "active": true,
+        "activeVolts": 10,
+        "stackLevel": 0,
+        "reverseSense": true,
+        "analogMode": "eol",
+        "thresholdVolts": 5,
+        "supervisionState": "normal"
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
+        "hardwareType": "relay",
         "channel": 0,
-        "active": false,
-        "supervisionState": "normal"
+        "active": true,
+        "supervisionState": "active",
+        "activeVolts": 10,
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
+        "hardwareType": "relay",
         "channel": 1,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "activeVolts": 10,
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "ios": [],
-      "reader": "ctrl-emu-11-0",
+      "reader": "wg-1",
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [],
+          "workflowId": "Main_Entrance___Standard_Exit_Event",
+          "workflowName": "Main Entrance · Standard Exit Event"
         },
         {
           "name": "Custom Event 2",
-          "enabled": false,
-          "steps": []
+          "enabled": true,
+          "steps": [],
+          "workflowId": "Door_Forced_Event",
+          "workflowName": "Door Forced Event"
         },
         {
           "name": "Custom Event 3",
           "enabled": false,
-          "steps": []
+          "steps": [],
+          "workflowId": "Custom_Event_3",
+          "workflowName": "Custom Event 3"
         },
         {
           "name": "Custom Event 4",
@@ -94,46 +112,90 @@
       "id": 2,
       "name": "Back Door",
       "enabled": true,
-      "ioSource": "physical",
+      "ioSource": "emulated",
       "emuBoard": 11,
       "emuReaderPort": 0,
       "lock": {
         "name": "Door Strike",
-        "hardwareType": "relay",
-        "channel": 2,
-        "active": false
+        "hardwareType": "opto-in",
+        "channel": 1,
+        "active": false,
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
-        "channel": 3,
+        "hardwareType": "relay",
+        "channel": 2,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
-        "channel": 4,
+        "hardwareType": "relay",
+        "channel": 3,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "stackLevel": 0,
+        "reverseSense": false
       },
-      "ios": [],
-      "reader": "reader2",
+      "ios": [
+        {
+          "id": "door2-io-1791754209124",
+          "name": "Strike Follower",
+          "type": "Strike Follower",
+          "hardwareType": "analog",
+          "channel": 6,
+          "active": false,
+          "enabled": true,
+          "direction": "input",
+          "reverseSense": true,
+          "supervisionState": "short"
+        }
+      ],
+      "reader": "wg-2",
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [
+            {
+              "id": 1791743952638,
+              "action": "activate-rex",
+              "delay": 100
+            },
+            {
+              "id": 1791743985865,
+              "action": "open-dps",
+              "delay": 1000
+            },
+            {
+              "id": 1791744408626,
+              "action": "deactivate-rex",
+              "delay": 5000
+            },
+            {
+              "id": 1791744501941,
+              "action": "close-dps",
+              "delay": 100
+            }
+          ]
         },
         {
-          "name": "Custom Event 2",
-          "enabled": false,
-          "steps": []
+          "name": "Door Forced Event",
+          "enabled": true,
+          "steps": [],
+          "workflowId": "Door_Forced_Event",
+          "workflowName": "Door Forced Event"
         },
         {
           "name": "Custom Event 3",
-          "enabled": false,
-          "steps": []
+          "enabled": true,
+          "steps": [],
+          "workflowId": "Custom_Event_3",
+          "workflowName": "Custom Event 3"
         },
         {
           "name": "Custom Event 4",
@@ -161,40 +223,50 @@
       "emuReaderPort": 0,
       "lock": {
         "name": "Door Strike",
-        "hardwareType": "relay",
-        "channel": 0,
-        "active": false
+        "hardwareType": "opto-in",
+        "channel": 2,
+        "active": false,
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
-        "channel": 0,
+        "hardwareType": "relay",
+        "channel": 4,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
-        "channel": 1,
+        "hardwareType": "relay",
+        "channel": 5,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "ios": [],
-      "reader": "ctrl-emu-12-0",
+      "reader": "wg-3",
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [],
+          "workflowId": "Side_Door___Standard_Exit_Event",
+          "workflowName": "Side Door · Standard Exit Event"
         },
         {
-          "name": "Custom Event 2",
-          "enabled": false,
-          "steps": []
+          "name": "Door Forced Event",
+          "enabled": true,
+          "steps": [],
+          "workflowId": "Door_Forced_Event",
+          "workflowName": "Door Forced Event"
         },
         {
           "name": "Custom Event 3",
-          "enabled": false,
+          "enabled": true,
           "steps": []
         },
         {
@@ -223,31 +295,58 @@
       "emuReaderPort": 1,
       "lock": {
         "name": "Door Strike",
-        "hardwareType": "relay",
-        "channel": 0,
-        "active": false
+        "hardwareType": "opto-in",
+        "channel": 3,
+        "active": false,
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
-        "channel": 0,
+        "hardwareType": "relay",
+        "channel": 6,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
-        "channel": 1,
+        "hardwareType": "relay",
+        "channel": 7,
         "active": false,
-        "supervisionState": "normal"
+        "supervisionState": "normal",
+        "stackLevel": 0,
+        "reverseSense": false
       },
       "ios": [],
-      "reader": "ctrl-emu-13-0",
+      "reader": "wg-4",
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [
+            {
+              "id": 1791743952638,
+              "action": "activate-rex",
+              "delay": 100
+            },
+            {
+              "id": 1791743985865,
+              "action": "open-dps",
+              "delay": 1000
+            },
+            {
+              "id": 1791744408626,
+              "action": "deactivate-rex",
+              "delay": 5000
+            },
+            {
+              "id": 1791744501941,
+              "action": "close-dps",
+              "delay": 100
+            }
+          ]
         },
         {
           "name": "Custom Event 2",
@@ -279,37 +378,58 @@
     {
       "id": 5,
       "name": "Door 5",
-      "enabled": false,
-      "ioSource": "physical",
-      "emuBoard": 0,
+      "enabled": true,
+      "ioSource": "emulated",
+      "emuBoard": 11,
       "emuReaderPort": 0,
       "lock": {
         "name": "Door Strike",
         "hardwareType": "relay",
-        "channel": 4,
+        "channel": 0,
         "active": false
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
-        "channel": 4,
+        "hardwareType": "relay",
+        "channel": 0,
         "active": false,
         "supervisionState": "normal"
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
-        "channel": 0,
+        "hardwareType": "relay",
+        "channel": 1,
         "active": false,
         "supervisionState": "normal"
       },
       "ios": [],
-      "reader": null,
+      "reader": "ctrl-emu-11-0",
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [
+            {
+              "id": 1791743952638,
+              "action": "activate-rex",
+              "delay": 100
+            },
+            {
+              "id": 1791743985865,
+              "action": "open-dps",
+              "delay": 1000
+            },
+            {
+              "id": 1791744408626,
+              "action": "deactivate-rex",
+              "delay": 5000
+            },
+            {
+              "id": 1791744501941,
+              "action": "close-dps",
+              "delay": 100
+            }
+          ]
         },
         {
           "name": "Custom Event 2",
@@ -342,26 +462,26 @@
       "id": 6,
       "name": "Door 6",
       "enabled": false,
-      "ioSource": "physical",
-      "emuBoard": 0,
-      "emuReaderPort": 0,
+      "ioSource": "emulated",
+      "emuBoard": 11,
+      "emuReaderPort": 1,
       "lock": {
         "name": "Door Strike",
         "hardwareType": "relay",
-        "channel": 5,
+        "channel": 2,
         "active": false
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
-        "channel": 5,
+        "hardwareType": "relay",
+        "channel": 3,
         "active": false,
         "supervisionState": "normal"
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
-        "channel": 1,
+        "hardwareType": "relay",
+        "channel": 4,
         "active": false,
         "supervisionState": "normal"
       },
@@ -369,9 +489,30 @@
       "reader": null,
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [
+            {
+              "id": 1791743952638,
+              "action": "activate-rex",
+              "delay": 100
+            },
+            {
+              "id": 1791743985865,
+              "action": "open-dps",
+              "delay": 1000
+            },
+            {
+              "id": 1791744408626,
+              "action": "deactivate-rex",
+              "delay": 5000
+            },
+            {
+              "id": 1791744501941,
+              "action": "close-dps",
+              "delay": 100
+            }
+          ]
         },
         {
           "name": "Custom Event 2",
@@ -415,14 +556,14 @@
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
+        "hardwareType": "relay",
         "channel": 6,
         "active": false,
         "supervisionState": "normal"
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
+        "hardwareType": "relay",
         "channel": 2,
         "active": false,
         "supervisionState": "normal"
@@ -431,9 +572,30 @@
       "reader": null,
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [
+            {
+              "id": 1791743952638,
+              "action": "activate-rex",
+              "delay": 100
+            },
+            {
+              "id": 1791743985865,
+              "action": "open-dps",
+              "delay": 1000
+            },
+            {
+              "id": 1791744408626,
+              "action": "deactivate-rex",
+              "delay": 5000
+            },
+            {
+              "id": 1791744501941,
+              "action": "close-dps",
+              "delay": 100
+            }
+          ]
         },
         {
           "name": "Custom Event 2",
@@ -477,14 +639,14 @@
       },
       "dps": {
         "name": "Door Position",
-        "hardwareType": "opto",
+        "hardwareType": "relay",
         "channel": 7,
         "active": false,
         "supervisionState": "normal"
       },
       "rexIn": {
         "name": "REX Button",
-        "hardwareType": "opto",
+        "hardwareType": "relay",
         "channel": 3,
         "active": false,
         "supervisionState": "normal"
@@ -493,9 +655,30 @@
       "reader": null,
       "customEvents": [
         {
-          "name": "Custom Event 1",
-          "enabled": false,
-          "steps": []
+          "name": "Standard Exit Event",
+          "enabled": true,
+          "steps": [
+            {
+              "id": 1791743952638,
+              "action": "activate-rex",
+              "delay": 100
+            },
+            {
+              "id": 1791743985865,
+              "action": "open-dps",
+              "delay": 1000
+            },
+            {
+              "id": 1791744408626,
+              "action": "deactivate-rex",
+              "delay": 5000
+            },
+            {
+              "id": 1791744501941,
+              "action": "close-dps",
+              "delay": 100
+            }
+          ]
         },
         {
           "name": "Custom Event 2",
@@ -525,5 +708,5 @@
       ]
     }
   ],
-  "savedAt": "2026-09-25T06:18:56.991Z"
+  "savedAt": "2026-10-11T23:50:22.197Z"
 }
