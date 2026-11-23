@@ -242,6 +242,8 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     return { hops, push: push ? push.at : null, api: api ? api.at : null, decided: tp };
   };
   const doorOf = ch => (roles[ch] && roles[ch].door) || null;
+  // Doors page channels read as the door ("Main Entrance · Lock (EOL watch)"); raw wires keep their name
+  const chName = ch => (/^door:\d+:/.test(ch) && wiring[ch] && wiring[ch].label) || ch;
   const lockChannels = door => Object.entries(roles).filter(([, r]) => r.role === 'lock' && (!door || !r.door || r.door === door)).map(([ch]) => ch);
   const traces = [];
   const cmdUsed = new Set();   // controller events a command trace claimed: the strike/output trace may share them
@@ -360,7 +362,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     }
     if (r.auto) notes.push(`Role ${r.role} inferred (${Math.round((r.score || 0) * 100)} % agreement) — set it in Setup › Wiring to be sure`);
     traces.push({
-      id: a.id, kind: 'input', at: t0, sync: isSync, role: r.role, action: { label: `${a.journal.ch} → ${a.journal.v ? 'on' : 'off'} (${r.role}${door ? '' : ''})`, ch: a.journal.ch, cred: null, type: a.type, v: a.journal.v },
+      id: a.id, kind: 'input', at: t0, sync: isSync, role: r.role, action: { label: `${chName(a.journal.ch)} → ${a.journal.v ? 'on' : 'off'} (${r.role})`, ch: a.journal.ch, cred: null, type: a.type, v: a.journal.v },
       decision: g ? { type: g.type, t: g.t, cred: g.cred, door: g.door, sources: [...new Set(g.copies.map(c => c.src))], matchedBy: 'type and time', clientType: g.clientType, eventIds: g.copies.map(c => c.id) } : null,
       expect: x.label, result: g ? g.type : null, credCheck: 'n/a', hops, status, notes,
       latency: { decision: g && off != null ? ch.decided - t0 : null, push: ch && ch.push != null ? ch.push - t0 : null, api: ch && ch.api != null ? ch.api - t0 : null },
@@ -393,7 +395,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     if (wantV != null) {
       const chans = x.outTo != null ? Object.entries(roles).filter(([, r]) => r.role === 'output').map(([k]) => k) : targets.flatMap(d => lockChannels(d));
       saw = journalEv.find(o => OBSERVE.has(o.type) && o.journal && chans.includes(o.journal.ch) && o.journal.v === wantV && o.at >= t0 && o.at <= t0 + th.matchWindowMs);
-      if (saw) hops.push({ id: 'lock', label: `Aether saw ${saw.journal.ch} → ${wantV ? 'on' : 'off'}`, at: saw.at, ms: saw.at - t0, clock: 'pi' });
+      if (saw) hops.push({ id: 'lock', label: `Aether saw ${chName(saw.journal.ch)} → ${wantV ? 'on' : 'off'}`, at: saw.at, ms: saw.at - t0, clock: 'pi' });
     }
     hops.sort((p, q) => p.at - q.at);
     const notes = [];
@@ -450,7 +452,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     if (cause) hops.push({ id: 'cause', label: `Asked by ${cause.label}`, at: cause.at, ms: 0, clock: 'pi' });
     let ch = null;
     if (g) { ch = cloudHops(g, t0, { decidedLabel: `Controller: ${g.type}` }); hops.push(...ch.hops); }
-    hops.push({ id: 'lock', label: `Aether saw ${o.journal.ch} → ${v ? 'on' : 'off'}`, at: o.at, ms: o.at - t0, clock: 'pi' });
+    hops.push({ id: 'lock', label: `Aether saw ${chName(o.journal.ch)} → ${v ? 'on' : 'off'}`, at: o.at, ms: o.at - t0, clock: 'pi' });
     const ds = doorStates.find(d => d.at >= o.at - 2000 && d.at <= o.at + 15000 && (!door || (d.door && d.door.id === door)));
     if (ds) hops.push({ id: 'state', label: `Cloud door state: ${ds.label}`, at: ds.at, ms: ds.at - t0, clock: 'pi' });
     hops.sort((p, q) => p.at - q.at);
@@ -479,7 +481,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     if (r.auto) notes.push(`Role ${r.role} inferred — set it in Setup › Wiring to be sure`);
     traces.push({
       id: o.id, kind: 'output', at: t0, sync: false, role: r.role, cause, held,
-      action: { label: `${o.journal.ch} → ${v ? 'on' : 'off'} (${r.role})`, ch: o.journal.ch, cred: null, type: o.type, v },
+      action: { label: `${chName(o.journal.ch)} → ${v ? 'on' : 'off'} (${r.role})`, ch: o.journal.ch, cred: null, type: o.type, v },
       decision: g ? { type: g.type, t: g.t, cred: g.cred, door: g.door, sources: [...new Set(g.copies.map(q => q.src))], matchedBy: 'type and time', clientType: g.clientType, eventIds: g.copies.map(q => q.id) } : null,
       expect: x.label, result: g ? g.type : null, credCheck: 'n/a', hops, status, notes,
       latency: { decision: g && (off != null || g.cloudClock) ? gPi(g) - t0 : null, push: ch && ch.push != null ? ch.push - t0 : null, api: ch && ch.api != null ? ch.api - t0 : null, output: o.at - t0, hardware: g && (off != null || g.cloudClock) ? o.at - gPi(g) : null },

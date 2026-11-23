@@ -322,7 +322,7 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
     <Card icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Doors from the Doors page fill this in (and get your changes back — the last save wins). Shared with Log Analytics › Product Test."
       right={<div className="flex items-center gap-2">{msg && <span className="text-[11px] text-hv-text-3">{msg}</span>}<Button size="sm" icon={<RefreshCw size={13} />} onClick={load}>Refresh</Button><Button size="sm" tone="primary" icon={<Save size={13} />} disabled={!dirty} busy={busy} onClick={save}>Save wiring</Button></div>}>
       {!rows.length ? <div className="text-xs text-hv-text-3">No relays, inputs or outputs used in the last 24 h. Add a channel by name (relay:6, opto:2, emu:2:in:3, emu:2:out:0).</div> : (
-        <div className="grid grid-cols-[110px_110px_190px_minmax(0,1fr)_140px_minmax(0,1fr)_28px] gap-2 items-center text-xs">
+        <div className="grid grid-cols-[minmax(130px,1.1fr)_100px_170px_minmax(0,1fr)_130px_minmax(0,1fr)_28px] gap-2 items-center text-xs">
           <span className="text-hv-text-3">Channel</span><span className="text-hv-text-3">Direction</span><span className="text-hv-text-3">Role</span><span className="text-hv-text-3">Door</span><span className="text-hv-text-3">DPS on means</span><span className="text-hv-text-3">Guess / description</span><span />
           {rows.map(ch => {
             const i = info(ch), m = w[ch], drive = isDrive(kindOf(ch));
@@ -332,7 +332,7 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
                   ? <span className="text-hv-text truncate" title={`${ch} — from the Doors page`}>{m.label || ch}<span className="ml-1 text-[10px] text-hv-info-fg">Doors page</span>{m.pin ? <PinTag onReset={() => set(ch, { reset: true, pin: undefined })} /> : null}</span>
                   : <span className="font-mono text-hv-text truncate" title={m?.via ? `Wired to ${m.doorName || 'a door'} — traced as ${m.via} while the door reports; Product Test and sync pulses use this wire` : i ? `${i.count} changes in 24 h` : ''}>{ch}{m?.via ? <span className="ml-1 font-sans text-[10px] text-hv-text-3">via {m.doorName || 'door'}</span> : null}{m?.src && m.pin ? <PinTag onReset={() => set(ch, { reset: true, pin: undefined })} /> : null}</span>}
                 <span className="text-hv-text-3">{drive ? 'Aether → panel' : 'panel → Aether'}</span>
-                <Select value={m?.role || ''} onChange={e => set(ch, e.target.value ? { role: e.target.value } : null)}>
+                <Select value={m?.role || ''} onChange={e => set(ch, e.target.value ? { role: e.target.value } : m?.src ? { role: 'ignore' } : null)}>
                   <option value="">not mapped</option>{(drive ? DRIVE_ROLES : OBSERVE_ROLES).map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                 </Select>
                 <Select value={m?.door || ''} disabled={!m || m.role === 'ignore'} onChange={e => set(ch, { door: e.target.value || undefined })}>
@@ -342,7 +342,7 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
                 {m?.src && /^door:/.test(ch)
                   ? <Input value={m.note || ''} placeholder="description (shared with the door)" onChange={e => set(ch, { note: e.target.value || undefined })} />
                   : <span className="text-hv-text-3 truncate" title={m?.src ? m.label : undefined}>{m?.src ? (m.label || '') : i?.inferred ? `${ROLE_LABEL[i.inferred.role] || i.inferred.role}${i.inferred.score != null ? ` (${Math.round(i.inferred.score * 100)} %)` : ''}` : ''}</span>}
-                <button className="text-hv-text-3 hover:text-hv-error-fg disabled:opacity-30" disabled={!m} aria-label="Unmap" onClick={() => set(ch, null)}><Trash2 size={14} /></button>
+                <button className="text-hv-text-3 hover:text-hv-error-fg disabled:opacity-30" disabled={!m || (!!m.src && m.role === 'ignore')} aria-label="Unmap" title={m?.src ? 'Ignore this channel (the door keeps it off until you choose “use door’s”)' : 'Unmap'} onClick={() => set(ch, m?.src ? { role: 'ignore' } : null)}><Trash2 size={14} /></button>
               </React.Fragment>
             );
           })}

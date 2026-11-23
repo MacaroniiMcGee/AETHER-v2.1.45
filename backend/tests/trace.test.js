@@ -586,7 +586,9 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       assert.throws(() => e3.saveWiring(stale, 'x', staleBase), e => e.status === 409 || /changed since you opened/.test(e.message));
       assert.strictEqual(e3.wiring()['door:1:dps'].note, 'newer from the door');
       // an override survives door saves until reset
-      let cur = JSON.parse(JSON.stringify(e3.wiring())); cur['door:1:rex'].role = 'input'; delete cur['door:1:io:Sounder'];
+      const partial = e3.saveWiring({ 'relay:3': e3.wiring()['relay:3'], 'relay:9': { role: 'rex' } });
+      assert.strictEqual(partial['door:1:dps'].role, 'dps', 'a partial save keeps door entries as they are'); assert(!partial['door:1:dps'].pin);
+      let cur = JSON.parse(JSON.stringify(e3.wiring())); cur['door:1:rex'].role = 'input'; cur['door:1:io:Sounder'].role = 'ignore';
       e3.saveWiring(cur, 'x', Math.max(...Object.values(cur).map(e => e.at || 0)));
       e3.importDoors();
       cur = e3.wiring();
@@ -625,7 +627,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       assert.strictEqual(corr([both[0]], [], {}, { wiring: wv }).roles['relay:0'].role, 'dps');
       fs.writeFileSync(dc, keepDc); fs.writeFileSync(ap, keepAp);
     }
-    ok('review: stale Setup tab refused (409); overrides kept until reset; removed door rows stay off; manual mappings restored; stale Doors page keeps newer pairing; deleted config; pulse sync on a door wire; door wires traced once');
+    ok('review: stale Setup tab refused (409); overrides kept until reset; partial saves keep doors; door rows switched off stay off; manual mappings restored; stale Doors page keeps newer pairing; deleted config; pulse sync on a door wire; door wires traced once');
 
     // door activity → traces: DPS from the door, strike watched on the analog zone, card on the door's reader
     const T = Date.now() - 60000;

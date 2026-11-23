@@ -426,9 +426,10 @@ class TraceEngine extends EventEmitter {
       if (!/^door:\d+$/.test(e.src || '') || owns(k)) continue;
       if (e.was) next[k] = e.was; else delete next[k];
     }
-    // a door entry removed in Setup stays off (pinned "ignore") so the next door save does not bring it back
+    // door entries the client did not send are kept as they are (a partial save never switches doors off;
+    // Setup turns a door row off explicitly by setting it to "ignore", which pins it)
     for (const [k, e] of Object.entries(prev)) {
-      if (/^door:\d+$/.test(e.src || '') && owns(k) && !next[k]) next[k] = { ...e, role: 'ignore', pin: true };
+      if (/^door:\d+$/.test(e.src || '') && owns(k) && !next[k]) next[k] = e;
     }
     const patch = new Map();   // door id -> { oncafeDoorId, note, flipDps }
     for (const [k, e] of Object.entries(next)) {
