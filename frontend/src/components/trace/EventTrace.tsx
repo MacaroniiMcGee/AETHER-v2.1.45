@@ -3,13 +3,18 @@
 // the controller's own logs (Log Analytics reports) and OnCAFE (MQTT push + event log). Sync cards line the
 // controller clock up with the Pi; secrets are scrubbed and plain text is shown only on request.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, Send, Radio, History, Settings as Cog, Loader2, AlertTriangle, Download, Trash2, Upload, FileJson, Waypoints, ScrollText, ChevronDown, Activity } from 'lucide-react';
+import { Play, Square, Send, Radio, History, Settings as Cog, Loader2, AlertTriangle, Download, Trash2, Upload, FileJson, Waypoints, ScrollText, ChevronDown, Activity, Cloud } from 'lucide-react';
 import { Badge, Button, Empty, Input, Segmented, Tabs, Toggle, cx, lsGet, lsSet } from '../sunapi/ui';
-import { traceClient, defaultBackend, clock, credText, fmtMs, SRC_LABEL, type Analysis, type RunMeta, type Status, type TEvent, type ReportMeta } from './api';
+import { traceClient, defaultBackend, clock, credText, fmtMs, SRC_LABEL, KIND_LABEL, type Analysis, type Kind, type RunMeta, type Status, type TEvent, type ReportMeta } from './api';
+import { CommandDialog } from './CommandDialog';
 import { Summary, ClockCard, TraceTable, TraceDetail, Swimlanes, EventBox } from './views';
 import { SetupPanel } from './Setup';
 
 type Page = 'live' | 'runs' | 'setup';
+const KindFilter: React.FC<{ a: Analysis | null; value: Kind | 'all'; onChange: (k: Kind | 'all') => void }> = ({ a, value, onChange }) => (
+  <Segmented value={value} onChange={onChange} items={[{ id: 'all', label: `All${a ? ' ' + a.stats.actions : ''}` }, ...(['card', 'input', 'output', 'command'] as Kind[]).map(k => ({ id: k, label: `${KIND_LABEL[k]}${a ? ' ' + a.stats.byKind[k].actions : ''}` }))]} />
+);
+
 const WINDOWS = [{ id: '60000', label: '1 min' }, { id: '300000', label: '5 min' }, { id: '900000', label: '15 min' }] as const;
 
 const SourceChip: React.FC<{ label: string; tone: 'success' | 'warning' | 'error' | 'neutral'; title?: string }> = ({ label, tone, title }) => (
@@ -35,7 +40,11 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [kind, setKind] = useState<Kind | 'all'>(() => lsGet('aether.trace.kind', 'all'));
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const seq = useRef(0);
+  useEffect(() => lsSet('aether.trace.kind', kind), [kind]);
 
   useEffect(() => lsSet('aether.trace.page', page), [page]);
   useEffect(() => lsSet('aether.trace.window', windowMs), [windowMs]);
@@ -102,7 +111,8 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
           </div>
         </div>
         {actionErr && <span className="max-w-[360px] truncate text-xs text-hv-error-fg flex items-center gap-1.5" title={actionErr}><AlertTriangle size={13} className="shrink-0" />{actionErr}</span>}
-        <Button size="sm" icon={<Send size={13} />} busy={busy === 'sync' || status.syncBusy} onClick={sync} title="Send the two sync cards now">Sync cards</Button>
+        {status.settings.commands.enabled && <Button size="sm" icon={<Cloud size={13} />} onClick={() => setCmdOpen(true)} title="Send a door / area / zone command to OnCAFE and trace it">Command</Button>}
+        <Button size="sm" icon={<Send size={13} />} busy={busy === 'sync' || status.syncBusy} onClick={sync} title="Send the sync markers now">Sync</Button>
         {run
           ? <Button tone="danger-soft" icon={<Square size={13} />} busy={busy === 'stop'} onClick={stopRun}>{withSync && status.settings.sync.atEnd ? 'Sync and stop' : 'Stop'}</Button>
           : (
@@ -129,6 +139,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
         { id: 'setup', label: <><Cog size={14} />Setup</> },
       ]} />
 
+      <CommandDialog open={cmdOpen} onClose={() => setCmdOpen(false)} api={api} status={status} onSent={m => { setNote(m); setActionErr(null); }} />
       {page === 'setup' ? (
         <div className="flex-1 min-h-0 overflow-auto p-4"><SetupPanel api={api} status={status} onSaved={loadStatus} /></div>
       ) : page === 'runs' ? (
@@ -136,7 +147,8 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
       ) : (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="px-3 pt-3 space-y-2 shrink-0">
-            {analysis && <Summary a={analysis} />}
+            {note && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-success-tint text-hv-success-fg flex items-center gap-2"><span className="flex-1">{note}</span><button className="opacity-70 hover:opacity-100" onClick={() => setNote(null)}>×</button></div>}
+            {analysis && <Summary a={analysis} kind={kind} />}
             {analysis && <ClockCard a={analysis} />}
             <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line px-2 pt-1 pb-0.5">
               <div className="flex items-center gap-2 text-[11px] text-hv-text-3"><Activity size={12} />Timeline by vantage point (controller times shifted by the clock offset)<span className="ml-auto" />
@@ -146,13 +158,13 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
             </div>
           </div>
           <div className="flex items-center gap-3 px-3 py-1.5 shrink-0">
-            <span className="text-xs font-semibold text-hv-text-2">Cards, followed through</span>
-            <Toggle on={showSync} onChange={setShowSync} label="Show sync cards" />
+            <KindFilter a={analysis} value={kind} onChange={setKind} />
+            <Toggle on={showSync} onChange={setShowSync} label="Show sync markers" />
             {analysis && analysis.unexplained.length > 0 && <Badge tone="warning">{analysis.unexplained.length} decision{analysis.unexplained.length > 1 ? 's' : ''} nobody triggered</Badge>}
           </div>
           <div className="flex-1 min-h-0 flex border-t border-hv-line">
             <div className={cx('min-w-0 overflow-auto', sel || picked ? 'w-[55%] border-r border-hv-line' : 'flex-1')}>
-              {analysis ? <TraceTable traces={analysis.traces} selected={selected} onSelect={id => { setSelected(id); setPicked(null); }} showSync={showSync} compact={!!(sel || picked)} /> : <Empty title="Loading…" />}
+              {analysis ? <TraceTable traces={analysis.traces} selected={selected} onSelect={id => { setSelected(id); setPicked(null); }} showSync={showSync} compact={!!(sel || picked)} kind={kind} /> : <Empty title="Loading…" />}
             </div>
             {sel && <div className="w-[45%] min-w-0"><TraceDetail t={sel} events={events} api={api} runId={runId} allowRaw={status.settings.allowRaw} onClose={() => setSelected(null)} /></div>}
             {!sel && picked && (
@@ -176,6 +188,7 @@ const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status }
   const [events, setEvents] = useState<TEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [showSync, setShowSync] = useState(false);
+  const [kind, setKind] = useState<Kind | 'all'>('all');
   const [msg, setMsg] = useState<{ tone: 'error' | 'success'; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [reports, setReports] = useState<ReportMeta[] | null>(null);
@@ -260,15 +273,16 @@ const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status }
             </div>
             {msg && <div className={cx('text-xs rounded-hv-xs px-2 py-1', msg.tone === 'error' ? 'bg-hv-error-tint text-hv-error-fg' : 'bg-hv-success-tint text-hv-success-fg')}>{msg.text}</div>}
             {a.meta && a.meta.imports.length > 0 && <div className="text-[11px] text-hv-text-3">Added: {a.meta.imports.map(i => i.what).join(' · ')}</div>}
-            <Summary a={a} />
+            <Summary a={a} kind={kind} />
             <ClockCard a={a} />
           </div>
           <div className="flex items-center gap-3 px-3 py-1.5 shrink-0">
-            <Toggle on={showSync} onChange={setShowSync} label="Show sync cards" />
+            <KindFilter a={a} value={kind} onChange={setKind} />
+            <Toggle on={showSync} onChange={setShowSync} label="Show sync markers" />
           </div>
           <div className="flex-1 min-h-0 flex border-t border-hv-line">
             <div className={cx('min-w-0 overflow-auto', sel ? 'w-[55%] border-r border-hv-line' : 'flex-1')}>
-              <TraceTable traces={a.traces} selected={selected} onSelect={setSelected} showSync={showSync} compact={!!sel} />
+              <TraceTable traces={a.traces} selected={selected} onSelect={setSelected} showSync={showSync} compact={!!sel} kind={kind} />
               {a.unexplained.length > 0 && (
                 <div className="p-3">
                   <div className="text-xs font-semibold text-hv-text-2 mb-1">Controller decisions nobody triggered ({a.unexplained.length})</div>

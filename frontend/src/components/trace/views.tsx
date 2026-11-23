@@ -1,8 +1,8 @@
 // AETHER_TRACE — Event Trace pieces: verdict strip, clock card, traces table, hop waterfall, swimlane timeline
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, EyeOff, X, CheckCircle2, AlertTriangle, XCircle, Clock, Fingerprint, Lock } from 'lucide-react';
+import { Eye, EyeOff, X, CheckCircle2, AlertTriangle, XCircle, Clock, Fingerprint, Lock, DoorOpen, Zap, Cloud } from 'lucide-react';
 import { Badge, Button, Empty, cx, type Tone } from '../sunapi/ui';
-import { clock, credText, fmtMs, LANES, SRC_LABEL, type Analysis, type TEvent, type Trace, type TraceApi, type Stat } from './api';
+import { clock, credText, fmtMs, LANES, SRC_LABEL, ROLE_LABEL, type Analysis, type Kind, type KindStats, type TEvent, type Trace, type TraceApi, type Stat } from './api';
 
 export const statusTone = (s: string): Tone => (s === 'pass' ? 'success' : s === 'warn' ? 'warning' : s === 'fail' ? 'error' : 'neutral');
 const StatusIcon: React.FC<{ s: string }> = ({ s }) => s === 'pass' ? <CheckCircle2 size={14} className="text-hv-success-fg" /> : s === 'warn' ? <AlertTriangle size={14} className="text-hv-warning-fg" /> : <XCircle size={14} className="text-hv-error-fg" />;
@@ -19,26 +19,31 @@ const StatTile: React.FC<{ label: string; s: Stat; hint?: string }> = ({ label, 
   </div>
 );
 
-export const Summary: React.FC<{ a: Analysis }> = ({ a }) => {
-  const s = a.stats;
+const TILES: Record<Kind | 'all', [keyof KindStats, string, string][]> = {
+  all: [['decision', 'Aether → controller reported', 'Corrected with the sync clock offset.'], ['push', 'Aether → cloud push (MQTT)', 'Both ends on the Pi clock.'], ['decisionToPush', 'Controller → cloud push', 'Controller + Cloud Connector + broker + cloud'], ['api', 'Aether → event log (API)', 'Resolution = poll interval.']],
+  card: [['decision', 'Aether → controller decision', 'Corrected with the sync clock offset. Includes the reader transmission.'], ['push', 'Aether → cloud push (MQTT)', 'Both ends on the Pi clock: this is the cloud latency.'], ['decisionToPush', 'Decision → cloud push', 'Controller + Cloud Connector + broker + cloud'], ['api', 'Aether → event log (API)', 'When the event first showed in the event log. Resolution = poll interval.']],
+  input: [['decision', 'Aether change → controller event', 'DPS / REX / input change until the controller stamped its event (corrected).'], ['push', 'Aether change → cloud push', 'Both ends on the Pi clock.'], ['decisionToPush', 'Controller → cloud push', ''], ['api', 'Aether change → event log', '']],
+  output: [['hardware', 'Controller event → output seen', 'From the controller stamping unlocked / output on until Aether saw the wire change.'], ['output', 'Cause → output seen', 'From the card / REX / command that asked for it until Aether saw the output.'], ['push', 'Cause → cloud push', ''], ['decision', 'Cause → controller event', '']],
+  command: [['ack', 'Command → OnCAFE answered', 'HTTP round trip of the command.'], ['decision', 'Command → controller event', 'Until the controller stamped the resulting event (corrected).'], ['output', 'Command → Aether saw the output', 'Until the strike / output physically changed at Aether.'], ['push', 'Command → cloud push', '']],
+};
+
+export const Summary: React.FC<{ a: Analysis; kind?: Kind | 'all' }> = ({ a, kind = 'all' }) => {
+  const s = kind === 'all' ? a.stats : a.stats.byKind[kind];
   return (
     <div className="flex flex-wrap gap-2">
       <div className="min-w-[150px] rounded-hv-xs bg-hv-widget ring-1 ring-inset ring-hv-line px-3 py-1.5">
-        <div className="text-[11px] text-hv-text-3">Actions</div>
+        <div className="text-[11px] text-hv-text-3">{kind === 'all' ? 'Everything traced' : 'Traced'}</div>
         <div className="flex items-center gap-1.5 text-sm">
           <Badge tone={statusTone(s.verdict)}>{s.verdict === 'no-data' ? 'no data' : s.verdict}</Badge>
           <span className="tabular-nums text-hv-text">{s.actions}</span>
           <span className="text-[11px] text-hv-text-3 tabular-nums">· {s.pass} pass · {s.warn} warn · {s.fail} fail</span>
         </div>
       </div>
-      <StatTile label="Aether → controller decision" s={s.decision} hint="Corrected with the sync-card clock offset. Includes the reader's transmission time." />
-      <StatTile label="Aether → cloud push (MQTT)" s={s.push} hint="Both ends on the Pi's clock: no correction needed. This is the cloud latency." />
-      <StatTile label="Decision → cloud push" s={s.decisionToPush} hint="Controller + Cloud Connector + broker + cloud processing" />
-      <StatTile label="Aether → event log (API)" s={s.api} hint="When the event first showed in the OnCAFE event log. Resolution = poll interval." />
-      {(s.credMismatch > 0 || s.unexplained > 0) && (
+      {TILES[kind].map(([k, label, hint]) => <StatTile key={k} label={label} s={s[k] as Stat} hint={hint} />)}
+      {((kind === 'all' || kind === 'card') && (s.credMismatch > 0 || a.stats.unexplained > 0)) && (
         <div className="rounded-hv-xs bg-hv-error-tint ring-1 ring-inset ring-hv-error/40 px-3 py-1.5 text-xs text-hv-error-fg">
           {s.credMismatch > 0 && <div><b>{s.credMismatch}</b> credential{s.credMismatch > 1 ? 's' : ''} changed on the way</div>}
-          {s.unexplained > 0 && <div><b>{s.unexplained}</b> controller decision{s.unexplained > 1 ? 's' : ''} nobody triggered</div>}
+          {a.stats.unexplained > 0 && <div><b>{a.stats.unexplained}</b> controller decision{a.stats.unexplained > 1 ? 's' : ''} nobody triggered</div>}
         </div>
       )}
     </div>
@@ -59,13 +64,13 @@ export const ClockCard: React.FC<{ a: Analysis }> = ({ a }) => {
         {c.drift && <Badge tone={Math.abs(c.drift.changeMs) > 500 ? 'warning' : 'neutral'}>drift {c.drift.changeMs >= 0 ? '+' : ''}{fmtMs(c.drift.changeMs)}{c.drift.perHourMs != null ? ` (${Math.round(c.drift.perHourMs)} ms/h)` : ''}</Badge>}
       </div>
       {!sets.length ? (
-        <div className="text-hv-text-3">No sync cards in this run. Start a run with sync cards (Setup › Sync cards) so controller timestamps can be lined up with the Pi.</div>
+        <div className="text-hv-text-3">No sync markers in this run. Start a run with sync markers (Setup › Sync markers) so controller timestamps line up with the Pi.</div>
       ) : sets.map(({ set, rows }) => (
         <div key={set} className="flex flex-wrap items-center gap-1.5 mt-1">
           <span className="w-10 text-hv-text-3">{set}</span>
           {rows.map((r, i) => (
             <Badge key={i} tone={r.matched ? 'success' : 'error'} title={r.matched ? `${r.type} at controller ${clock(r.eventT!)}${r.byPattern ? ' — matched by the gap between the cards (the cloud did not report card numbers)' : ''}` : 'Not found in the controller/cloud events'}>
-              {r.fc}-{r.cn} {r.matched ? `${r.offset! >= 0 ? '+' : ''}${fmtMs(r.offset)}` : 'missing'}{r.byPattern ? ' ≈' : ''}
+              {r.ch ? `${r.ch} ${r.v ? 'on' : 'off'}` : `${r.fc}-${r.cn}`} {r.matched ? `${r.offset! >= 0 ? '+' : ''}${fmtMs(r.offset)}` : 'missing'}{r.byPattern ? ' ≈' : ''}
             </Badge>
           ))}
         </div>
@@ -75,7 +80,7 @@ export const ClockCard: React.FC<{ a: Analysis }> = ({ a }) => {
   );
 };
 
-const HOP_TONE: Record<string, string> = { sent: 'bg-hv-brand', decided: 'bg-hv-purple', published: 'bg-hv-purple', wire: 'bg-hv-info', push: 'bg-hv-success', stored: 'bg-hv-success', api: 'bg-hv-warning', browser: 'bg-hv-warning', lock: 'bg-hv-text-3' };
+const HOP_TONE: Record<string, string> = { cause: 'bg-hv-brand', ack: 'bg-hv-info', state: 'bg-hv-success', sent: 'bg-hv-brand', decided: 'bg-hv-purple', published: 'bg-hv-purple', wire: 'bg-hv-info', push: 'bg-hv-success', stored: 'bg-hv-success', api: 'bg-hv-warning', browser: 'bg-hv-warning', lock: 'bg-hv-text-3' };
 
 export const HopChips: React.FC<{ t: Trace }> = ({ t }) => (
   <div className="flex flex-wrap gap-1">
@@ -88,19 +93,33 @@ export const HopChips: React.FC<{ t: Trace }> = ({ t }) => (
   </div>
 );
 
-export const TraceTable: React.FC<{ traces: Trace[]; selected: string | null; onSelect: (id: string | null) => void; showSync: boolean; compact?: boolean }> = ({ traces, selected, onSelect, showSync, compact }) => {
-  const rows = useMemo(() => traces.filter(t => showSync || !t.sync).slice().reverse(), [traces, showSync]);
-  if (!rows.length) return <Empty icon={<Fingerprint size={28} />} title="No actions yet">Present a card from Aether (Readers, Wiegand, OSDP or an emulated board). Every card becomes a row here, followed through the controller to the cloud.</Empty>;
+const KindIcon: React.FC<{ t: Trace }> = ({ t }) => {
+  const c = 'text-hv-text-3 shrink-0';
+  return t.kind === 'card' ? <Fingerprint size={13} className={c} /> : t.kind === 'input' ? <DoorOpen size={13} className={c} /> : t.kind === 'output' ? <Zap size={13} className={c} /> : <Cloud size={13} className={c} />;
+};
+const mainLatency = (t: Trace) => (t.kind === 'output' ? t.latency.hardware ?? t.latency.output : t.kind === 'command' ? t.latency.output ?? t.latency.push ?? t.latency.decision : t.latency.push);
+const latencyHead = (k: Kind | 'all') => (k === 'output' ? 'Controller → output' : k === 'command' ? 'To the door' : 'Cloud push');
+
+export const TraceTable: React.FC<{ traces: Trace[]; selected: string | null; onSelect: (id: string | null) => void; showSync: boolean; compact?: boolean; kind?: Kind | 'all' }> = ({ traces, selected, onSelect, showSync, compact, kind = 'all' }) => {
+  const rows = useMemo(() => traces.filter(t => (showSync || !t.sync) && (kind === 'all' || t.kind === kind)).slice().reverse(), [traces, showSync, kind]);
+  if (!rows.length) return (
+    <Empty icon={<Fingerprint size={28} />} title="Nothing traced yet">
+      {kind === 'output' ? 'Outputs show up when Aether sees a controller output change (opto inputs or emulated board outputs). Map them in Setup › Wiring.'
+        : kind === 'command' ? 'Send a command from here (Commands), or capture the OnCAFE web app with the Traffic Inspector or a HAR.'
+          : kind === 'input' ? 'Drive a DPS, REX or input from Aether (relays or emulated board inputs). Map the channels in Setup › Wiring.'
+            : 'Present a card, open a door or send a command from Aether. Each one is followed through the controller to the cloud.'}
+    </Empty>
+  );
   return (
     <table className="w-full text-[12px] table-fixed">
       <thead className="sticky top-0 bg-hv-widget-panel z-10">
         <tr className="text-left text-[11px] text-hv-text-3 border-b border-hv-line">
           <th className="font-semibold px-3 py-1.5 w-[100px]">Time</th>
           <th className="font-semibold px-2 py-1.5 w-[30px]" />
-          <th className="font-semibold px-2 py-1.5">Card</th>
-          <th className="font-semibold px-2 py-1.5 w-[170px]">Controller</th>
-          {!compact && <th className="font-semibold px-2 py-1.5">Hops (from the card)</th>}
-          <th className="font-semibold px-3 py-1.5 text-right w-[84px]">Cloud push</th>
+          <th className="font-semibold px-2 py-1.5">What happened</th>
+          <th className="font-semibold px-2 py-1.5 w-[180px]">Controller</th>
+          {!compact && <th className="font-semibold px-2 py-1.5">Hops</th>}
+          <th className="font-semibold px-3 py-1.5 text-right w-[96px]">{latencyHead(kind)}</th>
         </tr>
       </thead>
       <tbody>
@@ -111,21 +130,25 @@ export const TraceTable: React.FC<{ traces: Trace[]; selected: string | null; on
             <td className="px-2 py-1.5"><StatusIcon s={t.status} /></td>
             <td className="px-2 py-1.5 overflow-hidden">
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="font-mono text-hv-text">{credText(t.action.cred)}</span>
+                <KindIcon t={t} />
+                {t.kind === 'card' ? <span className="font-mono text-hv-text">{credText(t.action.cred)}</span> : <span className="text-hv-text truncate">{t.action.label}</span>}
                 {t.sync && <Badge tone="info">sync</Badge>}
                 {t.credCheck === 'mismatch' && <Badge tone="error">decoded {credText(t.decision?.cred)}</Badge>}
-                {t.expect && <Badge tone="neutral">expect {t.expect}</Badge>}
+                {t.kind === 'card' && t.expect && <Badge tone="neutral">expect {t.expect}</Badge>}
+                {t.held != null && <Badge tone="neutral">held {(t.held / 1000).toFixed(1)} s</Badge>}
               </div>
-              <div className="text-[11px] text-hv-text-3 truncate">{t.action.ch}{t.notes[0] ? ` · ${t.notes[0]}` : ''}</div>
+              <div className="text-[11px] text-hv-text-3 truncate">
+                {t.kind === 'output' ? (t.cause ? `asked by ${t.cause.label}` : t.action.v ? 'nothing asked for it' : '') : t.action.ch || ''}{t.notes[0] ? ` · ${t.notes[0]}` : ''}
+              </div>
             </td>
             <td className="px-2 py-1.5 overflow-hidden">
               {t.decision ? <>
-                <Badge tone={t.decision.type.startsWith('accessgranted') ? 'success' : 'error'}>{t.decision.type}</Badge>
+                <Badge tone={/denied|forced|held|alarm|tamper/.test(t.decision.type) ? 'error' : 'success'}>{t.decision.type}</Badge>
                 <div className="text-[11px] text-hv-text-3 truncate">{t.decision.door?.name || t.decision.door?.id || ''}{t.decision.clientType ? ` · ${t.decision.clientType}` : ''}</div>
-              </> : <span className="text-hv-text-3">—</span>}
+              </> : <span className="text-hv-text-3">{t.expect ? `no ${t.expect}` : '—'}</span>}
             </td>
             {!compact && <td className="px-2 py-1.5"><HopChips t={t} /></td>}
-            <td className="px-3 py-1.5 text-right tabular-nums text-hv-text">{fmtMs(t.latency.push)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-hv-text">{fmtMs(mainLatency(t))}</td>
           </tr>
         ))}
       </tbody>
@@ -167,7 +190,16 @@ export const TraceDetail: React.FC<{ t: Trace; events: TEvent[]; api: TraceApi; 
           </div>
           {t.hops.some(h => h.clock === 'controller' && !h.corrected) && <div className="mt-1 text-[11px] text-hv-text-3">* controller clock, not corrected (no sync cards matched)</div>}
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        {t.kind !== 'card' && (
+          <div className="rounded-hv-xs bg-hv-widget ring-1 ring-inset ring-hv-line p-2 space-y-0.5">
+            {t.role && <div><span className="text-hv-text-3">Channel role: </span><span className="text-hv-text">{ROLE_LABEL[t.role] || t.role}</span></div>}
+            {t.expect && <div><span className="text-hv-text-3">Expected from the controller: </span><span className="text-hv-text">{t.expect}</span>{t.result ? <span className="text-hv-text-3"> · got {t.result}</span> : null}</div>}
+            {t.kind === 'output' && <div><span className="text-hv-text-3">Asked by: </span><span className="text-hv-text">{t.cause ? `${t.cause.label} at ${clock(t.cause.at)}` : t.action.v ? 'nothing Aether saw' : '—'}</span></div>}
+            {t.held != null && <div><span className="text-hv-text-3">On for: </span><span className="text-hv-text">{(t.held / 1000).toFixed(2)} s</span></div>}
+            {t.kind === 'command' && t.action.cmd && <div><span className="text-hv-text-3">Target: </span><span className="text-hv-text">{t.action.cmd.targetName || [].concat(t.action.cmd.target as never).join(', ')}</span></div>}
+          </div>
+        )}
+        {t.kind === 'card' && <div className="grid grid-cols-2 gap-2">
           <div className="rounded-hv-xs bg-hv-widget ring-1 ring-inset ring-hv-line p-2">
             <div className="text-[11px] text-hv-text-3">Aether sent</div>
             <div className="font-mono text-hv-text">{credText(t.action.cred)}{t.action.cred?.format ? ` · ${t.action.cred.format}` : ''}</div>
@@ -178,7 +210,7 @@ export const TraceDetail: React.FC<{ t: Trace; events: TEvent[]; api: TraceApi; 
             <div className="font-mono text-hv-text">{t.decision ? `${credText(t.decision.cred)}${t.decision.cred?.format ? ` · ${t.decision.cred.format}` : ''}` : '—'}</div>
             <div className="text-[11px] text-hv-text-3">{t.credCheck === 'match' ? 'same credential' : t.credCheck === 'mismatch' ? 'different credential' : t.credCheck === 'not-reported' ? 'the event has no card number' : ''}{t.decision ? ` · matched by ${t.decision.matchedBy}` : ''}</div>
           </div>
-        </div>
+        </div>}
         {t.decision && <div className="text-hv-text-3">Seen by: {t.decision.sources.map(s => SRC_LABEL[s] || s).join(' · ')}</div>}
         {behind.length > 0 && (
           <div>

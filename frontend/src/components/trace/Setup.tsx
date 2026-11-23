@@ -1,8 +1,8 @@
 // AETHER_TRACE — Event Trace › Setup
 import React, { useEffect, useState } from 'react';
-import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2 } from 'lucide-react';
+import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
-import { fmtMs, type Inventory, type OnCafeSession, type Settings, type Status, type TraceApi } from './api';
+import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring } from './api';
 
 const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ icon, title, sub, right, children }) => (
   <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line">
@@ -69,6 +69,8 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
   };
   const toggleIn = (list: string[], id: string) => (list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
   const ch = s.sync.channel;
+  const pulse = ch.kind === 'relay' || ch.kind === 'emu-in';
+  const doorsKnown = inv ? inv.doors : status.inventory ? status.inventory.doors : [];
   const readers = ch.kind === 'wiegand' ? status.channels.wiegand : ch.kind === 'osdp' ? status.channels.osdp : [];
   const pushTone = cloud.push.state === 'connected' ? 'success' : cloud.push.state === 'off' ? 'neutral' : cloud.push.error ? 'error' : 'warning';
 
@@ -153,18 +155,30 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
       </Card>
 
       {/* Sync cards */}
-      <Card icon={<Fingerprint size={16} />} title="Sync cards" sub="Two known cards with a fixed gap mark the start (and end) of a run, so controller timestamps line up with the Pi's clock."
+      <Card icon={<Fingerprint size={16} />} title="Sync markers" sub="Two known cards with a fixed gap — or one DPS / REX pulse — mark the start (and end) of a run, so controller timestamps line up with the Pi's clock."
         right={<Button size="sm" icon={<Send size={13} />} busy={busy === 'sync' || status.syncBusy} onClick={sendSync}>Send now</Button>}>
-        <div className="rounded-hv-xs bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 px-3 py-2 text-xs">
+        {pulse ? (
+          <div className="rounded-hv-xs bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 px-3 py-2 text-xs">
+            Aether turns the input on, waits, and turns it off. The controller's open / closed (or REX) events for that pulse give the clock offset — no enrolled cards needed. Map the channel in Wiring with its door.
+          </div>
+        ) : <div className="rounded-hv-xs bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 px-3 py-2 text-xs">
           Enrol both cards in OnCAFE with access to the test door. A granted card is always published; an unknown card may not be (NHP does not publish anonymous grants). If the cloud leaves card numbers out, the gap between the two cards still identifies them.
-        </div>
+        </div>}
         <div className="grid grid-cols-4 gap-3">
           <Field label="Send through">
             <Select value={ch.kind} onChange={e => upd(x => { x.sync.channel.kind = e.target.value as Settings['sync']['channel']['kind']; x.sync.channel.readerId = ''; return x; })}>
-              <option value="wiegand">Wiegand output</option><option value="osdp">OSDP reader</option><option value="emu">Emulated board</option>
+              <option value="wiegand">Wiegand output (cards)</option><option value="osdp">OSDP reader (cards)</option><option value="emu">Emulated board reader (cards)</option>
+              <option value="relay" disabled={!status.channels.relay}>Relay pulse on a DPS / REX input</option><option value="emu-in">Emulated board input pulse</option>
             </Select>
           </Field>
-          {ch.kind !== 'emu' ? (
+          {ch.kind === 'relay' ? (
+            <Field label="Relay" hint={`relay:${ch.relay} must be mapped (Wiring)`}><Input type="number" min={0} max={63} value={ch.relay} onChange={e => upd(x => { x.sync.channel.relay = Number(e.target.value); return x; })} /></Field>
+          ) : ch.kind === 'emu-in' ? (
+            <>
+              <Field label="Board address"><Input type="number" min={0} max={126} value={ch.address} onChange={e => upd(x => { x.sync.channel.address = Number(e.target.value); return x; })} /></Field>
+              <Field label="Input" hint={`emu:${ch.address}:in:${ch.input} must be mapped`}><Input type="number" min={0} max={31} value={ch.input} onChange={e => upd(x => { x.sync.channel.input = Number(e.target.value); return x; })} /></Field>
+            </>
+          ) : ch.kind !== 'emu' ? (
             <Field label="Reader">
               <Select value={ch.readerId} onChange={e => upd(x => { x.sync.channel.readerId = e.target.value; return x; })}>
                 <option value="">{readers.length ? 'Pick…' : 'none running'}</option>{readers.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -176,9 +190,14 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
               <Field label="Reader port"><Input type="number" min={0} max={7} value={ch.port} onChange={e => upd(x => { x.sync.channel.port = Number(e.target.value); return x; })} /></Field>
             </>
           )}
-          <Field label="Card format" hint="Aether format id, e.g. w26, h10302"><Input mono value={s.sync.format} onChange={e => upd(x => { x.sync.format = e.target.value; return x; })} /></Field>
+          {!pulse && <Field label="Card format" hint="Aether format id, e.g. w26, h10302"><Input mono value={s.sync.format} onChange={e => upd(x => { x.sync.format = e.target.value; return x; })} /></Field>}
         </div>
-        <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-x-3 gap-y-2 items-center text-xs">
+        {pulse ? (
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <Field label="On for (s)" hint="door open / REX pressed"><Input type="number" step={0.5} min={0.5} value={(s.sync.gapsMs[0] ?? 2000) / 1000} onChange={e => upd(x => { x.sync.gapsMs[0] = Math.round(Number(e.target.value) * 1000); return x; })} /></Field>
+            <Field label="Then wait (s)"><Input type="number" step={0.5} min={0.5} value={(s.sync.gapsMs[1] ?? 2000) / 1000} onChange={e => upd(x => { x.sync.gapsMs[1] = Math.round(Number(e.target.value) * 1000); return x; })} /></Field>
+          </div>
+        ) : <div className="grid grid-cols-[auto_1fr_1fr_1fr] gap-x-3 gap-y-2 items-center text-xs">
           <span /><span className="text-hv-text-3">Facility</span><span className="text-hv-text-3">Card number</span><span className="text-hv-text-3">Wait after</span>
           {s.sync.cards.map((c, i) => (
             <React.Fragment key={i}>
@@ -188,11 +207,11 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
               <div className="flex items-center gap-1"><Input type="number" step={0.5} min={0.5} value={(s.sync.gapsMs[i] ?? 2000) / 1000} onChange={e => upd(x => { x.sync.gapsMs[i] = Math.round(Number(e.target.value) * 1000); return x; })} /><span className="text-hv-text-3">s</span></div>
             </React.Fragment>
           ))}
-        </div>
+        </div>}
         <div className="flex flex-wrap items-center gap-4">
           <Toggle on={s.sync.atStart} onChange={v => upd(x => { x.sync.atStart = v; return x; })} label="At the start of a run" />
           <Toggle on={s.sync.atEnd} onChange={v => upd(x => { x.sync.atEnd = v; return x; })} label="At the end (measures drift)" />
-          <label className="flex items-center gap-2 text-xs text-hv-text-2">and every
+          <label className="flex items-center gap-2 text-xs text-hv-text-2 whitespace-nowrap">and every
             <Input className="w-20" type="number" min={0} max={240} value={s.sync.everyMin} onChange={e => upd(x => { x.sync.everyMin = Number(e.target.value); return x; })} /> min (0 = off)
           </label>
         </div>
@@ -203,6 +222,14 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
         <Field label="Controller IP addresses" hint={<>Live: put the controller behind the Pi with Traffic Inspector › Setup › Gateway (encrypted MQTT is fine — only the timing is used). After the fact: import a packet capture into a run (switch mirror + Packet capture adds no hop). {status.sources.wire.traffic ? <>Traffic Inspector is <b>{status.sources.wire.traffic.state}</b>{status.sources.wire.traffic.gateway ? ' with gateway mode' : ''}.</> : 'Traffic Inspector is not installed.'}</>}>
           <Input mono value={ipText} placeholder="192.168.1.50, 192.168.1.51" onChange={e => { setIpText(e.target.value); setDirty(true); }} />
         </Field>
+      </Card>
+
+      <WiringCard api={api} status={status} doors={doorsKnown} />
+
+      {/* Commands */}
+      <Card icon={<Megaphone size={16} />} title="Commands" sub="Let Aether send door, area and zone commands to OnCAFE (temporary unlock, lockdown, maintenance, shunt, zones) and trace them to the door.">
+        <Toggle on={s.commands.enabled} onChange={v => upd(x => { x.commands.enabled = v; return x; })} label="Allow commands from Event Trace (admins only)" />
+        <div className="text-xs text-hv-text-3">Commands change real doors through the Pi's OnCAFE account and appear in OnCAFE's audit log. They only go to the doors under test (and their areas); each one asks for confirmation and can be turned back automatically. Commands sent from the OnCAFE web app are traced too when that PC goes through the Traffic Inspector or you add a HAR to a run.</div>
       </Card>
 
       {/* Expectations */}
@@ -248,5 +275,61 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
         <Button size="sm" tone="primary" icon={<Save size={13} />} disabled={!dirty} busy={saving} onClick={() => save()}>Save</Button>
       </div>
     </div>
+  );
+};
+
+const DRIVE_ROLES = ['dps', 'rex', 'input', 'ignore'];
+const OBSERVE_ROLES = ['lock', 'output', 'ignore'];
+const isDrive = (kind: string) => ['relay', 'gpio', 'emu-in'].includes(kind);
+
+/** Wiring map editor — the same map Log Analytics › Product Test uses. */
+export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: string; name: string }[] }> = ({ api, status, doors }) => {
+  const [w, setW] = useState<Wiring>(status.wiring || {});
+  const [seen, setSeen] = useState<SeenChannel[]>([]);
+  const [extra, setExtra] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = () => api.wiring().then(r => { setW(r.wiring); setSeen(r.channels); setDirty(false); }).catch(e => setMsg(e.message));
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const rows = [...new Set([...seen.map(c => c.ch), ...Object.keys(w)])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const info = (ch: string) => seen.find(c => c.ch === ch);
+  const kindOf = (ch: string) => info(ch)?.kind || (/^(relay|gpio):|:in:/.test(ch) ? 'relay' : 'opto');
+  const set = (ch: string, patch: Partial<Wiring[string]> | null) => {
+    setW(x => { const n = { ...x }; if (patch === null) delete n[ch]; else n[ch] = { ...(n[ch] || { role: isDrive(kindOf(ch)) ? 'dps' : 'lock' }), ...patch }; return n; });
+    setDirty(true);
+  };
+  const save = async () => { setBusy(true); setMsg(null); try { const r = await api.saveWiring(w); setW(r.wiring); setDirty(false); setMsg('Saved — Log Analytics › Product Test uses the same map.'); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
+  return (
+    <Card icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Shared with Log Analytics › Product Test. Unmapped channels get a role guessed from what the controller reported."
+      right={<div className="flex items-center gap-2">{msg && <span className="text-[11px] text-hv-text-3">{msg}</span>}<Button size="sm" icon={<RefreshCw size={13} />} onClick={load}>Refresh</Button><Button size="sm" tone="primary" icon={<Save size={13} />} disabled={!dirty} busy={busy} onClick={save}>Save wiring</Button></div>}>
+      {!rows.length ? <div className="text-xs text-hv-text-3">No relays, inputs or outputs used in the last 24 h. Add a channel by name (relay:6, opto:2, emu:2:in:3, emu:2:out:0).</div> : (
+        <div className="grid grid-cols-[110px_110px_190px_minmax(0,1fr)_140px_minmax(0,1fr)_28px] gap-2 items-center text-xs">
+          <span className="text-hv-text-3">Channel</span><span className="text-hv-text-3">Direction</span><span className="text-hv-text-3">Role</span><span className="text-hv-text-3">Door</span><span className="text-hv-text-3">DPS on means</span><span className="text-hv-text-3">Guess from the controller</span><span />
+          {rows.map(ch => {
+            const i = info(ch), m = w[ch], drive = isDrive(kindOf(ch));
+            return (
+              <React.Fragment key={ch}>
+                <span className="font-mono text-hv-text truncate" title={i ? `${i.count} changes in 24 h` : ''}>{ch}</span>
+                <span className="text-hv-text-3">{drive ? 'Aether → panel' : 'panel → Aether'}</span>
+                <Select value={m?.role || ''} onChange={e => set(ch, e.target.value ? { role: e.target.value } : null)}>
+                  <option value="">not mapped</option>{(drive ? DRIVE_ROLES : OBSERVE_ROLES).map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                </Select>
+                <Select value={m?.door || ''} disabled={!m || m.role === 'ignore'} onChange={e => set(ch, { door: e.target.value || undefined })}>
+                  <option value="">{doors.length ? 'any door' : 'load doors in OnCAFE'}</option>{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </Select>
+                <Select value={m?.active || 'open'} disabled={m?.role !== 'dps'} onChange={e => set(ch, { active: e.target.value as 'open' | 'closed' })}><option value="open">door open</option><option value="closed">door closed</option></Select>
+                <span className="text-hv-text-3 truncate">{i?.inferred ? `${ROLE_LABEL[i.inferred.role] || i.inferred.role}${i.inferred.score != null ? ` (${Math.round(i.inferred.score * 100)} %)` : ''}` : ''}</span>
+                <button className="text-hv-text-3 hover:text-hv-error-fg disabled:opacity-30" disabled={!m} aria-label="Unmap" onClick={() => set(ch, null)}><Trash2 size={14} /></button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Input mono className="w-48" placeholder="add channel, e.g. relay:6" value={extra} onChange={e => setExtra(e.target.value.trim())} />
+        <Button size="sm" icon={<Plus size={13} />} disabled={!/^[\w:.\-]{3,80}$/.test(extra)} onClick={() => { set(extra, {}); setExtra(''); }}>Add</Button>
+      </div>
+    </Card>
   );
 };

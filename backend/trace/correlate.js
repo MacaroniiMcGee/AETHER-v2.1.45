@@ -329,9 +329,14 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
       else bad(`Controller never reported ${x.label} within ${Math.round((until - t0) / 1000)} s`);
     } else {
       if (g.type === 'doorforcedopen') {
-        const grant = traces.find(t => t.kind === 'card' && t.result === 'grant' && t0 - t.at >= 0 && t0 - t.at < 15000 && (!door || !t.decision.door || t.decision.door.id === door));
-        if (grant) bad(`Door opened ${Math.round((t0 - grant.at) / 100) / 10} s after a granted card, but the controller reported FORCED OPEN`);
-        else notes.push('Controller reported forced open (no grant, REX or unlock before the door opened)');
+        // a forced open is wrong only while the door was unlocked: the strike channel says so, or (unmapped) the door's grant time
+        const strikes = lockChannels(door);
+        const lastEdge = strikes.length ? journalEv.filter(o => o.journal && strikes.includes(o.journal.ch) && o.at <= t0).sort((p, q) => q.at - p.at)[0] : null;
+        const grant = traces.find(t => t.kind === 'card' && t.result === 'grant' && t0 - t.at >= 0 && (!door || !t.decision.door || t.decision.door.id === door)
+          && t0 - t.at <= ((doorCfg[door] && doorCfg[door].grantMs) || 5000) + 1000);
+        if (lastEdge && lastEdge.journal.v === 1) bad(`Door opened while the strike (${lastEdge.journal.ch}) was unlocked, but the controller reported FORCED OPEN`);
+        else if (!strikes.length && grant) bad(`Door opened ${Math.round((t0 - grant.at) / 100) / 10} s after a granted card (inside the grant time), but the controller reported FORCED OPEN`);
+        else notes.push('Controller reported forced open (the door was locked when it opened)');
       }
       const ms = ch.decided - t0;
       if (off == null) warn('Controller clock offset unknown — controller hop uncorrected');
@@ -404,15 +409,17 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
   // ── 4. outputs: controller → Aether (strike, relays) ───────────────────
   const observes = journalEv.filter(e => OBSERVE.has(e.type) && e.journal && roles[e.journal.ch] && ['lock', 'output'].includes(roles[e.journal.ch].role));
   const lastOn = new Map();
+  const usedOut = new Set();
   for (const o of observes) {
     const r = roles[o.journal.ch];
     const x = expectFor(o, r.role, r);
     const door = r.door || null;
     const v = o.journal.v;
     // the controller's own report of this change (usually just before Aether sees it)
-    const g = groups.filter(h => !used.has(h) && typeIn(h.type, x.types) && (!door || !h.door || h.door.id === door)
+    // (an "unlocked" claimed by a command trace is the same event that fired this strike: outputs share it, but never with another output)
+    const g = groups.filter(h => !usedOut.has(h) && typeIn(h.type, x.types) && (!door || !h.door || h.door.id === door)
       && gPi(h) - o.at >= -th.outputWindowMs && gPi(h) - o.at <= 2000).sort((p, q) => Math.abs(gPi(p) - o.at) - Math.abs(gPi(q) - o.at))[0];
-    if (g) used.add(g);
+    if (g) usedOut.add(g);
     // what asked for it (only for "on" edges)
     let cause = null;
     if (v === 1) {
@@ -467,7 +474,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
   }
   traces.sort((a, b) => a.at - b.at);
 
-  const unexplained = groups.filter(g => !used.has(g) && g.access && !traces.some(t => t.decision && t.decision.t === g.t && t.decision.type === g.type))
+  const unexplained = groups.filter(g => !used.has(g) && !usedOut.has(g) && g.access && !traces.some(t => t.decision && t.decision.t === g.t && t.decision.type === g.type))
     .map(g => ({ type: g.type, t: g.t, at: gPi(g), cred: g.cred, door: g.door, sources: [...new Set(g.copies.map(c => c.src))] }));
 
   const statsFor = list => {

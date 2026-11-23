@@ -424,7 +424,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     const rex = ins.find(t => t.action.ch === 'relay:7' && t.action.v === 1);
     assert.strictEqual(rex.status, 'pass', rex.notes.join()); assert.strictEqual(rex.latency.decision, 10); assert.strictEqual(rex.latency.push, 740);
     const forced = ins.find(t => t.result === 'doorforcedopen');
-    assert.strictEqual(forced.status, 'fail'); assert(/FORCED OPEN/.test(forced.notes.join()));
+    assert.strictEqual(forced.status, 'fail'); assert(/while the strike \(opto:2\) was unlocked/.test(forced.notes.join()));
     assert.strictEqual(r.roles['relay:9'].role, 'rex'); assert(r.roles['relay:9'].auto);
     const outs = r.traces.filter(t => t.kind === 'output');
     const strike = outs.find(t => t.action.v === 1 && t.cause && t.cause.kind === 'card');
