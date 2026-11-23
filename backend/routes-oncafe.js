@@ -243,4 +243,4 @@ module.exports = function oncafeRoutes() {
   return router;
 };
 module.exports.hosts = hosts;
-module.exports.api = api; module.exports.status = status;   // AETHER_TRACE: Event Trace reuses the OnCAFE sign-in
+module.exports.api = api; module.exports.status = status; module.exports.bearer = bearer;   // AETHER_TRACE: Event Trace reuses the OnCAFE sign-in

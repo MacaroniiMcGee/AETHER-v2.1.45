@@ -104,20 +104,25 @@ def main():
     P.edit('backend/server.js', 'mount /api/trace', server_mount)
 
     def server_attach(s):
-        if "getEngine().attach(" in s:
-            return None
-        line = ("try { require('./routes/trace').getEngine().attach({ getWiegand: () => wiegandManager, getOsdp: () => osdpManager, "
+        line = ("try { require('./routes/trace').getEngine().attach({ gpioQueue, getWiegand: () => wiegandManager, getOsdp: () => osdpManager, "
                 "emulator: require('./osdp/OSDPDeviceEmulator') }); } catch (e) { console.warn('[Trace] not attached:', e.message); }   // AETHER_TRACE")
+        if "getEngine().attach({ gpioQueue," in s:
+            return None
+        if "getEngine().attach(" in s:   # TRACE-1 line: add the relay board for pulse sync markers
+            return '\n'.join(line if 'getEngine().attach(' in l else l for l in s.split('\n'))
         return insert_after_line(s, r"journal not attached", line)
     P.edit('backend/server.js', 'attach Event Trace after the journal', server_attach)
 
     # ── routes-oncafe.js: share the session helpers (no behaviour change) ──
     def oncafe(s):
-        if 'module.exports.api = api' in s:
+        full = 'module.exports.api = api; module.exports.status = status; module.exports.bearer = bearer;   // AETHER_TRACE: Event Trace reuses the OnCAFE sign-in'
+        if 'module.exports.bearer = bearer' in s:
             return None
-        if 'async function api(' not in s or 'function status(' not in s:
-            raise LookupError('api()/status() not found')
-        return s.rstrip('\n') + '\nmodule.exports.api = api; module.exports.status = status;   // AETHER_TRACE: Event Trace reuses the OnCAFE sign-in\n'
+        if 'module.exports.api = api' in s:   # TRACE-1 line
+            return '\n'.join(full if 'module.exports.api = api' in l else l for l in s.split('\n'))
+        if 'async function api(' not in s or 'function status(' not in s or 'async function bearer(' not in s:
+            raise LookupError('api()/status()/bearer() not found')
+        return s.rstrip('\n') + '\n' + full + '\n'
     P.edit('backend/routes-oncafe.js', 'export OnCAFE session helpers', oncafe)
 
     # ── routes/traffic.js: let Event Trace see flows (optional) ───────────

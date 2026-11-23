@@ -365,6 +365,124 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     ok('lost decisions are not blamed on the next card; sync pair = nearest matching pair of one send');
   }
 
+  console.log('TRACE-2: inputs, outputs, commands');
+  {
+    const { parseCommand, buildRequest, reverseOf, localStamp } = require('../trace/commands');
+    const { commandEvent } = require('../trace/commands');
+    const ORG = '44444444-4444-4444-4444-444444444444', DOOR = '33333333-3333-3333-3333-333333333333', AREA = '77777777-7777-7777-7777-777777777777', Z = '88888888-8888-8888-8888-888888888888';
+    const B = `https://api.qa.oncafe.hanwhavision.cloud/acsio/orgs/${ORG}`;
+    assert.deepStrictEqual(parseCommand('PUT', `${B}/area/${AREA}/lockdown`, '{"lockdown":true}'), { kind: 'lockdown', target: AREA, value: true, area: undefined, org: ORG });
+    const ov = parseCommand('POST', `${B}/entity/temporaryOverride`, { areaId: AREA, temporaryOverrideSchedule: [{ doorId: DOOR, behaviour: 'unlock', enable: true }] });
+    assert.deepStrictEqual([ov.kind, ov.target, ov.value, ov.area], ['override', [DOOR], 'unlock', AREA]);
+    assert.strictEqual(parseCommand('PUT', `${B}/zone/${Z}/outputzone/state`, '{"state":"activate"}').value, 'activate');
+    assert.strictEqual(parseCommand('PUT', `${B}/door/${DOOR}/manageMaintenanceMode`, '{"maintenanceState":true}').kind, 'maintenance');
+    assert.strictEqual(parseCommand('GET', `${B}/area/${AREA}/lockdown`, null), null);
+    assert.strictEqual(localStamp(Date.UTC(2026, 9, 20, 0, 47, 13), 'Asia/Seoul'), '20261020T094713');
+    const rq = buildRequest({ kind: 'override', target: DOOR, value: 'unlock', area: AREA, seconds: 10 }, { tz: 'UTC' });
+    const ve = rq.body.temporaryOverrideSchedule[0].standard.vcalendar[0].vevent[0];
+    assert.strictEqual(rq.path, '/entity/temporaryOverride');
+    assert.strictEqual(Date.parse(ve.dtend.replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)/, '$1-$2-$3T$4:$5:$6Z')) - Date.parse(ve.dtstart.replace(/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)/, '$1-$2-$3T$4:$5:$6Z')), 10000);
+    assert.deepStrictEqual(reverseOf({ kind: 'lockdown', target: AREA, value: true }).value, false);
+    ok('commands: recognised from the web app requests, built with site-local times, reversed');
+
+    // a timeline: controller clock 1 s ahead; DPS pulse sync on relay:6 (mapped dps, door D), REX, card + strike, lockdown, unlock override
+    const OFF = 1000, T = 2_000_000_000_000;
+    const wiring = { 'relay:6': { role: 'dps', door: DOOR, active: 'open' }, 'relay:7': { role: 'rex', door: DOOR }, 'opto:2': { role: 'lock', door: DOOR } };
+    const ev = [];
+    const J = (at, k, ch, v, m) => { const e = fromJournal({ t: at, k, ch, v, src: 'physical', m }); ev.push(e); return e; };
+    const C = (ctrlT, type, extra = {}, at = ctrlT - OFF + 700) => { const e = fromCloud({ eventTimestamp: ctrlT, doorId: DOOR, ...extra, eventMeta: { eventId: type + ctrlT, triggerType: extra.trigger, events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at })[0]; ev.push(e); return e; };
+    // sync pulse: relay:6 on 2 s, off
+    J(T, 'relay', 'relay:6', 1); C(T + OFF + 30, 'open');
+    J(T + 2000, 'relay', 'relay:6', 0); C(T + 2000 + OFF + 30, 'closed');
+    const syncs = [{ at: T - 5, set: 'start', idx: 0, batch: 'p', ch: 'relay:6', v: 1, types: ['open', 'doorforcedopen', 'dooropen'], door: DOOR },
+      { at: T + 1995, set: 'start', idx: 1, batch: 'p', ch: 'relay:6', v: 0, types: ['closed', 'doorclosed'], door: DOOR }];
+    // REX press
+    J(T + 10000, 'relay', 'relay:7', 1); C(T + 10000 + OFF + 40, 'rexactivated');
+    J(T + 10500, 'relay', 'relay:7', 0);
+    // card granted → strike on 5.2 s (door set to 5 s) → door opened while unlocked, still reported forced → fail
+    J(T + 20000, 'card', 'wiegand:r1', 1, { fc: 1, cn: 5 }); C(T + 20000 + OFF + 50, 'accessgranted', { cardNumber: '5', facilityCode: '1' });
+    C(T + 20000 + OFF + 60, 'unlocked'); J(T + 20000 + 110, 'opto', 'opto:2', 1);
+    J(T + 22000, 'relay', 'relay:6', 1); C(T + 22000 + OFF + 30, 'doorforcedopen');
+    J(T + 25310, 'opto', 'opto:2', 0); C(T + 25300 + OFF, 'locked');
+    J(T + 26000, 'relay', 'relay:6', 0); C(T + 26000 + OFF + 30, 'closed');
+    // strike fires with nothing asking for it
+    J(T + 40000, 'opto', 'opto:2', 1); J(T + 41000, 'opto', 'opto:2', 0);
+    // Aether sends a temporary unlock: OnCAFE acks in 400 ms, controller unlocks, door state updates, strike fires
+    ev.push(commandEvent({ kind: 'override', target: [DOOR], value: 'unlock', area: AREA }, { src: 'command', at: T + 50000, ackMs: 400, status: 200 }));
+    C(T + 50000 + OFF + 900, 'unlocked', { trigger: 'manual', clientType: 'Browser' });
+    J(T + 50000 + 1000, 'opto', 'opto:2', 1);
+    ev.push(fromCloud({ msgs: [{ msg: { action: 'update', resource: `door/${DOOR}`, propertyDetails: { doorId: DOOR, modifiedDate: T + 51200, state: { DoorPhysicalState: 'Closed', LockPhysicalState: 'Unlocked' } } } }] }, { src: 'cloud-mqtt', at: T + 51500 })[0]);
+    // a lockdown command seen in a HAR that the controller never acted on
+    ev.push(commandEvent({ kind: 'lockdown', target: AREA, value: true }, { src: 'har', at: T + 70000, clock: 'browser', ackMs: 800, status: 200 }));
+    // an unmapped relay whose pattern says "REX"
+    J(T + 80000, 'relay', 'relay:9', 1); C(T + 80000 + OFF + 20, 'rexactivated', { doorId: '99999999-9999-9999-9999-999999999999' });
+
+    const r = correlate(ev, syncs, { doorConfig: { [DOOR]: { grantMs: 5000 } } }, { wiring });
+    assert.strictEqual(r.clock.offset, OFF + 30, 'offset from the DPS pulse');
+    assert.strictEqual(r.clock.gaps[0].sent, 2000);
+    const ins = r.traces.filter(t => t.kind === 'input' && !t.sync);
+    const rex = ins.find(t => t.action.ch === 'relay:7' && t.action.v === 1);
+    assert.strictEqual(rex.status, 'pass', rex.notes.join()); assert.strictEqual(rex.latency.decision, 10); assert.strictEqual(rex.latency.push, 740);
+    const forced = ins.find(t => t.result === 'doorforcedopen');
+    assert.strictEqual(forced.status, 'fail'); assert(/FORCED OPEN/.test(forced.notes.join()));
+    assert.strictEqual(r.roles['relay:9'].role, 'rex'); assert(r.roles['relay:9'].auto);
+    const outs = r.traces.filter(t => t.kind === 'output');
+    const strike = outs.find(t => t.action.v === 1 && t.cause && t.cause.kind === 'card');
+    assert(strike, 'strike caused by the granted card');
+    assert.strictEqual(strike.latency.hardware, 80, 'strike 80 ms after the corrected "unlocked"');
+    const off2 = outs.find(t => t.action.v === 0 && t.held != null && t.held > 5000);
+    assert.strictEqual(off2.held, 5200); assert.strictEqual(off2.status, 'pass', off2.notes.join());
+    const rogue = outs.find(t => t.action.v === 1 && !t.cause);
+    assert.strictEqual(rogue.status, 'warn'); assert(/nothing Aether saw asked/.test(rogue.notes.join()));
+    const cmd = r.traces.find(t => t.kind === 'command' && t.action.cmd.kind === 'override');
+    assert.strictEqual(cmd.status, 'pass', cmd.notes.join());
+    assert.deepStrictEqual(cmd.hops.map(h => h.id), ['sent', 'ack', 'decided', 'lock', 'state', 'push']);
+    assert.strictEqual(cmd.latency.output, 1000); assert.strictEqual(cmd.latency.ack, 400); assert.strictEqual(cmd.latency.decision, 870);
+    const cmdStrike = outs.find(t => t.cause && t.cause.kind === 'command');
+    assert(cmdStrike, 'strike traced back to the command');
+    const lk = r.traces.find(t => t.kind === 'command' && t.action.cmd.kind === 'lockdown');
+    assert.strictEqual(lk.status, 'fail'); assert(/never reported lockdown on/.test(lk.notes.join()));
+    assert.strictEqual(r.stats.byKind.command.actions, 2); assert.strictEqual(r.stats.byKind.input.fail, 1);
+    ok('DPS pulse sync, REX/DPS input traces, forced-open-after-grant, role inference, strike cause + held time, rogue output, command traces (Aether-sent and HAR)');
+
+    // engine: commands gated, scoped to doors under test, sent with the OnCAFE session, auto-reverted; wiring shared
+    const { TraceEngine } = require('../trace/engine');
+    const eng = new TraceEngine();
+    eng.saveSettings({ cloud: { url: 'https://qa.oncafe.hanwhavision.cloud', org: ORG, doors: [DOOR] }, commands: { enabled: false } });
+    eng.cloud.inv = { org: ORG, doors: [{ id: DOOR, name: 'Lab door', areaIds: [AREA] }], areas: [{ id: AREA, name: 'Lab', tz: 'UTC' }], zones: [{ id: Z, name: 'Siren' }], controllers: [] };
+    const sentReq = [];
+    eng.cloud.command = async (_u, _o, req) => { sentReq.push(req); return { ok: true, status: 200, ackMs: 321, data: { success: true } }; };
+    await assert.rejects(eng.command({ kind: 'lockdown', target: AREA, value: true }, 't'), /turned off/);
+    eng.saveSettings({ commands: { enabled: true } });
+    await assert.rejects(eng.command({ kind: 'maintenance', target: '12121212-1212-1212-1212-121212121212', value: true }, 't'), /doors under test/);
+    await assert.rejects(eng.command({ kind: 'lockdown', target: '12121212-1212-1212-1212-121212121212', value: true }, 't'), /area that holds a door under test/);
+    const res1 = await eng.command({ kind: 'lockdown', target: AREA, value: true, revertSec: 1 }, 'tester');
+    assert(res1.ok && res1.revertIn === 1);
+    assert.deepStrictEqual(sentReq[0], { method: 'PUT', path: `/area/${AREA}/lockdown`, body: { lockdown: true } });
+    await sleep(1300);
+    assert.deepStrictEqual(sentReq[1].body, { lockdown: false }, 'reverted');
+    const cmds = eng.live.filter(e => e.type === 'command');
+    assert.strictEqual(cmds.length, 2); assert.strictEqual(cmds[0].info.ackMs, 321); assert(/tester/.test(cmds[0].info.by));
+    // wiring is shared with Log Analytics settings and keeps its other keys
+    const ap = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');
+    fs.mkdirSync(path.dirname(ap), { recursive: true });
+    fs.writeFileSync(ap, JSON.stringify({ thresholds: { latencyWarnMs: 1234 }, wiring: {} }));
+    eng.saveWiring({ 'relay:6': { role: 'dps', door: DOOR, active: 'open' }, 'bad key!': { role: 'dps' }, 'opto:2': { role: 'nonsense' } });
+    const back = JSON.parse(fs.readFileSync(ap, 'utf8'));
+    assert.strictEqual(back.thresholds.latencyWarnMs, 1234); assert.deepStrictEqual(Object.keys(back.wiring), ['relay:6']);
+    assert.strictEqual(eng.wiring()['relay:6'].role, 'dps');
+    // pulse sync drives the relay through the GPIO queue
+    const q = { calls: [], async enqueue(op, ch, v) { this.calls.push([op, ch, v]); } };
+    eng.deps = { gpioQueue: q };
+    eng.saveSettings({ sync: { channel: { kind: 'relay', relay: 6 }, gapsMs: [500, 500] } });
+    const sent = await eng.sendSync('check');
+    assert.deepStrictEqual(q.calls, [['setRelay', 6, true], ['setRelay', 6, false]]);
+    assert.deepStrictEqual(sent.map(x => [x.ch, x.v]), [['relay:6', 1], ['relay:6', 0]]);
+    eng.saveSettings({ sync: { channel: { kind: 'relay', relay: 3 } } });
+    await assert.rejects(eng.sendSync('check'), /Map relay:3/);
+    ok('commands: off by default, scoped, sent with the session, logged with who, auto-reverted; wiring shared with Product Test; DPS pulse sync');
+  }
+
   console.log(`\n${passed} checks passed`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

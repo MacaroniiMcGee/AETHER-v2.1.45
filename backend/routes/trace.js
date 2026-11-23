@@ -7,7 +7,9 @@
 //   GET    /cloud/inventory?url=&org= controllers and doors of the signed-in OnCAFE org
 //   POST   /cloud/connect             start the OnCAFE push feed (+ event-log poll) with the saved settings
 //   POST   /cloud/disconnect
-//   POST   /sync                      send the sync cards now {set: start|end|check}
+//   GET    /wiring  PUT /wiring       wiring map shared with Log Analytics › Product Test (+ channels seen in 24 h)
+//   POST   /command                   {kind, target, value, seconds, revertSec} — door/area/zone command to OnCAFE (admin)
+//   POST   /sync                      send the sync markers now {set: start|end|check}
 //   POST   /runs/start  {name, sync}  start a run (sends the start pair unless sync:false)
 //   POST   /runs/stop   {sync}        stop (sends the end pair unless sync:false)
 //   GET    /runs                      list
@@ -47,6 +49,7 @@ module.exports = function traceRoutes() {
     try {
       const body = { ...(req.body || {}) };
       if ('allowRaw' in body && body.allowRaw !== eng.settings.allowRaw && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change who may see plain text' });
+      if (body.commands && !!body.commands.enabled !== eng.settings.commands.enabled && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can turn commands on or off' });
       res.json(eng.saveSettings(body));
     } catch (e) { fail(res, e); }
   });
@@ -54,12 +57,26 @@ module.exports = function traceRoutes() {
   router.get('/live/analysis', (_req, res) => { try { res.json(eng.analyze(null)); } catch (e) { fail(res, e); } });
 
   router.get('/cloud/inventory', async (req, res) => {
-    try { res.json(await eng.cloud.inventory(String(req.query.url || eng.settings.cloud.url), String(req.query.org || eng.settings.cloud.org))); } catch (e) { fail(res, e); }
+    try {
+      const inv = await eng.cloud.inventory(String(req.query.url || eng.settings.cloud.url), String(req.query.org || eng.settings.cloud.org));
+      eng.refreshDoorConfig().catch(() => {});
+      res.json(inv);
+    } catch (e) { fail(res, e); }
   });
   router.post('/cloud/connect', express.json(), async (_req, res) => {
-    try { res.json(await eng.cloud.start(eng.settings.cloud)); } catch (e) { fail(res, e); }
+    try { const st = await eng.cloud.start(eng.settings.cloud); eng.refreshDoorConfig().catch(() => {}); res.json(st); } catch (e) { fail(res, e); }
   });
   router.post('/cloud/disconnect', express.json(), async (_req, res) => { await eng.cloud.stop(); res.json(eng.cloud.status()); });
+
+  // wiring map (shared with Log Analytics › Product Test) and the channels Aether used lately
+  router.get('/wiring', (_req, res) => { try { res.json({ wiring: eng.wiring(), channels: eng.channelsSeen() }); } catch (e) { fail(res, e); } });
+  router.put('/wiring', express.json({ limit: '64kb' }), (req, res) => { try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}) }); } catch (e) { fail(res, e); } });
+
+  // a door / area / zone command sent to OnCAFE by Aether (admins only; doors under test only)
+  router.post('/command', express.json(), async (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can send commands to OnCAFE' });
+    try { res.json(await eng.command(req.body || {}, who(req))); } catch (e) { fail(res, e); }
+  });
 
   router.post('/sync', express.json(), async (req, res) => {
     try { res.json({ sent: await eng.sendSync(['start', 'end', 'check'].includes(req.body && req.body.set) ? req.body.set : 'check') }); } catch (e) { fail(res, e); }

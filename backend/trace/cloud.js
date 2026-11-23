@@ -51,22 +51,73 @@ class CloudFeed extends EventEmitter {
     };
   }
 
-  /** Doors and controllers of the signed-in org, for the Setup page. */
+  /** Controllers, doors, areas and zones of the signed-in org (Setup page, command targets). */
   async inventory(url, org) {
     const o = lib();
     const H = o.hosts(url);
     if (!H) throw Object.assign(new Error('Enter an OnCAFE address ending in oncafe.hanwhavision.cloud.'), { status: 400 });
+    if (!/^[0-9a-f-]{36}$/i.test(String(org || ''))) throw Object.assign(new Error('Pick the OnCAFE organisation first.'), { status: 400 });
     const list = (d, keys) => Array.isArray(d) ? d : (keys.map(k => d && d[k]).find(Array.isArray) || []);
-    const [devs, doors] = await Promise.all([
+    const soft = p => p.catch(() => []);
+    const [devs, doors, locs, zones] = await Promise.all([
       o.api(H, `${H.device}/${org}/devices`).then(d => list(d, ['devices'])),
-      o.api(H, `${H.io}/${org}/doors/v2?pageNumber=0&pageSize=1000`).then(d => list(d, ['doors'])).catch(() => []),
+      soft(o.api(H, `${H.io}/${org}/doors/v2?pageNumber=0&pageSize=1000`).then(d => list(d, ['doors']))),
+      soft(o.api(H, `${H.partner}/orgs/${org}/locations`).then(d => list(d, ['locations']))),
+      soft(o.api(H, `${H.io}/${org}/zones`).then(d => list(d, ['zones']))),
     ]);
     const controllers = devs.filter(d => !isCamera(d) && (!d.parentId || /acc|panel|controller/i.test(String(d.deviceType || ''))))
       .map(d => ({ id: d.deviceId, name: d.deviceName || d.deviceId, model: d.modelNumber || d.model || d.deviceType || '', status: d.connectionStatus || d.deviceStatus || '', type: d.deviceType || '' }));
-    return {
+    const areas = [];
+    for (const l of locs) for (const a of (l.areas || [])) areas.push({ id: a.areaId || a.id, name: a.areaName || a.name || '', locationId: l.locationId || l.id, location: l.locationName || l.name || '', tz: l.timezone || l.uiTimezone || null });
+    const inv = {
       controllers,
-      doors: doors.map(x => ({ id: x.doorId || x.id, name: x.doorName || x.name || '', controllerId: x.controllerId || x.deviceId || '' })),
+      doors: doors.map(x => ({ id: x.doorId || x.id, name: x.doorName || x.name || '', controllerId: x.controllerId || x.deviceId || '', areaIds: [].concat(x.areaIds || x.areaId || []).filter(Boolean), locationId: x.locationId || '' })),
+      areas,
+      zones: zones.map(z => ({ id: z.zoneId || z.id, name: z.zoneName || z.name || '', type: z.zoneType || '', state: (z.zoneState && z.zoneState.state) || '' })),
     };
+    this.inv = { url, org, at: Date.now(), ...inv };
+    return inv;
+  }
+
+  /** Strike (grant) time per door, from the door templates. ms, or null when OnCAFE does not say. */
+  async doorConfig(url, org, doorIds) {
+    const o = lib();
+    const H = o.hosts(url);
+    if (!H || !doorIds.length) return {};
+    const d = await o.api(H, `${H.io}/${org}/doors?doorIds=${doorIds.join(',')}`).catch(() => []);
+    const out = {};
+    for (const x of (Array.isArray(d) ? d : (d && d.doors) || [])) {
+      const t = (x.defaultDoorTemplate || x.doorTemplate || {}).doorOpening || {};
+      const g = Number(t.grantTimeStandard);
+      const ext = Number(t.grantTimeExtended);
+      const ms = v => (Number.isFinite(v) && v > 0 ? (v <= 600 ? v * 1000 : v) : null);   // seconds in the web app; ms if it is ever large
+      out[x.doorId || x.id] = { grantMs: ms(g), extendedMs: ms(ext), name: x.doorName || '' };
+    }
+    return out;
+  }
+
+  /** Send a door / area / zone command to OnCAFE. Resolves to { ok, status, ackMs, error?, data? } — never throws for HTTP errors. */
+  async command(url, org, req) {
+    const o = lib();
+    const H = o.hosts(url);
+    if (!H) throw Object.assign(new Error('Enter an OnCAFE address ending in oncafe.hanwhavision.cloud.'), { status: 400 });
+    if (typeof o.bearer !== 'function') throw Object.assign(new Error('This Aether is missing the OnCAFE session helpers. Re-run the Event Trace installer.'), { status: 500 });
+    const t0 = Date.now();
+    let r, text = '';
+    try {
+      r = await fetch(`${H.io}/${org}${req.path}`, {
+        method: req.method,
+        headers: { authorization: 'Bearer ' + await o.bearer(H), accept: 'application/json', 'content-type': 'application/json', 'x-app-id': 'acs', 'x-tenant-id': 'hva', 'x-correlation-id': crypto.randomUUID() },
+        body: JSON.stringify(req.body), signal: AbortSignal.timeout(20000),
+      });
+      text = await r.text();
+    } catch (e) {
+      return { ok: false, status: 0, ackMs: Date.now() - t0, error: e.status === 401 ? e.message : `could not reach OnCAFE (${(e.cause && e.cause.code) || e.message})` };
+    }
+    const ackMs = Date.now() - t0;
+    let j = null; try { j = JSON.parse(text); } catch { /* */ }
+    if (!r.ok) return { ok: false, status: r.status, ackMs, error: (j && ((j.meta && j.meta.message) || j.message || j.error)) || `HTTP ${r.status}` };
+    return { ok: true, status: r.status, ackMs, data: j && j.data !== undefined ? j.data : j };
   }
 
   async start(cfg) {

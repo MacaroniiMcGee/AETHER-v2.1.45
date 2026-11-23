@@ -912,7 +912,7 @@ try {
     emulator: require('./osdp/OSDPDeviceEmulator'),
   });
 } catch (e) { console.warn('[Analytics] journal not attached:', e.message); }
-try { require('./routes/trace').getEngine().attach({ getWiegand: () => wiegandManager, getOsdp: () => osdpManager, emulator: require('./osdp/OSDPDeviceEmulator') }); } catch (e) { console.warn('[Trace] not attached:', e.message); }   // AETHER_TRACE
+try { require('./routes/trace').getEngine().attach({ gpioQueue, getWiegand: () => wiegandManager, getOsdp: () => osdpManager, emulator: require('./osdp/OSDPDeviceEmulator') }); } catch (e) { console.warn('[Trace] not attached:', e.message); }   // AETHER_TRACE
 let nfcManager = null;
 let nfcBridge = null;
 let switchManager = null;

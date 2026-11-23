@@ -21,26 +21,29 @@ const { fromJournal, fromCloud, fromReport, newId, toMs } = require('./normalize
 const { correlate } = require('./correlate');
 const { scrub, scrubString, hasSecrets, Vault } = require('./redact');
 const { decodePublishes } = require('./mqtt5');
+const { parseCommand, commandEvent, buildRequest, reverseOf } = require('./commands');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
 const RUNS = path.join(BASE, 'runs');
 const SETTINGS = path.join(BASE, 'settings.json');
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
+const ANALYTICS_SETTINGS = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');   // wiring map shared with Product Test
 const KEEP_RUNS = 40;
 const LIVE_MAX = 4000;
 const RUN_MAX = 50000;
 
 const DEFAULTS = {
-  cloud: { url: '', org: '', controllers: [], doors: [], poll: true, pollMs: 2000, autoConnect: false },
+  cloud: { url: '', org: '', controllers: [], doors: [], poll: true, pollMs: 2000, autoConnect: false, doorConfig: {} },
   sync: {
-    channel: { kind: 'wiegand', readerId: '', address: 1, port: 0 },
+    channel: { kind: 'wiegand', readerId: '', address: 1, port: 0, relay: 1, input: 0 },
     format: 'w26',
     cards: [{ fc: 123, cn: 1234 }, { fc: 123, cn: 9876 }],
     gapsMs: [2000, 5000],
     atStart: true, atEnd: true, everyMin: 0,
   },
   wire: { controllerIps: [] },
-  thresholds: { decisionWarn: 1000, decisionFail: 2000, pushWarn: 3000, pushFail: 10000, matchWindowMs: 30000 },
+  thresholds: { decisionWarn: 1000, decisionFail: 2000, pushWarn: 3000, pushFail: 10000, matchWindowMs: 30000, inputWindowMs: 10000, outputWindowMs: 10000, commandWarn: 5000, commandFail: 15000, heldToleranceMs: 1500 },
+  commands: { enabled: false },
   expectations: [],     // [{ fc, cn, expect: 'grant'|'deny', note }]
   allowRaw: true,
 };
@@ -61,9 +64,11 @@ function cleanSettings(s = {}) {
       controllers: (Array.isArray(c.controllers) ? c.controllers : []).filter(x => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 64),
       doors: (Array.isArray(c.doors) ? c.doors : []).filter(x => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 50),
       poll: c.poll !== false, pollMs: int(c.pollMs, 1000, 30000, d.cloud.pollMs), autoConnect: !!c.autoConnect,
+      doorConfig: Object.fromEntries(Object.entries(c.doorConfig && typeof c.doorConfig === 'object' ? c.doorConfig : {}).filter(([k]) => /^[0-9a-f-]{36}$/i.test(k)).slice(0, 50)
+        .map(([k, v]) => [k, { grantMs: Number.isFinite(Number(v && v.grantMs)) && v.grantMs !== null ? Number(v.grantMs) : null, extendedMs: Number.isFinite(Number(v && v.extendedMs)) && v.extendedMs !== null ? Number(v.extendedMs) : null, name: String((v && v.name) || '').slice(0, 80) }])),
     },
     sync: {
-      channel: { kind: ['wiegand', 'osdp', 'emu'].includes(ch.kind) ? ch.kind : 'wiegand', readerId: String(ch.readerId ?? '').slice(0, 64), address: int(ch.address, 0, 126, 1), port: int(ch.port, 0, 7, 0) },
+      channel: { kind: ['wiegand', 'osdp', 'emu', 'relay', 'emu-in'].includes(ch.kind) ? ch.kind : 'wiegand', readerId: String(ch.readerId ?? '').slice(0, 64), address: int(ch.address, 0, 126, 1), port: int(ch.port, 0, 7, 0), relay: int(ch.relay, 0, 63, 1), input: int(ch.input, 0, 31, 0) },
       format: String(y.format || d.sync.format).slice(0, 64),
       cards: (Array.isArray(y.cards) && y.cards.length ? y.cards : d.sync.cards).slice(0, 4).map(k => ({ fc: int(k.fc, 0, 2 ** 31 - 1, 0), cn: String(k.cn ?? '').replace(/\D/g, '').slice(0, 20) || '0' })),
       gapsMs: (Array.isArray(y.gapsMs) ? y.gapsMs : d.sync.gapsMs).slice(0, 4).map(g => int(g, 500, 60000, 2000)),
@@ -73,7 +78,19 @@ function cleanSettings(s = {}) {
     thresholds: Object.fromEntries(Object.entries(d.thresholds).map(([k, v]) => [k, int(th[k], 50, 600000, v)])),
     expectations: (Array.isArray(s.expectations) ? s.expectations : []).slice(0, 200).map(x => ({ fc: x.fc === '' || x.fc == null ? '' : String(int(x.fc, 0, 2 ** 31 - 1, 0)), cn: String(x.cn ?? '').replace(/\D/g, '').slice(0, 20), expect: x.expect === 'deny' ? 'deny' : 'grant', note: String(x.note || '').slice(0, 80) })).filter(x => x.cn),
     allowRaw: s.allowRaw !== false,
+    commands: { enabled: !!(s.commands && s.commands.enabled) },
   };
+}
+
+const WIRING_ROLES = ['dps', 'rex', 'card', 'keypad', 'lock', 'input', 'output', 'ignore'];
+function readAnalyticsSettings() { try { return JSON.parse(fs.readFileSync(ANALYTICS_SETTINGS, 'utf8')) || {}; } catch { return {}; } }
+function cleanWiring(wiring) {
+  const w = {};
+  for (const [ch, v] of Object.entries(wiring && typeof wiring === 'object' ? wiring : {})) {
+    if (!v || typeof v !== 'object' || !/^[\w:.\-]{1,80}$/.test(ch) || !WIRING_ROLES.includes(v.role)) continue;
+    w[ch] = { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 60) } : {}) };
+  }
+  return w;
 }
 
 class TraceEngine extends EventEmitter {
@@ -130,6 +147,19 @@ class TraceEngine extends EventEmitter {
   }
 
   _fromTraffic(r) {
+    if (r && r.kind === 'http' && r.request && r.response && /hanwhavision\.cloud$/i.test(String(r.request.host || '')) && !(this._cmdFlows || (this._cmdFlows = new Set())).has(r.id)) {
+      const rq = r.request;
+      let body = rq.body;
+      if (body && rq.bodyEncoding === 'base64') { try { body = Buffer.from(body, 'base64').toString('utf8'); } catch { body = null; } }
+      const cmd = parseCommand(rq.method, `https://${rq.host}${rq.path}`, body);
+      if (cmd) {
+        this._cmdFlows.add(r.id); if (this._cmdFlows.size > 500) this._cmdFlows.delete(this._cmdFlows.values().next().value);
+        const at = Math.round((r.ts || Date.now() / 1000) * 1000);
+        const end = r.response.tsEnd ? Math.round(r.response.tsEnd * 1000) : null;
+        cmd.targetName = this._nameOf(cmd);
+        this.add(commandEvent(cmd, { src: 'wire', at, by: `PC ${String(r.client || '')}`, ackMs: end ? end - at : undefined, status: r.response.status, error: r.response.status >= 400 ? `HTTP ${r.response.status}` : undefined, via: 'Traffic Inspector' }));
+      }
+    }
     const ips = this.settings.wire.controllerIps;
     if (!r || !ips.length) return;
     const client = String(r.client || '').replace(/^::ffff:/, '').split(':')[0];
@@ -209,8 +239,9 @@ class TraceEngine extends EventEmitter {
 
   // ── settings ───────────────────────────────────────────────────────────
   saveSettings(s) {
-    const merged = cleanSettings({ ...this.settings, ...s, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
+    const merged = cleanSettings({ ...this.settings, ...s, commands: { ...this.settings.commands, ...(s.commands || {}) }, thresholds: { ...this.settings.thresholds, ...(s.thresholds || {}) }, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
     this.settings = merged;
+    this._settingsRev = (this._settingsRev || 0) + 1;
     fs.mkdirSync(BASE, { recursive: true });
     fs.writeFileSync(SETTINGS, JSON.stringify(merged, null, 1));
     return merged;
@@ -222,6 +253,7 @@ class TraceEngine extends EventEmitter {
     try { const wm = this.deps.getWiegand && this.deps.getWiegand(); if (wm && wm.getReaders) out.wiegand = wm.getReaders().map(r => ({ id: String(r.id), name: r.name || r.label || String(r.id) })); } catch { /* */ }
     try { const om = this.deps.getOsdp && this.deps.getOsdp(); if (om && om.getReaders) out.osdp = [].concat(om.getReaders() || []).map(r => ({ id: String(r.id ?? r.readerId), name: r.name || `OSDP ${r.address ?? r.id}` })); } catch { /* */ }
     try { const em = this.deps.emulator; if (em && typeof em.queueCardRead === 'function') out.emu = [{ id: 'emu', name: 'Emulated board reader (address / port)' }]; } catch { /* */ }
+    out.relay = !!this.deps.gpioQueue;
     return out;
   }
 
@@ -247,29 +279,144 @@ class TraceEngine extends EventEmitter {
     return r;
   }
 
-  /** Send the sync pair now. set: start | end | check */
+  /** The channel key and expected controller events of a pulse sync (relay / emulated input). */
+  _pulseSync() {
+    const c = this.settings.sync.channel;
+    const ch = c.kind === 'relay' ? `relay:${c.relay}` : `emu:${c.address}:in:${c.input}`;
+    const w = this.wiring()[ch];
+    if (!w || !['dps', 'rex', 'input'].includes(w.role)) throw err(`Map ${ch} as a DPS, REX or input in Setup › Wiring before using it for sync`);
+    const { expectFor } = require('./correlate');
+    const on = expectFor({ journal: { v: 1 } }, w.role, w), off = expectFor({ journal: { v: 0 } }, w.role, w);
+    return { ch, door: w.door || null, on: on.types, off: off.types };
+  }
+  async _drive(v) {
+    const c = this.settings.sync.channel;
+    if (c.kind === 'relay') {
+      const q = this.deps.gpioQueue;
+      if (!q) throw err('The relay board is not available on this Pi');
+      return q.enqueue('setRelay', c.relay, !!v);
+    }
+    const em = this.deps.emulator;
+    if (!em || typeof em.setInput !== 'function') throw err('The board emulator is not loaded');
+    if (em.setInput(c.address, c.input, !!v) === false) throw err(`Emulated board ${c.address} has no input ${c.input}`);
+  }
+
+  /** Send the sync markers now (two cards, or one DPS/input pulse). set: start | end | check */
   async sendSync(set = 'check') {
-    if (this.syncBusy) throw err('Sync cards are already being sent', 409);
+    if (this.syncBusy) throw err('Sync markers are already being sent', 409);
     this.syncBusy = true;
     const s = this.settings.sync;
     const sent = [];
     const batch = Date.now().toString(36);
+    const keep = rec => { sent.push(rec); if (this.run) { this.run.syncs.push(rec); this._patchMeta(this.run.id, { syncs: this.run.syncs }); } else { this.liveSyncs = (this.liveSyncs || []).concat(rec).slice(-20); } };
     try {
       if (this.journal) this.journal.record('marker', 'trace', 1, 'ui', { event: 'sync-' + set, trace: true });
+      if (s.channel.kind === 'relay' || s.channel.kind === 'emu-in') {
+        const p = this._pulseSync();
+        for (const [i, v] of [[0, 1], [1, 0]]) {
+          const at = Date.now();
+          await this._drive(v);
+          keep({ at, set, idx: i, batch, ch: p.ch, v, types: v ? p.on : p.off, door: p.door });
+          await sleep(s.gapsMs[i] ?? 2000);
+        }
+        return sent;
+      }
       for (let i = 0; i < s.cards.length; i++) {
         const c = s.cards[i];
         const at = Date.now();
         await this._sendCard(c);
-        const rec = { at, fc: c.fc, cn: String(c.cn), set, idx: i, batch };
-        sent.push(rec);
-        if (this.run) { this.run.syncs.push(rec); this._patchMeta(this.run.id, { syncs: this.run.syncs }); }
-        else { this.liveSyncs = (this.liveSyncs || []).concat(rec).slice(-20); }
+        keep({ at, fc: c.fc, cn: String(c.cn), set, idx: i, batch });
         await sleep(s.gapsMs[i] ?? s.gapsMs[s.gapsMs.length - 1] ?? 2000);
       }
-      // tag the journal card events that belong to the sync so the page can label them
       for (const e of this.live) if (e.src === 'journal' && e.type === 'card' && sent.some(x => Math.abs(x.at - e.at) < 400)) { e.info = { ...(e.info || {}), sync: set }; }
       return sent;
     } finally { this.syncBusy = false; }
+  }
+
+  // ── wiring map (shared with Log Analytics › Product Test) ─────────────
+  wiring() {
+    try {
+      const st = fs.statSync(ANALYTICS_SETTINGS);
+      if (this._wiring && this._wiring.mtime === st.mtimeMs) return this._wiring.value;
+      const value = cleanWiring(readAnalyticsSettings().wiring);
+      this._wiring = { mtime: st.mtimeMs, value };
+      return value;
+    } catch { return {}; }
+  }
+  saveWiring(w) {
+    const s = readAnalyticsSettings();
+    s.wiring = cleanWiring(w);
+    fs.mkdirSync(path.dirname(ANALYTICS_SETTINGS), { recursive: true });
+    fs.writeFileSync(ANALYTICS_SETTINGS, JSON.stringify(s, null, 1));
+    this._wiring = null; this._cache = null;
+    return s.wiring;
+  }
+  /** Channels Aether drove or saw in the last 24 h (for the wiring editor). */
+  channelsSeen() {
+    const out = new Map();
+    let list = [];
+    try { list = this.journal ? this.journal.read({ from: Date.now() - 86400000 }) : []; } catch { list = []; }
+    for (const e of list) {
+      if (!['relay', 'gpio', 'emu-in', 'opto', 'emu-out'].includes(e.k)) continue;
+      const c = out.get(e.ch) || { ch: e.ch, kind: e.k, count: 0, last: 0 };
+      c.count++; c.last = Math.max(c.last, e.t);
+      out.set(e.ch, c);
+    }
+    let roles = {};
+    try { roles = this.analyze(this.run ? this.run.id : null).roles || {}; } catch { roles = {}; }
+    return [...out.values()].sort((a, b) => a.ch.localeCompare(b.ch, undefined, { numeric: true })).map(c => ({ ...c, inferred: roles[c.ch] && roles[c.ch].auto ? roles[c.ch] : null }));
+  }
+
+  /** Strike times of the doors under test (for the "strike held" check). */
+  async refreshDoorConfig() {
+    const c = this.settings.cloud;
+    if (!c.url || !c.org || !c.doors.length) return c.doorConfig;
+    const cfg = await this.cloud.doorConfig(c.url, c.org, c.doors).catch(() => null);
+    if (cfg && Object.keys(cfg).length) this.saveSettings({ cloud: { doorConfig: cfg } });
+    return this.settings.cloud.doorConfig;
+  }
+
+  // ── commands to OnCAFE (sent by Aether) ───────────────────────────────
+  _nameOf(cmd) {
+    const inv = this.cloud.inv || {};
+    const t = [].concat(cmd.target || [])[0];
+    const hit = [...(inv.doors || []), ...(inv.areas || []), ...(inv.zones || [])].find(x => x.id === t);
+    return hit ? hit.name : null;
+  }
+  async command(c, who) {
+    const st = this.settings;
+    if (!st.commands.enabled) throw err('Sending commands is turned off (Setup › Commands)', 403);
+    if (!st.cloud.url || !st.cloud.org) throw err('Set up OnCAFE first (Setup › OnCAFE)', 400);
+    const inv = this.cloud.inv && this.cloud.inv.org === st.cloud.org ? this.cloud.inv : await this.cloud.inventory(st.cloud.url, st.cloud.org);
+    const kind = String(c.kind || '');
+    const target = String(c.target || '');
+    const doors = st.cloud.doors;
+    let cmd;
+    if (['override', 'maintenance', 'shunt'].includes(kind)) {
+      if (!doors.includes(target)) throw err('Commands only go to the doors under test (Setup › OnCAFE)', 403);
+      const d = inv.doors.find(x => x.id === target);
+      cmd = { kind, target, value: kind === 'override' ? (c.value === 'lock' ? 'lock' : 'unlock') : !!c.value, area: d && d.areaIds[0], seconds: c.seconds, targetName: d && d.name };
+    } else if (kind === 'lockdown') {
+      const allowed = new Set(inv.doors.filter(d => doors.includes(d.id)).flatMap(d => d.areaIds));
+      if (!allowed.has(target)) throw err('Lockdown only goes to an area that holds a door under test', 403);
+      cmd = { kind, target, value: !!c.value, targetName: (inv.areas.find(a => a.id === target) || {}).name };
+    } else if (kind === 'outputzone' || kind === 'inputzone') {
+      const z = inv.zones.find(x => x.id === target);
+      if (!z) throw err('Unknown zone', 400);
+      cmd = { kind, target, value: kind === 'outputzone' ? (c.value === 'activate' ? 'activate' : 'deactivate') : (c.value === 'arm' ? 'arm' : 'disarm'), targetName: z.name };
+    } else throw err('Unknown command', 400);
+    const area = cmd.area && inv.areas.find(a => a.id === cmd.area);
+    const req = buildRequest(cmd, { tz: area && area.tz });
+    const at = Date.now();
+    const r = await this.cloud.command(st.cloud.url, st.cloud.org, req);
+    const e = this.add(commandEvent(cmd, { src: 'command', at, by: `Aether (${String(who || '?').slice(0, 40)})`, ackMs: r.ackMs, status: r.status, error: r.ok ? undefined : r.error, via: 'Aether' }), { request: req, response: r.data !== undefined ? r.data : r.error });
+    const back = reverseOf(cmd);
+    const revertSec = Math.max(0, Math.min(3600, Number(c.revertSec) || 0));
+    if (r.ok && back && revertSec) {
+      const t = setTimeout(() => this.command({ ...back, kind: back.kind, target: back.target, value: back.value }, `${who} (auto)`).catch(x => console.warn('[Trace] revert failed:', x.message)), revertSec * 1000);
+      if (t.unref) t.unref();
+    }
+    return { ok: r.ok, status: r.status, ackMs: r.ackMs, error: r.error || null, event: e.id, revertIn: r.ok && back && revertSec ? revertSec : null };
   }
 
   // ── runs ───────────────────────────────────────────────────────────────
@@ -332,13 +479,13 @@ class TraceEngine extends EventEmitter {
 
   analyze(id) {
     if (id) runDir(id);
-    const key = `${id || 'live'}|${id && this.run && this.run.id === id ? this.run.count : id ? 'done' : this.seq}`;
+    const key = `${id || 'live'}|${id && this.run && this.run.id === id ? this.run.count : id ? 'done' : this.seq}|${this._wiring ? this._wiring.mtime : ''}|${this._settingsRev || 0}`;
     if (this._cache && this._cache.key === key && Date.now() - this._cache.at < (id && !(this.run && this.run.id === id) ? 60000 : 1000)) return this._cache.value;
     const meta = id ? (this.run && this.run.id === id ? { id: this.run.id, name: this.run.name, start: this.run.start, end: null, syncs: this.run.syncs, imports: this.run.imports } : (() => { try { return JSON.parse(fs.readFileSync(this._metaPath(id), 'utf8')); } catch { return null; } })()) : null;
     if (id && !meta) throw err('That run no longer exists', 404);
     const events = id ? this.readEvents(id) : this.live;
     const syncs = id ? (meta.syncs || []) : (this.liveSyncs || []);
-    const res = correlate(events, syncs, this.settings);
+    const res = correlate(events, syncs, { ...this.settings, doorConfig: this.settings.cloud.doorConfig }, { wiring: this.wiring() });
     const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id) } : null, ...res };
     this._cache = { key, at: Date.now(), value };
     return value;
@@ -438,6 +585,16 @@ class TraceEngine extends EventEmitter {
         const at = Number.isFinite(started) ? Math.round(started + (e.time || 0)) : null;
         for (const it of items || []) for (const ev of fromCloud(it, { src: 'har', at })) { ev.clock = 'controller'; ev.harVia = 'event-log'; events.push(ev); raws.push(it); }
       }
+      const rq = e.request || {};
+      if (rq.method && rq.method !== 'GET' && rq.method !== 'OPTIONS') {
+        const cmd = parseCommand(rq.method, url, rq.postData && rq.postData.text);
+        if (cmd && Number.isFinite(started)) {
+          cmd.targetName = this._nameOf(cmd);
+          const st = e.response && e.response.status;
+          events.push(commandEvent(cmd, { src: 'har', at: Math.round(started), clock: 'browser', by: 'browser (HAR)', ackMs: Math.round(e.time || 0), status: st, error: st >= 400 ? `HTTP ${st}` : undefined, via: 'HAR' }));
+          raws.push({ request: { method: rq.method, url, body: rq.postData && rq.postData.text }, status: st });
+        }
+      }
       const msgs = e._webSocketMessages;
       if (msgs && /\/mqtt/.test(url)) {
         for (const m of msgs) {
@@ -454,7 +611,7 @@ class TraceEngine extends EventEmitter {
     }
     // dedupe the event log (the page re-reads it many times): keep the first sighting
     const seen = new Set(), ev2 = [], raw2 = [];
-    events.forEach((e, i) => { const k = `${e.harVia}|${e.eventId || ''}|${e.type}|${e.t}|${e.door && e.door.id}`; if (seen.has(k)) return; seen.add(k); ev2.push(e); raw2.push(raws[i]); });
+    events.forEach((e, i) => { const k = e.type === 'command' ? `cmd|${e.id}` : `${e.harVia}|${e.eventId || ''}|${e.type}|${e.t}|${e.door && e.door.id}`; if (seen.has(k)) return; seen.add(k); ev2.push(e); raw2.push(raws[i]); });
     return this._importInto(id, ev2, raw2, `HAR (${ev2.length} cloud events, browser clock)`);
   }
 
@@ -469,6 +626,8 @@ class TraceEngine extends EventEmitter {
       },
       channels: this.channels(),
       settings: this.settings,
+      wiring: this.wiring(),
+      inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,
     };
   }
 }
