@@ -1,0 +1,334 @@
+// Event Trace tests (AETHER_TRACE). Run from a COPY of backend/ (it writes data/):
+//   NODE_PATH=<dir with ws, express> node tests/trace.test.js
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+const { WebSocketServer } = require('ws');
+
+const { scrub, hasSecrets, Vault } = require('../trace/redact');
+const { Mqtt5, decodePublishes, _internal: M } = require('../trace/mqtt5');
+const { fromCloud, fromJournal, fromReport, normType } = require('../trace/normalize');
+const { correlate } = require('../trace/correlate');
+
+let passed = 0;
+const ok = (name) => { passed++; console.log('  ✓ ' + name); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── mock MQTT 5 broker over WebSocket ──────────────────────────────────────
+function mockBroker({ user, pass, refuseIds = [] } = {}) {
+  const server = http.createServer();
+  const wss = new WebSocketServer({ server, handleProtocols: p => (p.has('mqtt') ? 'mqtt' : false) });
+  const b = { server, clients: new Set(), subs: new Map(), connects: [], port: 0 };
+  wss.on('connection', ws => {
+    let buf = Buffer.alloc(0);
+    ws.on('message', data => {
+      buf = Buffer.concat([buf, data]);
+      for (;;) {
+        if (buf.length < 2) return;
+        const l = M.readVarint(buf, 1); if (!l) return;
+        const total = l.next + l.val; if (buf.length < total) return;
+        const first = buf[0], body = buf.subarray(l.next, total); buf = buf.subarray(total);
+        const type = first >> 4;
+        if (type === 1) {
+          let i = 2 + body.readUInt16BE(0); const ver = body[i++]; const flags = body[i++]; i += 2;
+          const pl = M.readVarint(body, i); i = pl.next + pl.val;
+          const rs = () => { const n = body.readUInt16BE(i); const s = body.toString('utf8', i + 2, i + 2 + n); i += 2 + n; return s; };
+          const cid = rs(); const u = flags & 0x80 ? rs() : null; const p = flags & 0x40 ? rs() : null;
+          b.connects.push({ ver, cid, u, p });
+          const bad = (user && u !== user) || (pass && p !== pass);
+          const refuse = refuseIds.some(x => cid.startsWith(x));
+          ws.send(M.packet(0x20, Buffer.from([0, bad ? 0x86 : refuse ? 0x85 : 0, 0])));
+          if (!bad && !refuse) b.clients.add(ws);
+        } else if (type === 8) {
+          const id = body.readUInt16BE(0); let i = 2; const pl = M.readVarint(body, i); i = pl.next + pl.val;
+          const codes = [];
+          while (i < body.length) { const n = body.readUInt16BE(i); const t = body.toString('utf8', i + 2, i + 2 + n); i += 3 + n; b.subs.set(t, ws); codes.push(t.includes('forbidden') ? 0x87 : 0); }
+          const pid = Buffer.alloc(2); pid.writeUInt16BE(id);
+          ws.send(M.packet(0x90, Buffer.concat([pid, Buffer.from([0]), Buffer.from(codes)])));
+        } else if (type === 12) ws.send(Buffer.from([0xD0, 0]));
+      }
+    });
+    ws.on('close', () => b.clients.delete(ws));
+  });
+  b.publish = (topic, obj, { qos = 0, alias = 0, aliasOnly = false } = {}) => {
+    const payload = Buffer.from(typeof obj === 'string' ? obj : JSON.stringify(obj));
+    const parts = [M.str(aliasOnly ? '' : topic)];
+    if (qos) { const pid = Buffer.alloc(2); pid.writeUInt16BE(7); parts.push(pid); }
+    if (alias) { const a = Buffer.alloc(2); a.writeUInt16BE(alias); parts.push(M.varint(3), Buffer.from([0x23]), a); } else parts.push(M.varint(0));
+    parts.push(payload);
+    const pkt = M.packet(0x30 | (qos << 1), Buffer.concat(parts));
+    for (const ws of b.clients) ws.send(pkt);
+  };
+  b.listen = () => new Promise(r => server.listen(0, '127.0.0.1', () => { b.port = server.address().port; r(b); }));
+  b.close = () => { for (const c of wss.clients) c.terminate(); wss.close(); server.close(); };
+  return b;
+}
+
+(async () => {
+  console.log('redact');
+  {
+    const raw = {
+      msg: { properties: { RequestHeader: ['Authorization:Bearer eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjE3OTI0NjA4MDB9.ucB86g853kZw7e4QUUqZkP', 'Accept: */*'], Content: { accessToken: 'abc123456789', refreshToken: 'zzz999888777', isTemporary: false } } },
+      url: 'https://s3/x.json?X-Amz-Security-Token=SECRET&X-Amz-Signature=deadbeef&ok=1',
+      pin: '1234', cardNumber: '9876', note: 'token=eyJabcdefghij.eyJklmnopqrstu.sigsigsigsig',
+    };
+    const s = scrub(raw);
+    const txt = JSON.stringify(s);
+    assert(!txt.includes('ucB86g') && !txt.includes('eyJhbGci'), 'Bearer inside array removed');
+    assert(txt.includes('Bearer [redacted]'));
+    assert(s.msg.properties.Content.accessToken.startsWith('[redacted'));
+    assert(s.msg.properties.Content.isTemporary === false);
+    assert(!txt.includes('SECRET') && !txt.includes('deadbeef') && txt.includes('ok=1'));
+    assert(s.pin.startsWith('[redacted') && s.cardNumber === '9876', 'PIN hidden, card number kept');
+    assert(!txt.includes('eyJklmnop'));
+    assert(hasSecrets(raw) && !hasSecrets({ a: 1, cardNumber: '5' }));
+    ok('Bearer in arrays, JWTs, tokens, PIN and S3 signatures are scrubbed; card numbers kept');
+    const dir = fs.mkdtempSync('/tmp/vault-');
+    const v = new Vault(dir); v.put('e1', raw);
+    const v2 = new Vault(dir);
+    assert.deepStrictEqual(v2.reveal('e1', 'tester'), raw);
+    assert((fs.statSync(path.join(dir, 'vault.jsonl')).mode & 0o777) === 0o600);
+    assert.strictEqual(v2.reveals()[0].who, 'tester');
+    ok('vault keeps originals mode 600 and logs every reveal');
+  }
+
+  console.log('mqtt5');
+  {
+    const br = await mockBroker({ user: 'acct', pass: 'tok' }).listen();
+    const c = new Mqtt5({ url: `ws://127.0.0.1:${br.port}/mqtt`, username: 'acct', password: 'tok', clientId: 'uacs#web#acct#s1' });
+    await c.connect();
+    assert.strictEqual(br.connects[0].ver, 5);
+    assert.strictEqual(br.connects[0].cid, 'uacs#web#acct#s1');
+    const subs = await c.subscribe(['d/rt-events/c1', 'd/settings/c1', 'b/notify/forbidden']);
+    assert.deepStrictEqual(subs.map(s => s.ok), [true, true, false]);
+    const got = [];
+    c.on('message', m => got.push(m));
+    br.publish('d/rt-events/c1', { a: 1 }, { alias: 4 });
+    br.publish('', { a: 2 }, { alias: 4, aliasOnly: true });
+    br.publish('d/settings/c1', { a: 3 }, { qos: 1 });
+    await sleep(150);
+    assert.deepStrictEqual(got.map(g => [g.topic, JSON.parse(g.payload).a]), [['d/rt-events/c1', 1], ['d/rt-events/c1', 2], ['d/settings/c1', 3]]);
+    assert(got.every(g => g.at > Date.now() - 5000));
+    c.close();
+    const bad = new Mqtt5({ url: `ws://127.0.0.1:${br.port}/mqtt`, username: 'acct', password: 'nope', clientId: 'x' });
+    await assert.rejects(bad.connect(), /bad username or password/);
+    br.close();
+    ok('connects (MQTT 5), subscribes, topic aliases, QoS 1, refused login reported');
+    const pkt = Buffer.concat([M.packet(0x30, Buffer.concat([M.str('d/rt-events/x'), M.varint(0), Buffer.from('{"q":1}')])), Buffer.from([0xD0, 0])]);
+    const d = decodePublishes(pkt);
+    assert.strictEqual(d[0].topic, 'd/rt-events/x'); assert.strictEqual(JSON.parse(d[0].payload).q, 1);
+    ok('decodes captured PUBLISH frames (HAR import)');
+  }
+
+  console.log('normalize');
+  {
+    // timeline API item (shape from the HAR survey)
+    const item = { eventTimestamp: 1793837501029, doorId: 'd-1', doorName: 'Front', cardNumber: '01234', facilityCode: '123', cardFormat: '26BIT', clientType: null,
+      eventMeta: { controllerId: 'ctrl-1', eventId: 'ev-9', triggerType: 'card', events: [{ event: [{ eventType: 'accessgranted' }] }] }, src: { srcId: 'd-1', type: 'door' } };
+    const e = fromCloud(item, { src: 'cloud-api', at: 1793837501900 });
+    assert.strictEqual(e.length, 1);
+    assert.strictEqual(e[0].type, 'accessgranted'); assert(e[0].access);
+    assert.deepStrictEqual(e[0].cred, { fc: '123', cn: '01234', format: '26BIT' });
+    assert.strictEqual(e[0].t, 1793837501029); assert.strictEqual(e[0].controllerId, 'ctrl-1'); assert.strictEqual(e[0].eventId, 'ev-9');
+    // Cloud Connector RealTime payload (t + nested events), dotted v2 type
+    const cc = { t: 1793837600000, src: { srcId: 'd-2', type: 'door' }, eventMeta: { eventId: 'x', events: [{ event: [{ eventType: 'Door.AccessDenied' }, { eventType: 'unlocked' }] }] } };
+    const e2 = fromCloud(cc, { topic: 'd/rt-events/ctrl-9', at: 1 });
+    assert.deepStrictEqual(e2.map(x => x.type), ['accessdenied', 'unlocked']);
+    assert.strictEqual(e2[0].controllerId, 'ctrl-9'); assert.strictEqual(e2[0].door.id, 'd-2');
+    // d/settings and b/notify
+    const s = fromCloud({ tid: '1792457234669', msg: { action: 'is', resource: 'controller/c-3', properties: { ioId: 'a#c-3#output_out1', ioState: 'active' } } }, { topic: 'd/settings/c-3', at: 2 });
+    assert.strictEqual(s[0].type, 'io-active'); assert.strictEqual(s[0].controllerId, 'c-3'); assert.strictEqual(s[0].clock, 'cloud');
+    const n = fromCloud({ msgs: [{ msg: { action: 'update', resource: 'door/d-7', propertyDetails: { doorId: 'd-7', modifiedDate: 1792457233815, state: { DoorPhysicalState: 'Closed', LockPhysicalState: 'Locked' } } } }] }, { at: 3 });
+    assert.strictEqual(n[0].type, 'door-state'); assert.strictEqual(n[0].cloudAt, 1792457233815);
+    assert.strictEqual(normType('Panel.TamperActive'), 'tamperactive');
+    const j = fromJournal({ t: 5, k: 'card', ch: 'wiegand:r1', v: 1, src: 'wiegand', m: { fc: 123, cn: 1234, format: 'w26' } });
+    assert.deepStrictEqual(j.cred, { fc: '123', cn: '1234', format: 'w26' });
+    const r = fromReport({ events: [{ t: 10, logT: 60, type: 'accessgranted', src: 'ap1' }], doors: { ap1: { name: 'Lab' } } });
+    assert.strictEqual(r[0].publishAt, 60); assert.strictEqual(r[0].door.name, 'Lab');
+    ok('timeline items, Cloud Connector payloads, I/O and door-state pushes, journal and Log Analytics reports');
+  }
+
+  console.log('correlate');
+  {
+    const OFF = 1234;   // controller clock runs 1.234 s ahead of the Pi
+    const ev = [];
+    const T = 1_800_000_000_000;
+    const journal = (at, fc, cn) => ev.push(fromJournal({ t: at, k: 'card', ch: 'wiegand:r1', v: 1, src: 'wiegand', m: { fc, cn, format: 'w26' } }));
+    const cloud = (ctrlT, type, fc, cn, pushAt, id, extra = {}) => {
+      const e = fromCloud({ eventTimestamp: ctrlT, cardNumber: cn == null ? undefined : String(cn), facilityCode: fc == null ? undefined : String(fc), doorId: 'd1', eventMeta: { eventId: id, events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at: pushAt })[0];
+      Object.assign(e, extra); ev.push(e); return e;
+    };
+    const syncs = [];
+    // start pair: sent at T and T+2000, decision 40 ms later, pushed ~700 ms later
+    for (const [i, at] of [[0, T], [1, T + 2000]]) {
+      syncs.push({ at: at - 5, fc: 123, cn: i ? '9876' : '1234', set: 'start', idx: i });
+      journal(at, 123, i ? 9876 : 1234);
+      cloud(at + 40 + OFF, 'accessgranted', 123, i ? 9876 : 1234, at + 700, 'sync-s' + i);
+    }
+    // test actions
+    journal(T + 10000, 55, 1001); cloud(T + 10000 + 60 + OFF, 'accessgranted', 55, 1001, T + 10000 + 800, 'a1');
+    const api = fromCloud({ eventTimestamp: T + 10000 + 60 + OFF, cardNumber: '1001', facilityCode: '55', doorId: 'd1', eventMeta: { eventId: 'a1', events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-api', at: T + 10000 + 2100 })[0];
+    api.pollMs = 2000; ev.push(api);
+    journal(T + 20000, 55, 1002); cloud(T + 20000 + 2600 + OFF, 'accessgranted', 55, 1002, T + 20000 + 3400, 'a2');          // slow decision (fail)
+    journal(T + 30000, 55, 1003); cloud(T + 30000 + 50 + OFF, 'accessgranted', 55, 1300, T + 30000 + 900, 'a3');           // decoded wrong
+    journal(T + 40000, 77, 5); cloud(T + 40000 + 50 + OFF, 'accessdenied_unauthorized', 77, 5, T + 40000 + 600, 'a4');    // expected grant
+    journal(T + 50000, 55, 1005);                                                                                       // never reached the cloud
+    cloud(T + 60000 + OFF, 'doorforcedopen', null, null, T + 60500, 'x1', { access: false });
+    cloud(T + 61000 + OFF, 'accessgranted', 9, 9, T + 61700, 'nobody');                                                // unexplained
+    // end pair 2 min later, clock drifted +120 ms
+    for (const [i, at] of [[0, T + 120000], [1, T + 122000]]) {
+      syncs.push({ at: at - 5, fc: 123, cn: i ? '9876' : '1234', set: 'end', idx: i });
+      journal(at, 123, i ? 9876 : 1234);
+      cloud(at + 40 + OFF + 120, 'accessgranted', 123, i ? 9876 : 1234, at + 700, 'sync-e' + i);
+    }
+    // wire egress after action a1
+    ev.push({ id: 'w1', src: 'wire', lane: 'wire', at: T + 10000 + 120, t: T + 10000 + 120, clock: 'pi', type: 'egress', dir: 'out', label: '↑ 312 B', access: false });
+    // controller log copy of a1 with publish time
+    ev.push(...fromReport({ events: [{ t: T + 10000 + 60 + OFF, logT: T + 10000 + 95 + OFF, type: 'accessgranted', src: 'd1' }] }));
+
+    const r = correlate(ev, syncs, { expectations: [{ fc: '77', cn: '5', expect: 'grant' }], thresholds: {} });
+    assert.strictEqual(r.clock.offset, OFF + 40, 'offset from the start pair (includes 40 ms decode)');
+    assert.strictEqual(r.clock.drift.changeMs, 120);
+    assert(Math.abs(r.clock.drift.perHourMs - 3600) < 1, 'drift per hour');
+    assert.strictEqual(r.clock.gaps[0].sent, 2000); assert.strictEqual(r.clock.gaps[0].seen, 2000);
+    const by = cn => r.traces.find(t => t.action.cred && t.action.cred.cn === String(cn));
+    const a1 = by(1001);
+    assert.strictEqual(a1.status, 'pass', JSON.stringify(a1.notes));
+    assert.strictEqual(a1.latency.decision, 20, 'decision corrected by the offset');
+    assert.strictEqual(a1.latency.push, 800); assert.strictEqual(a1.latency.api, 2100);
+    assert.deepStrictEqual(a1.hops.map(h => h.id), ['sent', 'decided', 'published', 'wire', 'push', 'api']);
+    assert.strictEqual(a1.hops.find(h => h.id === 'published').ms, 55);
+    assert.strictEqual(a1.decision.sources.sort().join(','), 'cloud-api,cloud-mqtt,controller');
+    assert.strictEqual(by(1002).status, 'fail'); assert(/Decision took/.test(by(1002).notes.join()));
+    assert.strictEqual(by(1003).credCheck, 'mismatch'); assert.strictEqual(by(1003).status, 'fail');
+    assert.strictEqual(by(5).status, 'fail'); assert(/Expected grant/.test(by(5).notes.join()));
+    assert.strictEqual(by(1005).status, 'fail'); assert(!by(1005).decision);
+    assert(r.traces.filter(t => t.sync).length === 4);
+    assert.deepStrictEqual(r.unexplained.map(u => u.cred && u.cred.cn), ['9']);
+    assert.strictEqual(r.stats.actions, 5); assert.strictEqual(r.stats.pass, 1); assert.strictEqual(r.stats.verdict, 'fail');
+    ok('offset + drift from sync pairs, corrected decision time, push/API/wire/publish hops, credential mismatch, expectations, unexplained');
+
+    // credential-less cloud events: the gap pattern still finds the sync pair
+    const ev2 = [], syn2 = [];
+    for (const [i, at] of [[0, T], [1, T + 3000]]) {
+      syn2.push({ at, fc: 1, cn: String(10 + i), set: 'start', idx: i });
+      ev2.push(fromCloud({ eventTimestamp: at + 500, eventMeta: { eventId: 'p' + i, events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: at + 900 })[0]);
+    }
+    ev2.push(fromCloud({ eventTimestamp: T + 1200, eventMeta: { eventId: 'noise', events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: T + 1500 })[0]);
+    const r2 = correlate(ev2, syn2, {});
+    assert.strictEqual(r2.clock.offset, 500); assert(r2.clock.sync.every(x => x.byPattern));
+    ok('sync pair matched by the gap pattern when the cloud omits card numbers');
+  }
+
+  console.log('engine (end to end)');
+  {
+    // fake OnCAFE session helpers + mock broker; the "controller" answers each card through MQTT
+    const br = await mockBroker({ user: 'acct-1', pass: 'msg-token' }).listen();
+    process.env.AETHER_TRACE_WS_INSECURE = '1';
+    const oncafePath = require.resolve('../routes-oncafe');
+    const H = { key: 'qa.oncafe.hanwhavision.cloud', app: 'https://qa.oncafe.hanwhavision.cloud', io: 'https://api.qa.oncafe.hanwhavision.cloud/acsio/orgs', device: 'https://d/device/orgs', partner: 'https://p/partner' };
+    const apiCalls = [];
+    let timeline = [];
+    require.cache[oncafePath] = { id: oncafePath, filename: oncafePath, loaded: true, exports: Object.assign(() => {}, {
+      hosts: () => H, status: () => ({ signedIn: true }),
+      api: async (_H, url) => {
+        apiCalls.push(url);
+        if (url.endsWith('/platform/v2')) return { acsmqtt: { wsHost: '127.0.0.1', wsPort: String(br.port), username: 'acct-1', token: 'msg-token', expiry: String(Math.floor(Date.now() / 1000) + 3600) } };
+        if (url.includes('/acstimeline/')) return { events: timeline };
+        if (url.includes('/devices')) return [{ deviceId: '11111111-1111-1111-1111-111111111111', deviceName: 'NHP lab', deviceType: 'acc' }, { deviceId: '22222222-2222-2222-2222-222222222222', deviceName: 'Cam', deviceType: 'ipcam' }];
+        if (url.includes('/doors/v2')) return [{ doorId: '33333333-3333-3333-3333-333333333333', doorName: 'Lab door', controllerId: '11111111-1111-1111-1111-111111111111' }];
+        return {};
+      },
+    }) };
+    const { TraceEngine } = require('../trace/engine');
+    const eng = new TraceEngine();
+    const CTRL = '11111111-1111-1111-1111-111111111111', DOOR = '33333333-3333-3333-3333-333333333333', ORG = '44444444-4444-4444-4444-444444444444';
+    const inv = await eng.cloud.inventory('https://qa.oncafe.hanwhavision.cloud', ORG);
+    assert.deepStrictEqual(inv.controllers.map(c => c.name), ['NHP lab']);
+    let evN = 0;
+    const respond = (fc, cn) => setTimeout(() => {
+      const it = { eventTimestamp: Date.now() + 1500, doorId: DOOR, cardNumber: String(cn), facilityCode: String(fc), cardFormat: '26BIT', clientType: null,
+        eventMeta: { controllerId: CTRL, eventId: 'e' + (++evN), events: [{ event: [{ eventType: 'accessgranted' }] }] },
+        headers: ['Authorization:Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlMTIz'] };
+      br.publish(`d/rt-events/${CTRL}`, it);
+      setTimeout(() => { timeline = [it, ...timeline]; }, 150);
+    }, 60);
+    const wm = { sent: [], getReaders: () => [{ id: 'r1', name: 'Reader 1' }], async sendCard(id, fc, cn, fmt) { this.sent.push([id, fc, cn, fmt]); await sleep(50); respond(fc, cn); return { success: true }; } };
+    const journal = require('../analytics/journal');
+    journal.attach({ getWiegand: () => wm });
+    eng.attach({ getWiegand: () => wm, getOsdp: () => null, emulator: null });
+    eng.saveSettings({ cloud: { url: 'https://qa.oncafe.hanwhavision.cloud', org: ORG, controllers: [CTRL], doors: [DOOR], poll: true, pollMs: 1000 },
+      sync: { channel: { kind: 'wiegand', readerId: 'r1' }, format: 'w26', cards: [{ fc: 123, cn: 1234 }, { fc: 123, cn: 9876 }], gapsMs: [600, 600] },
+      thresholds: { matchWindowMs: 5000 }, expectations: [{ fc: 55, cn: 1001, expect: 'grant' }] });
+    const st = await eng.cloud.start(eng.settings.cloud);
+    assert.strictEqual(st.push.state, 'connected', st.push.error);
+    assert.strictEqual(br.connects.at(-1).cid.startsWith('uacs#web#acct-1#'), true);
+    assert(br.subs.has(`d/rt-events/${CTRL}`) && br.subs.has(`b/notify/${ORG}`));
+    const run = await eng.startRun('e2e');
+    await sleep(1500);   // start pair
+    await wm.sendCard('r1', 55, 1001, 'w26');
+    await sleep(2300);   // let the poll see it
+    const stopped = await eng.stopRun('done');
+    assert(stopped.end);
+    const a = eng.analyze(run.id);
+    const syncT = a.traces.filter(t => t.sync), real = a.traces.filter(t => !t.sync);
+    assert.strictEqual(syncT.length, 4, 'start + end pairs traced');
+    assert.strictEqual(real.length, 1);
+    assert(Math.abs(a.clock.offset - 1500) < 400, 'offset ≈ the fake controller clock lead: ' + a.clock.offset);
+    assert.strictEqual(real[0].status, 'pass', real[0].notes.join('; '));
+    assert(real[0].latency.push > 0 && real[0].latency.push < 1000, 'push latency ' + real[0].latency.push);
+    assert(real[0].latency.api > 0, 'seen by the event-log poll');
+    assert(Math.abs(real[0].latency.decision) < 400, 'corrected decision ' + real[0].latency.decision);
+    // secrets: events file is scrubbed, vault has the original, reveal is logged
+    const evFile = fs.readFileSync(path.join(__dirname, '..', 'data', 'trace', 'runs', run.id, 'events.jsonl'), 'utf8');
+    assert(!evFile.includes('c2lnbmF0dXJlMTIz') && evFile.includes('Bearer [redacted]'));
+    const ce = eng.readEvents(run.id).find(e => e.src === 'cloud-mqtt' && e.secret);
+    const raw = eng.reveal(run.id, ce.id, 'tester');
+    assert(JSON.stringify(raw).includes('c2lnbmF0dXJlMTIz'));
+    eng.saveSettings({ allowRaw: false });
+    assert.throws(() => eng.reveal(run.id, ce.id, 'tester'), /turned off/);
+    eng.saveSettings({ allowRaw: true });
+    ok('live run: sync pairs → offset, card → MQTT push + event-log poll, scrubbed storage, logged reveal');
+
+    // HAR import into the same run (browser clock)
+    const pub = M.packet(0x30, Buffer.concat([M.str(`d/rt-events/${CTRL}`), M.varint(0), Buffer.from(JSON.stringify({ eventTimestamp: Date.now(), cardNumber: '42', facilityCode: '1', eventMeta: { eventId: 'h1', events: [{ event: [{ eventType: 'accessgranted' }] }] } }))]));
+    const har = { log: { entries: [
+      { startedDateTime: new Date().toISOString(), time: 30, request: { url: `https://api.qa.oncafe.hanwhavision.cloud/acstimeline/orgs/${ORG}/door/events?from=0` }, response: { content: { text: JSON.stringify({ data: { events: [{ eventTimestamp: 1, eventMeta: { eventId: 'h2', events: [{ event: [{ eventType: 'locked' }] }] } }] } }) } } },
+      { startedDateTime: new Date().toISOString(), time: 1, request: { url: 'wss://messaging-ext.qa.oncafe.hanwhavision.cloud/mqtt' }, response: {}, _webSocketMessages: [{ type: 'receive', opcode: 2, time: Date.now() / 1000, data: pub.toString('base64') }] },
+    ] } };
+    const im = eng.importHar(run.id, JSON.stringify(har));
+    assert.strictEqual(im.imported, 2);
+    assert(eng.readEvents(run.id).some(e => e.src === 'har' && e.harVia === 'mqtt' && e.cred && e.cred.cn === '42'));
+    ok('HAR import: event-log responses and MQTT frames');
+
+    // Express routes
+    const express = require('express');
+    const app = express();
+    app.use('/api/trace', express.json({ limit: '20mb' }));
+    app.use(express.json());
+    app.use('/api/trace', require('../routes/trace')());
+    const srv = app.listen(0);
+    const base = `http://127.0.0.1:${srv.address().port}/api/trace`;
+    const s = await (await fetch(base + '/status')).json();
+    assert(s.sources && s.channels.wiegand.length >= 0);
+    const runs = await (await fetch(base + '/runs')).json();
+    assert(Array.isArray(runs.runs));
+    const csv = await (await fetch(`${base}/runs/${runs.runs[0].id}/export.csv`)).text();
+    assert(csv.startsWith('time,status'));
+    const big = { packets: Array.from({ length: 3000 }, (_, i) => ({ ts: Date.now() + i, src: '10.0.0.5', dst: '3.3.3.3', sport: 5000, dport: 443, bytes: 100 })) };
+    eng.saveSettings({ wire: { controllerIps: ['10.0.0.5'] } });
+    const wr = await (await fetch(`${base}/runs/${runs.runs[0].id}/import/wire`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(big) })).json();
+    assert.strictEqual(wr.imported, 3000);
+    srv.close();
+    ok('routes: status, runs, CSV export, 3000-packet wire import past the global 100 kB JSON limit');
+
+    await eng.cloud.stop();
+    br.close();
+  }
+
+  console.log(`\n${passed} checks passed`);
+  process.exit(0);
+})().catch(e => { console.error(e); process.exit(1); });
