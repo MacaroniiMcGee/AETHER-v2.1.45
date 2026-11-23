@@ -19,6 +19,7 @@ import { T } from './config/ui';
 import SunapiConsole from './sunapi/SunapiConsole';   // AETHER_SUNAPI
 import AzureDebugger from './azure/AzureDebugger';   // AETHER_AZURE_DEBUG
 import TrafficInspector from './traffic/TrafficInspector';   // AETHER_TRAFFIC
+import EventTrace from './trace/EventTrace';   // AETHER_TRACE
 
 type Item = { id: number; name: string; type: string; channel: number; active: boolean; [k: string]: any };
 
@@ -65,6 +66,7 @@ export const TOOL_TABS = [
   { id: 'azure', label: 'Azure Debugger', description: 'Azure BLU-IC2 controllers: log bundles, RS-485 boards, the ASP SDK link, cloud start-up and live network checks' },   // AETHER_AZURE_DEBUG
   { id: 'qrcreds', label: 'QR Credentials', description: 'Test OSDP QR readers and bridge rotating QR badges to the panel' }, // AETHER_QR_CREDENTIALS
   { id: 'traffic', label: 'Traffic Inspector', description: 'See what WAVE, the SUNAPI Test Client or an app sends to cameras and controllers — the Pi relays it (mitmproxy) and lists every call' },   // AETHER_TRAFFIC
+  { id: 'trace', label: 'Event Trace', description: 'Follow every card from Aether through the controller and the wire to OnCAFE, live — clock sync, latency per hop, credential checks' },   // AETHER_TRACE
 ] as const;
 export type SetupId = typeof SETUP_TABS[number]['id'];
 export type ToolId = typeof TOOL_TABS[number]['id'];
@@ -125,6 +127,7 @@ const ConfigSection: React.FC<ConfigSectionProps> = ({
       {mode === 'tools' && tool !== 'analytics' && toolPanels[tool as keyof typeof toolPanels]}
       {mode === 'tools' && page === 'sunapi' && <SunapiConsole />}{/* AETHER_SUNAPI */}
       {mode === 'tools' && page === 'traffic' && <TrafficInspector />}{/* AETHER_TRAFFIC */}
+      {mode === 'tools' && page === 'trace' && <EventTrace />}{/* AETHER_TRACE */}
       {mode === 'tools' && page === 'azure' && <AzureDebugger />}{/* AETHER_AZURE_DEBUG */}
     </div>
   );

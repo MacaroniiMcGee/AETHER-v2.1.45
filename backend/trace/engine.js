@@ -19,7 +19,7 @@ const { EventEmitter } = require('events');
 const { CloudFeed } = require('./cloud');
 const { fromJournal, fromCloud, fromReport, newId, toMs } = require('./normalize');
 const { correlate } = require('./correlate');
-const { scrub, hasSecrets, Vault } = require('./redact');
+const { scrub, scrubString, hasSecrets, Vault } = require('./redact');
 const { decodePublishes } = require('./mqtt5');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
@@ -49,6 +49,8 @@ const isIp = s => /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|
 const int = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
 const err = (message, status = 400) => Object.assign(new Error(message), { status });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const RUN_ID = /^trace-[a-z0-9]+$/;
+function runDir(id) { if (!RUN_ID.test(String(id || ''))) throw err('Bad run id', 400); return path.join(RUNS, id); }
 
 function cleanSettings(s = {}) {
   const d = DEFAULTS;
@@ -90,6 +92,8 @@ class TraceEngine extends EventEmitter {
     this.syncBusy = false;
     this._syncTimer = null;
     this.wireSeen = new Map();
+    this.liveLog = { reveal: (id, who) => new Vault(path.join(BASE, 'live')).reveal(id, who) };
+    this._cache = null;
   }
 
   // ── wiring into the backend ────────────────────────────────────────────
@@ -159,21 +163,42 @@ class TraceEngine extends EventEmitter {
   // ── events ─────────────────────────────────────────────────────────────
   add(e, raw) {
     e.seq = ++this.seq;
+    if (typeof e.label === 'string') e.label = scrubString(e.label);
+    if (e.info) e.info = scrub(e.info);
+    const room = !this.run || this.run.count < RUN_MAX;
     if (raw !== undefined && raw !== null) {
       e.hasRaw = true;
-      e.secret = hasSecrets(raw);
       e.detail = scrub(raw);
-      if (this.run) this.run.vault.put(e.id, raw); else { this.liveVault.set(e.id, raw); if (this.liveVault.size > 600) this.liveVault.delete(this.liveVault.keys().next().value); }
+      e.secret = hasSecrets(raw, e.detail);
+      if (this.run) { if (room) this.run.vault.put(e.id, raw); }
+      else { this.liveVault.set(e.id, raw); if (this.liveVault.size > 600) this.liveVault.delete(this.liveVault.keys().next().value); }
     }
     this.live.push(e);
     if (this.live.length > LIVE_MAX) this.live.splice(0, this.live.length - LIVE_MAX);
-    if (this.run && this.run.count < RUN_MAX) {
+    if (this.run && room) {
       this.run.count++;
       this.run.lastAt = e.at || Date.now();
-      try { fs.appendFileSync(path.join(this.run.dir, 'events.jsonl'), JSON.stringify(e) + '\n'); } catch { /* */ }
+      this.run.events.push(e);
+      this._queueWrite(this.run, JSON.stringify(e));
     }
     this.emit('event', e);
     return e;
+  }
+
+  // events.jsonl is written in the background (never blocks the GPIO/Wiegand loop)
+  _queueWrite(run, line) {
+    run.wbuf.push(line);
+    if (run.wtimer) return;
+    run.wtimer = setTimeout(() => this._flushRun(run), 300);
+  }
+  _flushRun(run, sync = false) {
+    clearTimeout(run.wtimer); run.wtimer = null;
+    if (!run.wbuf.length) return Promise.resolve();
+    const data = run.wbuf.join('\n') + '\n'; run.wbuf = [];
+    const f = path.join(run.dir, 'events.jsonl');
+    if (sync) { try { fs.appendFileSync(f, data); } catch { /* */ } return Promise.resolve(); }
+    run.wq = (run.wq || Promise.resolve()).then(() => fs.promises.appendFile(f, data).catch(() => {}));
+    return run.wq;
   }
 
   liveSince(seq = 0, limit = 1500) {
@@ -228,13 +253,14 @@ class TraceEngine extends EventEmitter {
     this.syncBusy = true;
     const s = this.settings.sync;
     const sent = [];
+    const batch = Date.now().toString(36);
     try {
       if (this.journal) this.journal.record('marker', 'trace', 1, 'ui', { event: 'sync-' + set, trace: true });
       for (let i = 0; i < s.cards.length; i++) {
         const c = s.cards[i];
         const at = Date.now();
         await this._sendCard(c);
-        const rec = { at, fc: c.fc, cn: String(c.cn), set, idx: i };
+        const rec = { at, fc: c.fc, cn: String(c.cn), set, idx: i, batch };
         sent.push(rec);
         if (this.run) { this.run.syncs.push(rec); this._patchMeta(this.run.id, { syncs: this.run.syncs }); }
         else { this.liveSyncs = (this.liveSyncs || []).concat(rec).slice(-20); }
@@ -247,7 +273,7 @@ class TraceEngine extends EventEmitter {
   }
 
   // ── runs ───────────────────────────────────────────────────────────────
-  _metaPath(id) { return path.join(RUNS, id, 'meta.json'); }
+  _metaPath(id) { return path.join(runDir(id), 'meta.json'); }
   _patchMeta(id, patch) {
     try { const p = this._metaPath(id); const m = JSON.parse(fs.readFileSync(p, 'utf8')); Object.assign(m, patch); fs.writeFileSync(p, JSON.stringify(m)); return m; } catch { return null; }
   }
@@ -265,11 +291,11 @@ class TraceEngine extends EventEmitter {
     fs.mkdirSync(dir, { recursive: true });
     const meta = { id, name: String(name || 'Trace run').slice(0, 120), start: Date.now(), end: null, syncs: [], settings: scrub(this.settings), imports: [], note: String(opt.note || '').slice(0, 500) };
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta));
-    this.run = { ...meta, dir, vault: new Vault(dir), count: 0, lastAt: meta.start };
+    this.run = { ...meta, dir, vault: new Vault(dir), count: 0, lastAt: meta.start, events: [], wbuf: [], wtimer: null };
     if (this.journal) this.journal.record('marker', 'trace', 1, 'ui', { event: 'trace-start', name: meta.name, trace: true });
     // old runs
     const all = this.listRuns();
-    for (const r of all.slice(KEEP_RUNS)) { try { fs.rmSync(path.join(RUNS, r.id), { recursive: true, force: true }); } catch { /* */ } }
+    for (const r of all.slice(KEEP_RUNS)) { try { fs.rmSync(runDir(r.id), { recursive: true, force: true }); } catch { /* */ } }
     const doSync = opt.sync !== false && this.settings.sync.atStart;
     if (doSync) this.sendSync('start').catch(e => this._patchMeta(id, { syncError: e.message }));
     clearInterval(this._syncTimer);
@@ -281,41 +307,46 @@ class TraceEngine extends EventEmitter {
   }
 
   async stopRun(reason = 'stopped', opt = {}) {
-    if (!this.run) return null;
+    const r = this.run;
+    if (!r || r.stopping) return null;
+    r.stopping = true;
     clearInterval(this._syncTimer); this._syncTimer = null;
     if (!opt.skipSync && this.settings.sync.atEnd && opt.sync !== false) {
-      try { while (this.syncBusy) await sleep(200); await this.sendSync('end'); await sleep(Math.min(8000, this.settings.thresholds.matchWindowMs)); } catch (e) { this._patchMeta(this.run.id, { syncError: e.message }); }
+      try { while (this.syncBusy) await sleep(200); if (this.run === r) await this.sendSync('end'); await sleep(Math.min(8000, this.settings.thresholds.matchWindowMs)); } catch (e) { this._patchMeta(r.id, { syncError: e.message }); }
     }
-    const r = this.run;
-    this.run = null;
+    if (this.run === r) this.run = null;
+    this._flushRun(r, true);
     if (this.journal) this.journal.record('marker', 'trace', 0, 'ui', { event: 'trace-stop', reason, trace: true });
     return this._patchMeta(r.id, { end: Date.now(), endReason: reason, count: r.count });
   }
 
   readEvents(id) {
-    if (this.run && this.run.id === id) {
-      // current run: the file is complete up to now
-    }
+    const dir = runDir(id);
+    if (this.run && this.run.id === id) return this.run.events.slice();
     const out = [];
     try {
-      for (const line of fs.readFileSync(path.join(RUNS, id, 'events.jsonl'), 'utf8').split('\n')) { if (line) { try { out.push(JSON.parse(line)); } catch { /* */ } } }
+      for (const line of fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').split('\n')) { if (line) { try { out.push(JSON.parse(line)); } catch { /* */ } } }
     } catch { /* none yet */ }
     return out;
   }
 
   analyze(id) {
-    const meta = id ? (this.run && this.run.id === id ? { ...this.run, vault: undefined, dir: undefined } : (() => { try { return JSON.parse(fs.readFileSync(this._metaPath(id), 'utf8')); } catch { return null; } })()) : null;
+    if (id) runDir(id);
+    const key = `${id || 'live'}|${id && this.run && this.run.id === id ? this.run.count : id ? 'done' : this.seq}`;
+    if (this._cache && this._cache.key === key && Date.now() - this._cache.at < (id && !(this.run && this.run.id === id) ? 60000 : 1000)) return this._cache.value;
+    const meta = id ? (this.run && this.run.id === id ? { id: this.run.id, name: this.run.name, start: this.run.start, end: null, syncs: this.run.syncs, imports: this.run.imports } : (() => { try { return JSON.parse(fs.readFileSync(this._metaPath(id), 'utf8')); } catch { return null; } })()) : null;
     if (id && !meta) throw err('That run no longer exists', 404);
     const events = id ? this.readEvents(id) : this.live;
     const syncs = id ? (meta.syncs || []) : (this.liveSyncs || []);
     const res = correlate(events, syncs, this.settings);
-    return { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id) } : null, ...res };
+    const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id) } : null, ...res };
+    this._cache = { key, at: Date.now(), value };
+    return value;
   }
 
   deleteRun(id) {
     if (this.run && this.run.id === id) throw err('Stop the run before deleting it', 409);
-    if (!/^trace-[a-z0-9]+$/.test(id)) throw err('Bad run id');
-    fs.rmSync(path.join(RUNS, id), { recursive: true, force: true });
+    fs.rmSync(runDir(id), { recursive: true, force: true });
   }
 
   /** Plain payload of one event, if allowed. Every reveal is logged. */
@@ -323,33 +354,40 @@ class TraceEngine extends EventEmitter {
     if (!this.settings.allowRaw) throw err('Showing plain text is turned off (Setup › Privacy)', 403);
     let raw;
     if (runId) {
-      const v = this.run && this.run.id === runId ? this.run.vault : new Vault(path.join(RUNS, runId));
+      const v = this.run && this.run.id === runId ? this.run.vault : new Vault(runDir(runId));
       raw = v.reveal(eventId, who);
+      if (raw === undefined && this.liveVault.has(eventId)) raw = this.liveVault.get(eventId);   // seen before the run started
     } else {
       raw = this.liveVault.get(eventId);
-      if (this.run) raw = raw === undefined ? this.run.vault.reveal(eventId, who) : (this.run.vault.reveal(eventId, who), raw);
+      if (raw === undefined && this.run) raw = this.run.vault.get(eventId);
+      this.liveLog.reveal(eventId, who);
     }
     if (raw === undefined) throw err('The original of that event is not kept', 404);
-    console.log(`[Trace] plain text of ${eventId} shown to ${who || '?'}`);
+    console.log(`[Trace] plain text of an event shown to ${String(who || '?').replace(/[\r\n]/g, ' ').slice(0, 60)}`);
     return raw;
   }
 
   // ── imports (after the fact) ───────────────────────────────────────────
   _importInto(id, events, rawList, what) {
-    const dir = path.join(RUNS, id);
+    const dir = runDir(id);
     if (!fs.existsSync(dir)) throw err('That run no longer exists', 404);
     const vault = this.run && this.run.id === id ? this.run.vault : new Vault(dir);
     const lines = [];
     events.forEach((e, i) => {
       e.seq = ++this.seq;
       const raw = rawList ? rawList[i] : undefined;
-      if (raw !== undefined && raw !== null) { e.secret = hasSecrets(raw); e.hasRaw = true; e.detail = scrub(raw); vault.put(e.id, raw); }
+      if (typeof e.label === 'string') e.label = scrubString(e.label);
+      if (e.info) e.info = scrub(e.info);
+      if (raw !== undefined && raw !== null) { e.hasRaw = true; e.detail = scrub(raw); e.secret = hasSecrets(raw, e.detail); vault.put(e.id, raw); }
       lines.push(JSON.stringify(e));
     });
-    if (lines.length) fs.appendFileSync(path.join(dir, 'events.jsonl'), lines.join('\n') + '\n');
+    const cur = this.run && this.run.id === id ? this.run : null;
+    if (cur) { cur.events.push(...events); for (const l of lines) this._queueWrite(cur, l); }
+    else if (lines.length) fs.appendFileSync(path.join(dir, 'events.jsonl'), lines.join('\n') + '\n');
+    this._cache = null;
     const m = this._patchMeta(id, {});
     if (m) { m.imports = (m.imports || []).concat({ at: Date.now(), what, count: events.length }); fs.writeFileSync(this._metaPath(id), JSON.stringify(m)); }
-    if (this.run && this.run.id === id) this.run.count += events.length;
+    if (cur) { cur.count += events.length; if (m) cur.imports = m.imports; }
     return { imported: events.length };
   }
 
@@ -385,6 +423,8 @@ class TraceEngine extends EventEmitter {
 
   /** HAR of the OnCAFE web app: event-log responses and MQTT frames, browser clock. */
   importHar(id, text) {
+    runDir(id);
+    if (String(text).length > 60 * 1024 * 1024) throw err('That HAR is over 60 MB. Save a shorter one (just the test window) and add it again.', 413);
     let har;
     try { har = JSON.parse(text); } catch { throw err('That file is not a HAR (JSON)'); }
     const entries = (har.log && har.log.entries) || [];

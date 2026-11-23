@@ -23,6 +23,7 @@ const TrafficManager = require('../traffic/TrafficManager');
 module.exports = function trafficRoutes() {
   const router = express.Router();
   const mgr = new TrafficManager();
+  module.exports.current = mgr;   // AETHER_TRACE: Event Trace reads controller flows
   const fail = (res, e) => res.status(e.status || 400).json({ error: e.message });
   const stamp = () => new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
 

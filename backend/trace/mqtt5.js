@@ -116,7 +116,7 @@ class Mqtt5 extends EventEmitter {
         const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
         this.stats.bytes += chunk.length;
         this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
-        try { this._drain(finish); } catch (e) { this.emit('error', e); }
+        try { this._drain(finish); } catch (e) { this.emit('error', e); this.buf = Buffer.alloc(0); this.close(); }   // framing lost: start over
       });
       ws.on('error', (e) => { this.emit('error', e); finish(e); });
       ws.on('unexpected-response', (_req, res) => finish(new Error(`MQTT WebSocket refused: HTTP ${res.statusCode}`)));
@@ -153,7 +153,12 @@ class Mqtt5 extends EventEmitter {
       const pr = readProps(body, 2);
       this.connack = pr ? pr.props : {};
       const ka = this.connack[0x13] || this.o.keepalive;   // server keep-alive overrides ours
-      this._ping = setInterval(() => this._send(Buffer.from([0xC0, 0])), Math.max(5, ka * 0.75) * 1000);
+      this._lastPong = Date.now();
+      const every = Math.max(5, ka * 0.75) * 1000;
+      this._ping = setInterval(() => {
+        if (Date.now() - this._lastPong > every * 2 + 5000) { this.emit('error', new Error('MQTT broker stopped answering pings')); this.close(); return; }
+        this._send(Buffer.from([0xC0, 0]));
+      }, every);
       if (this._ping.unref) this._ping.unref();
       this.stats.connectedAt = Date.now();
       this._set('connected');
@@ -171,7 +176,7 @@ class Mqtt5 extends EventEmitter {
       const payload = body.subarray(pr.next);
       if (qos === 1 && pid != null) { const b = Buffer.alloc(2); b.writeUInt16BE(pid); this._send(packet(0x40, b)); }
       if (qos === 2 && pid != null) { const b = Buffer.alloc(2); b.writeUInt16BE(pid); this._send(packet(0x50, b)); }
-      this.stats.received++; this.stats.lastMessageAt = at;
+      this.stats.received++; this.stats.lastMessageAt = at; this._lastPong = at;
       this.emit('message', { topic, payload: Buffer.from(payload), at, retain: !!(first & 1), props: pr.props });
     } else if (type === 6) {    // PUBREL (QoS 2) -> PUBCOMP
       this._send(packet(0x70, body.subarray(0, 2)));
@@ -185,7 +190,8 @@ class Mqtt5 extends EventEmitter {
       const reason = body.length ? body[0] : 0;
       this.emit('error', new Error(`MQTT broker disconnected us (reason 0x${reason.toString(16)})`));
     }
-    // PINGRESP (13) and anything else: nothing to do
+    if (type === 13) this._lastPong = Date.now();
+    else if (type !== 3) this._lastPong = Date.now();   // any packet proves the link is alive
   }
 
   _send(b) { try { if (this.ws && this.ws.readyState === 1) this.ws.send(b); } catch { /* */ } }

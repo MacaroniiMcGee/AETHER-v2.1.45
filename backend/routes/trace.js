@@ -15,7 +15,7 @@
 //   GET    /runs/:id/events           all events of a run (scrubbed)
 //   GET    /runs/:id/export.json|.csv
 //   DELETE /runs/:id
-//   POST   /runs/:id/import/har       raw HAR text (text/plain or application/json up to 200 MB)
+//   POST   /runs/:id/import/har       raw HAR text (text/plain, up to 60 MB)
 //   POST   /runs/:id/import/wire      {packets:[{ts,src,dst,sport,dport,bytes,sni,proto}]}
 //   POST   /runs/:id/import/report    {reportId}   a Log Analytics report (controller logs)
 //   GET    /reports                   Log Analytics reports to pick from
@@ -38,10 +38,18 @@ module.exports = function traceRoutes() {
   const eng = getEngine();
   const fail = (res, e) => res.status(e.status || 500).json({ error: e.message });
   const who = req => (req.aetherUser && (req.aetherUser.user || req.aetherUser.name)) || req.ip || '?';
+  // Plain text (and the switch that allows it) is for Aether admins. Without the Aether login installed, everyone is.
+  const isAdmin = req => !req.aetherUser || req.aetherUser.role === 'admin' || req.aetherUser.local === true;
   router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
   router.get('/status', (_req, res) => res.json(eng.status()));
-  router.put('/settings', express.json({ limit: '256kb' }), (req, res) => { try { res.json(eng.saveSettings(req.body || {})); } catch (e) { fail(res, e); } });
+  router.put('/settings', express.json({ limit: '256kb' }), (req, res) => {
+    try {
+      const body = { ...(req.body || {}) };
+      if ('allowRaw' in body && body.allowRaw !== eng.settings.allowRaw && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change who may see plain text' });
+      res.json(eng.saveSettings(body));
+    } catch (e) { fail(res, e); }
+  });
   router.get('/live', (req, res) => res.json(eng.liveSince(Number(req.query.since) || 0)));
   router.get('/live/analysis', (_req, res) => { try { res.json(eng.analyze(null)); } catch (e) { fail(res, e); } });
 
@@ -67,9 +75,10 @@ module.exports = function traceRoutes() {
   router.get('/runs/:id', (req, res) => { try { res.json(eng.analyze(String(req.params.id))); } catch (e) { fail(res, e); } });
   router.get('/runs/:id/events', (req, res) => res.json({ events: eng.readEvents(String(req.params.id)) }));
   router.get('/runs/:id/reveals', (req, res) => {
+    const id = String(req.params.id);
+    if (!/^trace-[a-z0-9]+$/.test(id)) return res.status(400).json({ error: 'Bad run id' });
     const { Vault } = require('../trace/redact');
-    const path = require('path');
-    res.json({ reveals: new Vault(path.join(__dirname, '..', 'data', 'trace', 'runs', String(req.params.id).replace(/[^\w-]/g, ''))).reveals() });
+    res.json({ reveals: new Vault(require('path').join(__dirname, '..', 'data', 'trace', 'runs', id)).reveals() });
   });
   router.delete('/runs/:id', (req, res) => { try { eng.deleteRun(String(req.params.id)); res.json({ ok: true }); } catch (e) { fail(res, e); } });
 
@@ -93,7 +102,7 @@ module.exports = function traceRoutes() {
     } catch (e) { fail(res, e); }
   });
 
-  router.post('/runs/:id/import/har', express.text({ type: () => true, limit: '200mb' }), (req, res) => {
+  router.post('/runs/:id/import/har', express.text({ type: () => true, limit: '60mb' }), (req, res) => {
     try { res.json(eng.importHar(String(req.params.id), typeof req.body === 'string' ? req.body : JSON.stringify(req.body))); } catch (e) { fail(res, e); }
   });
   router.post('/runs/:id/import/wire', express.json({ limit: '20mb' }), (req, res) => {
@@ -105,7 +114,8 @@ module.exports = function traceRoutes() {
   router.get('/reports', (_req, res) => res.json({ reports: eng.listReports() }));
 
   router.get('/reveal', (req, res) => {
-    try { res.json({ raw: eng.reveal(req.query.run ? String(req.query.run) : null, String(req.query.event || ''), who(req)) }); } catch (e) { fail(res, e); }
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can see plain text' });
+    try { res.json({ raw: eng.reveal(req.query.run ? String(req.query.run) : null, String(req.query.event || '').slice(0, 64), who(req)) }); } catch (e) { fail(res, e); }
   });
 
   return router;

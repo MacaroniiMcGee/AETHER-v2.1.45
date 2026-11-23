@@ -235,7 +235,7 @@ function attach(d = {}) {
     }
     const om = d.getOsdp && d.getOsdp();
     if (om) {
-      wrap(om, 'sendCardRead', (args, r, err) => { if (!err) record('card', `osdp:${args[0]}`, 1, 'osdp', { format: args[2] }); });
+      wrap(om, 'sendCardRead', (args, r, err) => { if (!err) record('card', `osdp:${args[0]}`, 1, 'osdp', { format: args[2], fc: args[1] && args[1].facility, cn: args[1] && args[1].card /* AETHER_TRACE */ }); });
       wrap(om, 'sendKeypadData', (args, r, err) => { if (!err) record('keypad', `osdp:${args[0]}`, 1, 'osdp', { count: String(args[1] || '').length }); });
     }
   };

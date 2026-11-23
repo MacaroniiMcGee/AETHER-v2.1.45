@@ -325,8 +325,44 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     srv.close();
     ok('routes: status, runs, CSV export, 3000-packet wire import past the global 100 kB JSON limit');
 
+    // review fixes: run ids, label scrubbing, stop/start race
+    for (const bad of ['../../../tmp/x', '..%2Fx', 'trace-abc/../../x']) {
+      assert.throws(() => eng.importWire(bad, []), /Bad run id/);
+      assert.throws(() => eng.analyze(bad), /Bad run id/);
+      assert.throws(() => eng.reveal(bad, 'e', 'x'), /Bad run id/);
+    }
+    const le = eng.add({ id: 'lbl', src: 'wire', lane: 'wire', at: Date.now(), t: Date.now(), clock: 'pi', type: 'egress-http', label: 'GET host/api?access_token=SEKRIT&x=1', info: { hdr: ['Authorization', 'Bearer abcdefghijkl'] } });
+    assert(!JSON.stringify(le).includes('SEKRIT') && !JSON.stringify(le).includes('abcdefghijkl'));
+    eng.saveSettings({ sync: { atStart: false, atEnd: true, gapsMs: [500, 500] } });
+    const rA = await eng.startRun('A');
+    const stopping = eng.stopRun('done');          // waits for its end sync
+    await sleep(200);
+    const rB = await eng.startRun('B', { sync: false });
+    await stopping;
+    assert.strictEqual(eng.run && eng.run.id, rB.id, 'stopping A must not stop B');
+    await eng.stopRun('done', { sync: false });
+    assert(rA.id !== rB.id);
+    ok('review: run ids validated, labels scrubbed, stopping one run never stops the next');
+
     await eng.cloud.stop();
     br.close();
+  }
+
+  console.log('correlate (review fixes)');
+  {
+    const T = 1_900_000_000_000;
+    const card = (at, cn) => fromJournal({ t: at, k: 'card', ch: 'wiegand:r1', v: 1, src: 'wiegand', m: { fc: 1, cn } });
+    const dec = (t, id) => fromCloud({ eventTimestamp: t, eventMeta: { eventId: id, events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: t + 500 })[0];
+    // card A's decision is lost; B's must stay with B
+    const r = correlate([card(T, 1), card(T + 5000, 2), dec(T + 5040, 'b')], [], {});
+    const A = r.traces.find(t => t.action.cred.cn === '1'), Bt = r.traces.find(t => t.action.cred.cn === '2');
+    assert(!A.decision, 'A has no decision'); assert(Bt.decision && Bt.decision.t === T + 5040);
+    // test cards 2 s apart must not be taken as the sync pair: the pair nearest the sync send wins
+    const syn = [{ at: T, fc: 9, cn: '1', set: 'start', idx: 0, batch: 'x' }, { at: T + 2000, fc: 9, cn: '2', set: 'start', idx: 1, batch: 'x' }];
+    const ev = [dec(T + 300, 's1'), dec(T + 2300, 's2'), dec(T + 60000, 't1'), dec(T + 62000, 't2')];
+    const r2 = correlate(ev, syn, {});
+    assert.strictEqual(r2.clock.offset, 300);
+    ok('lost decisions are not blamed on the next card; sync pair = nearest matching pair of one send');
   }
 
   console.log(`\n${passed} checks passed`);

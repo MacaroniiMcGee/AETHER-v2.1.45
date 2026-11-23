@@ -12,26 +12,40 @@
 const fs = require('fs');
 const path = require('path');
 
-const SECRET_KEY = /pass(word)?|passwd|secret|token|cookie|authori[sz]ation|^auth$|signature|api[-_]?key|private[-_]?key|session[-_]?id|^sid$|jwt|credentials?secret|^pin$|^pincode$|x-amz-(security-token|signature|credential)/i;
+const SECRET_KEY = /pass(word)?|passwd|secret|token|cookie|authori[sz]ation|^auth$|signature|api[-_]?key|private[-_]?key|session[-_]?id|^sid$|jwt|credentials?secret|pin(code|number)?$|^pin[-_]?no$|x-amz-(security-token|signature|credential)|^sig$|^code_verifier$/i;
 const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
 const BEARER = /\b(Bearer|Basic|Digest)\s+[A-Za-z0-9._~+/=-]{8,}[^\s"',]*/gi;
 const AMZ = /([?&]X-Amz-(?:Security-Token|Signature|Credential)=)[^&\s"]+/gi;
 const COOKIE = /\b((?:Set-)?Cookie\s*:\s*)[^\r\n"]+/gi;
+const DIGEST_RESP = /\b(response|cnonce)="[^"]*"/gi;
+// query / form parameters whose name looks secret: ?access_token=…&password=…
+const PARAM = /([?&;]|^)([A-Za-z0-9_.\-]{1,40})=([^&#\s"']+)/g;
 
-function scrubString(s) {
-  if (typeof s !== 'string' || s.length < 8) return s;
+function scrubString(s, depth = 0) {
+  if (typeof s !== 'string' || s.length < 6) return s;
+  const t = s.trim();
+  // a JSON body inside a string: scrub it structurally
+  if (depth < 4 && t.length < 2_000_000 && ((t[0] === '{' && t.endsWith('}')) || (t[0] === '[' && t.endsWith(']')))) {
+    try { return JSON.stringify(scrub(JSON.parse(t), depth + 1)); } catch { /* not JSON */ }
+  }
   return s
     .replace(BEARER, (_m, kind) => `${kind} [redacted]`)
     .replace(JWT, m => `[redacted JWT ${m.length}]`)
     .replace(AMZ, (_m, k) => `${k}[redacted]`)
-    .replace(COOKIE, (_m, k) => `${k}[redacted]`);
+    .replace(COOKIE, (_m, k) => `${k}[redacted]`)
+    .replace(DIGEST_RESP, (_m, k) => `${k}="[redacted]"`)
+    .replace(PARAM, (m, pre, k) => (SECRET_KEY.test(k) ? `${pre}${k}=[redacted]` : m));
 }
 
 /** Deep copy with secrets removed. Never throws; depth-limited. */
 function scrub(v, depth = 0) {
   if (depth > 24) return '[too deep]';
-  if (typeof v === 'string') return scrubString(v);
-  if (Array.isArray(v)) return v.map(x => scrub(x, depth + 1));
+  if (typeof v === 'string') return scrubString(v, depth);
+  if (Array.isArray(v)) {
+    // header lists come as [name, value] pairs: treat the name as a key
+    if (v.length === 2 && typeof v[0] === 'string' && typeof v[1] === 'string' && v[0].length < 64 && SECRET_KEY.test(v[0]) && v[1]) return [v[0], `[redacted ${v[1].length}]`];
+    return v.map(x => scrub(x, depth + 1));
+  }
   if (v && typeof v === 'object') {
     if (Buffer.isBuffer(v)) return `[${v.length} bytes]`;
     const out = {};
@@ -46,8 +60,8 @@ function scrub(v, depth = 0) {
 }
 
 /** True when scrub() would change something (the page offers "Show plain text" only then). */
-function hasSecrets(v) {
-  try { return JSON.stringify(scrub(v)) !== JSON.stringify(v); } catch { return false; }
+function hasSecrets(v, scrubbed) {
+  try { return JSON.stringify(scrubbed === undefined ? scrub(v) : scrubbed) !== JSON.stringify(v); } catch { return false; }
 }
 
 class Vault {
@@ -61,6 +75,7 @@ class Vault {
   put(id, raw) {
     if (raw === undefined) return;
     this.index.set(id, raw);
+    if (this.index.size > 300) this.index.delete(this.index.keys().next().value);   // the file is the full copy
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       fs.appendFileSync(this.file, JSON.stringify({ id, raw }) + '\n', { mode: 0o600 });
@@ -82,8 +97,8 @@ class Vault {
   reveal(id, who) {
     const raw = this.get(id);
     try {
-      fs.mkdirSync(this.dir, { recursive: true });
-      fs.appendFileSync(this.log, `${new Date().toISOString()}\t${who || '?'}\t${id}\t${raw === undefined ? 'missing' : 'shown'}\n`, { mode: 0o600 });
+      const clean = x => String(x == null ? '?' : x).replace(/[\t\r\n]/g, ' ').slice(0, 120);
+      fs.appendFileSync(this.log, `${new Date().toISOString()}\t${clean(who)}\t${clean(id)}\t${raw === undefined ? 'missing' : 'shown'}\n`, { mode: 0o600 });
     } catch { /* */ }
     return raw;
   }

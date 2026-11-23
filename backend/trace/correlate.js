@@ -63,24 +63,30 @@ function solveClock(syncs, groups, opt) {
     if (g) used.add(g);
     results.push({ ...s, matched: !!g, eventT: g ? g.t : null, type: g ? g.type : null, offset: g ? g.t - s.at : null });
   }
-  // Without credentials in the cloud events, fall back to the gap pattern: two access events whose spacing
-  // matches the spacing Aether used (±250 ms).
-  for (const set of ['start', 'end', 'check']) {
-    const pair = results.filter(r => r.set === set);
+  // Without credentials in the cloud events, fall back to the gap pattern: the two cards of ONE send whose
+  // access events are spaced like Aether spaced them (±250 ms). Of all such pairs, take the one nearest the
+  // send, and never a decision already used or one whose credential belongs to another card.
+  const sends = new Map();
+  for (const r of results) { const k = `${r.set}|${r.batch || ''}`; if (!sends.has(k)) sends.set(k, []); sends.get(k).push(r); }
+  for (const pair of sends.values()) {
+    pair.sort((x, y) => x.idx - y.idx);
     for (let i = 0; i + 1 < pair.length; i++) {
       const a = pair[i], b = pair[i + 1];
       if (a.matched && b.matched) continue;
       const gap = b.at - a.at;
-      for (let x = 0; x < groups.length; x++) {
-        const g1 = groups[x];
-        if (used.has(g1) || Math.abs(g1.t - a.at) > opt.maxOffsetMs) continue;
-        const g2 = groups.find(h => h !== g1 && !used.has(h) && Math.abs((h.t - g1.t) - gap) <= 250);
-        if (g2) {
-          used.add(g1); used.add(g2);
-          Object.assign(a, { matched: true, eventT: g1.t, type: g1.type, offset: g1.t - a.at, byPattern: true });
-          Object.assign(b, { matched: true, eventT: g2.t, type: g2.type, offset: g2.t - b.at, byPattern: true });
-          break;
+      const free = groups.filter(g => !used.has(g) && !g.cred && Math.abs(g.t - a.at) < opt.maxOffsetMs);
+      let best = null;
+      for (const g1 of free) {
+        for (const g2 of free) {
+          if (g2 === g1 || Math.abs((g2.t - g1.t) - gap) > 250) continue;
+          const score = Math.abs(g1.t - a.at);
+          if (!best || score < best.score) best = { g1, g2, score };
         }
+      }
+      if (best) {
+        used.add(best.g1); used.add(best.g2);
+        Object.assign(a, { matched: true, eventT: best.g1.t, type: best.g1.type, offset: best.g1.t - a.at, byPattern: true });
+        Object.assign(b, { matched: true, eventT: best.g2.t, type: best.g2.type, offset: best.g2.t - b.at, byPattern: true });
       }
     }
   }
@@ -94,9 +100,9 @@ function solveClock(syncs, groups, opt) {
     drift = { startMs: median(start), endMs: median(end), changeMs: median(end) - median(start), perHourMs: hours > 0 ? (median(end) - median(start)) / hours : null };
   }
   const gaps = [];
-  for (const set of ['start', 'end', 'check']) {
-    const p = results.filter(r => r.set === set && r.matched);
-    for (let i = 0; i + 1 < p.length; i++) gaps.push({ set, sent: p[i + 1].at - p[i].at, seen: p[i + 1].eventT - p[i].eventT });
+  for (const pair of sends.values()) {
+    const p = pair.filter(r => r.matched);
+    for (let i = 0; i + 1 < p.length; i++) gaps.push({ set: p[i].set, sent: p[i + 1].at - p[i].at, seen: p[i + 1].eventT - p[i].eventT });
   }
   return { offset, drift, sync: results, gaps, used };
 }
@@ -139,7 +145,13 @@ function correlate(events, syncs = [], s = {}) {
     const inWin = groups.filter(g => !used.has(g) || isSync).filter(g => { const tp = toPi(g.t); return tp >= t0 - 1500 && tp <= t0 + th.matchWindowMs; });
     let g = inWin.find(x => credEq(a.cred, x.cred));
     let matchedBy = g ? 'credential' : null;
-    if (!g && a.cred) g = inWin.find(x => !x.cred && !used.has(x));
+    if (!g) {
+      // no card number in the event: nearest unused decision before the next card was sent
+      const ai = actions.indexOf(a);
+      const next = actions.slice(ai + 1).find(o => o.at > t0);
+      const until = next ? next.at : t0 + th.matchWindowMs;
+      g = inWin.filter(x => !x.cred && !used.has(x) && toPi(x.t) <= until).sort((x, y) => Math.abs(toPi(x.t) - t0) - Math.abs(toPi(y.t) - t0))[0];
+    }
     if (g && !matchedBy) matchedBy = 'time';
     if (!g && a.cred) {
       // a decision a few seconds after the card with a different credential that no other action sent: decoded wrong

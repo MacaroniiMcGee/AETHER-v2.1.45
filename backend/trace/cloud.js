@@ -40,6 +40,7 @@ class CloudFeed extends EventEmitter {
     this._renew = null;
     this._seen = new Map();    // api event key -> first seen (bounded)
     this.stopped = true;
+    this.gen = 0;              // bumps on every start/stop: stale connects drop their result
   }
 
   status() {
@@ -87,6 +88,7 @@ class CloudFeed extends EventEmitter {
 
   async stop() {
     this.stopped = true;
+    this.gen++;
     clearTimeout(this._retry); this._retry = null;
     clearTimeout(this._renew); this._renew = null;
     clearInterval(this._pollTimer); this._pollTimer = null;
@@ -101,11 +103,13 @@ class CloudFeed extends EventEmitter {
     this.mq.state = 'retrying';
     this.mq.retryAt = Date.now() + wait;
     clearTimeout(this._retry);
-    this._retry = setTimeout(() => this._connect().catch(e => { this.mq.error = e.message; this._scheduleRetry(); }), wait);
+    const gen = this.gen;
+    this._retry = setTimeout(() => gen === this.gen && this._connect().catch(e => { this.mq.error = e.message; this._scheduleRetry(); }), wait);
     if (this._retry.unref) this._retry.unref();
   }
 
   async _connect() {
+    const gen = this.gen;
     const o = lib();
     const H = this.H;
     this.mq.state = 'connecting'; this.mq.error = null;
@@ -131,9 +135,13 @@ class CloudFeed extends EventEmitter {
       try { await c.connect(); client = c; break; } catch (e) { lastErr = e; c.removeAllListeners(); c.on('error', () => {}); c.close(); if (!/client id|not authorized|bad username/i.test(e.message)) break; }
     }
     if (!client) throw lastErr || new Error('MQTT connect failed');
-    if (this.stopped) { client.close(); return; }
+    const drop = (c) => { c.removeAllListeners(); c.on('error', () => {}); c.close(); };
+    if (this.stopped || gen !== this.gen) { drop(client); return; }
+    let acked;
+    try { acked = await client.subscribe(topics); } catch (e) { drop(client); throw e; }
+    if (this.stopped || gen !== this.gen) { drop(client); return; }
+    if (this.mqtt && this.mqtt !== client) drop(this.mqtt);
     this.mqtt = client;
-    const acked = await client.subscribe(topics);
     this.mq = {
       ...this.mq, state: 'connected', error: acked.some(a => !a.ok) ? `Broker refused ${acked.filter(a => !a.ok).length} of ${acked.length} topics` : null,
       host, topics, acked, connectedAt: Date.now(), tokenExpiry: m.expiry ? Number(m.expiry) * 1000 : null,
@@ -148,7 +156,7 @@ class CloudFeed extends EventEmitter {
     if (this.mq.tokenExpiry) {
       const inMs = Math.max(60000, this.mq.tokenExpiry - Date.now() - 10 * 60000);
       clearTimeout(this._renew);
-      this._renew = setTimeout(() => { if (this.mqtt === client) { this.mqtt = null; client.removeAllListeners(); client.close(); this._connect().catch(e => { this.mq.error = e.message; this._scheduleRetry(); }); } }, Math.min(inMs, 2 ** 31 - 1));
+      this._renew = setTimeout(() => { if (this.mqtt === client && gen === this.gen) { this.mqtt = null; drop(client); this._connect().catch(e => { this.mq.error = e.message; this._scheduleRetry(); }); } }, Math.min(inMs, 2 ** 31 - 1));
       if (this._renew.unref) this._renew.unref();
     }
   }

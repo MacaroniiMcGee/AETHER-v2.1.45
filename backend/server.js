@@ -725,6 +725,7 @@ catch (e) { require('./lib/authManager').failClosed(app, e); }
 app.use(['/api/config/restore', '/api/config/app'], express.json({ limit: '25mb' }));   // backups can be large
 app.use('/api/sunapi', express.json({ limit: '30mb' }));   // AETHER_SUNAPI (snapshots are larger than the global 100 kB limit)
 try { app.use('/api/blueprints', require('./routes/blueprints-remote')()); } catch (e) { console.warn('[Blueprints] not mounted:', e.message); }   // AETHER_BLUEPRINTS_GH: Board Blueprints on GitHub
+app.use('/api/trace', express.json({ limit: '20mb' }));   // AETHER_TRACE (wire imports are larger than the global 100 kB limit)
 app.use(express.json());
 app.use('/api/oncafe', require('./routes-oncafe')());   // Board Blueprints: sign in to OnCafe and read a site (Update 58)
 // Device firmware: send Aether updates and script files from the browser
@@ -733,6 +734,7 @@ try { app.use('/api/sunapi', require('./routes/sunapi')()); } catch (e) { consol
 try { app.use('/api/traffic', require('./routes/traffic')()); } catch (e) { console.warn('[Traffic] not mounted:', e.message); }   // AETHER_TRAFFIC (mitmproxy)
 try { app.use('/api/sunapi/limits', require('./routes/sunapi-limits')()); } catch (e) { console.warn('[SUNAPI limits] not mounted:', e.message); }   // AETHER_SUNAPI_LIMITS
 try { app.use('/api/analytics', require('./routes-analytics')()); } catch (e) { console.warn('[Analytics] not mounted:', e.message); }   // AETHER-ANALYTICS route
+try { app.use('/api/trace', require('./routes/trace')()); } catch (e) { console.warn('[Trace] not mounted:', e.message); }   // AETHER_TRACE
 app.use(i2cBus.middleware);   // tags I2C calls with the request that caused them
 app.use('/api/formats', formatRoutes);
 app.use('/api/credential-formats', formatRoutes); // alias — frontend calls this URL
@@ -910,6 +912,7 @@ try {
     emulator: require('./osdp/OSDPDeviceEmulator'),
   });
 } catch (e) { console.warn('[Analytics] journal not attached:', e.message); }
+try { require('./routes/trace').getEngine().attach({ getWiegand: () => wiegandManager, getOsdp: () => osdpManager, emulator: require('./osdp/OSDPDeviceEmulator') }); } catch (e) { console.warn('[Trace] not attached:', e.message); }   // AETHER_TRACE
 let nfcManager = null;
 let nfcBridge = null;
 let switchManager = null;
