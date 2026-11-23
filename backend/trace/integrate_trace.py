@@ -154,25 +154,41 @@ def main():
         return s.replace(old, old + " try { require('./routes/trace').getEngine().onDoorActivity(entry, meta); } catch (_) { /* AETHER_TRACE */ }", 1)
     P.edit('backend/server.js', 'door activity into Event Trace', server_door_activity, required=False)
 
+    SAVE_HOOK = ("app.post('/api/doors/config', (req, res, next) => { try { require('./routes/trace').getEngine().mergeDoorSave(req.body); } catch (e) { console.warn('[Trace] door merge:', e.message); } "
+                 "res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page'); } catch (e) { console.warn('[Trace] door import:', e.message); } } }); next(); });   "
+                 "// AETHER_TRACE: a door save keeps newer Event Trace pairings, then updates the wiring map\n"
+                 "app.delete('/api/doors/config', (req, res, next) => { res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page (config deleted)'); } catch (_) { /* */ } } }); next(); });   // AETHER_TRACE")
+
     def server_door_save(s):
-        if 'getEngine().importDoors(' in s:
+        if 'getEngine().mergeDoorSave(' in s:
             return None
-        line = ("app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page'); } "
-                "catch (e) { console.warn('[Trace] door import:', e.message); } } }); next(); });   // AETHER_TRACE: a door save updates the wiring map")
-        return insert_before_line(s, r"^app\.use\('/api/doors', require\('\./routes-doors'\)\(\)\);", line)
-    P.edit('backend/server.js', 'door saves update the wiring map', server_door_save, required=False)
+        lines = s.split('\n')
+        old = [i for i, l in enumerate(lines) if "getEngine().importDoors('doors page')" in l and l.startswith("app.post('/api/doors/config'")]
+        if old:   # first TRACE-3 build: replace its hook
+            lines[old[0]] = SAVE_HOOK
+            return '\n'.join(lines)
+        return insert_before_line(s, r"^app\.use\('/api/doors', require\('\./routes-doors'\)\(\)\);", SAVE_HOOK)
+    P.edit('backend/server.js', 'door saves keep Event Trace pairings and update the wiring map', server_door_save, required=False)
+
+    ANALYTICS_NEW = ("...(v.label ? { label: String(v.label).slice(0, 80) } : {}), "
+                     "...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), "
+                     "...(Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), "
+                     "...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}), ...(/^door:\\d+:[\\w:.\\-]{1,70}$/.test(String(v.via || '')) ? { via: String(v.via) } : {}), "
+                     "...(v.pin === true ? { pin: true } : {}), ...(v.was && typeof v.was === 'object' && !Array.isArray(v.was) ? { was: v.was } : {}) };   /* AETHER_TRACE wiring keys v2: keep Doors page pairing */")
 
     def analytics_keys(s):
-        if 'AETHER_TRACE wiring keys' in s:
+        if 'AETHER_TRACE wiring keys v2' in s:
             return None
+        lines = s.split('\n')
+        for n, l in enumerate(lines):   # first TRACE-3 build: upgrade its line
+            if 'AETHER_TRACE wiring keys' in l:
+                k = l.index('...(v.label ? { label: String(v.label).slice(0, 60) } : {})')
+                lines[n] = l[:k] + ANALYTICS_NEW
+                return '\n'.join(lines)
         old = "...(v.label ? { label: String(v.label).slice(0, 60) } : {}) };"
         if old not in s:
             raise LookupError('wiring validation not found')
-        new = ("...(v.label ? { label: String(v.label).slice(0, 60) } : {}), "
-               "...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), "
-               "...(Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), "
-               "...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}) };   /* AETHER_TRACE wiring keys: keep Doors page pairing */")
-        return s.replace(old, new, 1)
+        return s.replace(old, ANALYTICS_NEW, 1)
     P.edit('backend/routes-analytics.js', 'Product Test keeps the door pairing in the wiring map', analytics_keys, required=False)
 
     ds = 'frontend/src/components/DoorSection.tsx'
@@ -190,6 +206,8 @@ def main():
             raise LookupError('door save mapping not found')
         return s.replace(old, "        reader: door.reader ?? null,\n        customEvents: door.customEvents,\n        trace: (door as any).trace   // AETHER_TRACE: OnCAFE pairing + description\n      }))", 1)
     P.edit(ds, 'save the door pairing with the door', ds_save, required=False)
+    ds_text = read(P.path(ds)) if os.path.exists(P.path(ds)) else ''
+    pairing_saved = 'trace: (door as any).trace' in ds_text or (P.check and any('save the door pairing' in d for d in P.done))
 
     def ds_strip(s):
         if '<DoorTraceStrip' in s:
@@ -203,7 +221,6 @@ def main():
         if "from './trace/DoorTrace'" in s:
             return None
         return insert_after_line(s, r"^import .*;\s*(//.*)?$", "import { DoorTracePairing } from './trace/DoorTrace';   // AETHER_TRACE", first=False)
-    P.edit(dset, 'import the door pairing', dset_import, required=False)
 
     def dset_pairing(s):
         if '<DoorTracePairing' in s:
@@ -219,7 +236,11 @@ def main():
         block = ("\n              {/* AETHER_TRACE: pair with the OnCAFE door + description (Event Trace) */}\n"
                  "              <DoorTracePairing door={editedDoor as any} onChange={(trace: any) => setEditedDoor({ ...(editedDoor as any), trace } as any)} />\n")
         return s[:j] + block + s[j:]
-    P.edit(dset, 'OnCAFE door + description in Settings › Basic', dset_pairing, required=False)
+    if pairing_saved:
+        P.edit(dset, 'import the door pairing', dset_import, required=False)
+        P.edit(dset, 'OnCAFE door + description in Settings › Basic', dset_pairing, required=False)
+    else:   # the Doors page would not save it: pair doors in Event Trace › Setup › Wiring instead (the strip still shows it)
+        P.notes.append(f'{dset}: pairing card left out (the Doors page save could not be taught to keep it); pair doors in Event Trace › Setup › Wiring')
 
     # ── frontend: Tools › Event Trace ────────────────────────────────────
     cs = 'frontend/src/components/ConfigSection.tsx'

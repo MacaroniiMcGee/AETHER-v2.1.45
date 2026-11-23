@@ -32,7 +32,9 @@ export interface Analysis {
 }
 export interface KindStats { actions: number; pass: number; warn: number; fail: number; decision: Stat; push: Stat; api: Stat; decisionToPush: Stat; output: Stat; hardware: Stat; ack: Stat; credMismatch: number; unexplained?: number; verdict: 'pass' | 'warn' | 'fail' | 'no-data' }
 export interface Role { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; auto?: boolean; score?: number; kind?: string; count?: number }
-export type Wiring = Record<string, { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; note?: string; src?: string; at?: number; dir?: 'in' | 'out'; doorName?: string }>;
+/** Version of a wiring map (newest entry time): sent back on save so a stale tab cannot overwrite newer door imports. */
+export const wiringVersion = (w: Record<string, { at?: number }>) => Math.max(0, ...Object.values(w || {}).map(e => Number(e.at) || 0));
+export type Wiring = Record<string, { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; note?: string; src?: string; at?: number; dir?: 'in' | 'out'; doorName?: string; via?: string; pin?: boolean; was?: Record<string, unknown>; reset?: boolean }>;
 export interface SeenChannel { ch: string; kind: string; count: number; last: number; inferred: Role | null }
 export interface InvDoor { id: string; name: string; controllerId: string; areaIds: string[]; locationId?: string }
 export interface InvArea { id: string; name: string; locationId: string; location: string; tz: string | null }
@@ -100,7 +102,7 @@ export function traceClient(backend: string) {
     connect: () => call<CloudStatus>('/cloud/connect', { method: 'POST', body: {} }),
     disconnect: () => call<CloudStatus>('/cloud/disconnect', { method: 'POST', body: {} }),
     wiring: () => call<{ wiring: Wiring; channels: SeenChannel[] }>('/wiring'),
-    saveWiring: (wiring: Wiring) => call<{ wiring: Wiring }>('/wiring', { method: 'PUT', body: { wiring } }),
+    saveWiring: (wiring: Wiring, base?: number) => call<{ wiring: Wiring }>('/wiring', { method: 'PUT', body: { wiring, base } }),
     command: (c: { kind: string; target: string; value: unknown; seconds?: number; revertSec?: number }) => call<{ ok: boolean; status: number; ackMs: number; error: string | null; revertIn: number | null }>('/command', { method: 'POST', body: c }),
     sync: (set: 'start' | 'end' | 'check' = 'check') => call<{ sent: unknown[] }>('/sync', { method: 'POST', body: { set } }),
     start: (name: string, sync: boolean) => call<RunMeta>('/runs/start', { method: 'POST', body: { name, sync } }),

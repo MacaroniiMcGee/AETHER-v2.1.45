@@ -77,7 +77,7 @@ module.exports = function traceRoutes() {
   router.get('/wiring', (_req, res) => { try { res.json({ wiring: eng.wiring(), channels: eng.channelsSeen() }); } catch (e) { fail(res, e); } });
   router.put('/wiring', express.json({ limit: '64kb' }), (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the wiring map' });
-    try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}, `event trace (${who(req)})`) }); } catch (e) { fail(res, e); } });
+    try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}, `event trace (${who(req)})`, (req.body || {}).base ?? null) }); } catch (e) { fail(res, e); } });
 
   // Doors page pairing: what Event Trace knows per Aether door, and a manual re-import of the door config
   router.get('/doors', (_req, res) => { try { res.json(eng.doorsSummary()); } catch (e) { fail(res, e); } });

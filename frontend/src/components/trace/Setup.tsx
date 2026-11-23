@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
-import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring } from './api';
+import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, wiringVersion } from './api';
 
 const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ icon, title, sub, right, children }) => (
   <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line">
@@ -291,6 +291,10 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
   );
 };
 
+const PinTag: React.FC<{ onReset: () => void }> = ({ onReset }) => (
+  <span className="ml-1 text-[10px] text-hv-warning-fg" title="Changed here, so saving the door no longer overwrites it">edited · <button className="underline hover:text-hv-text" onClick={onReset}>use door's</button></span>
+);
+
 const DRIVE_ROLES = ['dps', 'rex', 'input', 'ignore'];
 const OBSERVE_ROLES = ['lock', 'output', 'ignore'];
 const isDrive = (kind: string) => ['relay', 'gpio', 'emu-in', 'door-in'].includes(kind);
@@ -303,7 +307,8 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const load = () => api.wiring().then(r => { setW(r.wiring); setSeen(r.channels); setDirty(false); }).catch(e => setMsg(e.message));
+  const [base, setBase] = useState<number>(wiringVersion(status.wiring || {}));
+  const load = () => api.wiring().then(r => { setW(r.wiring); setBase(wiringVersion(r.wiring)); setSeen(r.channels); setDirty(false); setMsg(null); }).catch(e => setMsg(e.message));
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const rows = [...new Set([...seen.map(c => c.ch), ...Object.keys(w)])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const info = (ch: string) => seen.find(c => c.ch === ch);
@@ -312,7 +317,7 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
     setW(x => { const n = { ...x }; if (patch === null) delete n[ch]; else n[ch] = { ...(n[ch] || { role: isDrive(kindOf(ch)) ? 'dps' : 'lock' }), ...patch }; return n; });
     setDirty(true);
   };
-  const save = async () => { setBusy(true); setMsg(null); try { const r = await api.saveWiring(w); setW(r.wiring); setDirty(false); setMsg(Object.values(r.wiring).some(e => e.src) ? 'Saved — door pairings go back to the Doors page; Product Test uses the same map.' : 'Saved — Log Analytics › Product Test uses the same map.'); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
+  const save = async () => { setBusy(true); setMsg(null); try { const r = await api.saveWiring(w, base); setW(r.wiring); setBase(wiringVersion(r.wiring)); setDirty(false); setMsg(Object.values(r.wiring).some(e => e.src) ? 'Saved — door pairings go back to the Doors page; Product Test uses the same map.' : 'Saved — Log Analytics › Product Test uses the same map.'); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
   return (
     <Card icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Doors from the Doors page fill this in (and get your changes back — the last save wins). Shared with Log Analytics › Product Test."
       right={<div className="flex items-center gap-2">{msg && <span className="text-[11px] text-hv-text-3">{msg}</span>}<Button size="sm" icon={<RefreshCw size={13} />} onClick={load}>Refresh</Button><Button size="sm" tone="primary" icon={<Save size={13} />} disabled={!dirty} busy={busy} onClick={save}>Save wiring</Button></div>}>
@@ -324,8 +329,8 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
             return (
               <React.Fragment key={ch}>
                 {m?.src && /^door:/.test(ch)
-                  ? <span className="text-hv-text truncate" title={`${ch} — from the Doors page`}>{m.label || ch}<span className="ml-1 text-[10px] text-hv-info-fg">Doors page</span></span>
-                  : <span className="font-mono text-hv-text truncate" title={i ? `${i.count} changes in 24 h` : ''}>{ch}{m?.src && m.role === 'ignore' ? <span className="ml-1 font-sans text-[10px] text-hv-text-3">via door</span> : null}</span>}
+                  ? <span className="text-hv-text truncate" title={`${ch} — from the Doors page`}>{m.label || ch}<span className="ml-1 text-[10px] text-hv-info-fg">Doors page</span>{m.pin ? <PinTag onReset={() => set(ch, { reset: true, pin: undefined })} /> : null}</span>
+                  : <span className="font-mono text-hv-text truncate" title={m?.via ? `Wired to ${m.doorName || 'a door'} — traced as ${m.via} while the door reports; Product Test and sync pulses use this wire` : i ? `${i.count} changes in 24 h` : ''}>{ch}{m?.via ? <span className="ml-1 font-sans text-[10px] text-hv-text-3">via {m.doorName || 'door'}</span> : null}{m?.src && m.pin ? <PinTag onReset={() => set(ch, { reset: true, pin: undefined })} /> : null}</span>}
                 <span className="text-hv-text-3">{drive ? 'Aether → panel' : 'panel → Aether'}</span>
                 <Select value={m?.role || ''} onChange={e => set(ch, e.target.value ? { role: e.target.value } : null)}>
                   <option value="">not mapped</option>{(drive ? DRIVE_ROLES : OBSERVE_ROLES).map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
@@ -336,7 +341,7 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
                 <Select value={m?.active || 'open'} disabled={m?.role !== 'dps'} onChange={e => set(ch, { active: e.target.value as 'open' | 'closed' })}><option value="open">door open</option><option value="closed">door closed</option></Select>
                 {m?.src && /^door:/.test(ch)
                   ? <Input value={m.note || ''} placeholder="description (shared with the door)" onChange={e => set(ch, { note: e.target.value || undefined })} />
-                  : <span className="text-hv-text-3 truncate" title={m?.role === 'ignore' && m.src ? m.label : undefined}>{m?.role === 'ignore' && m.src ? (m.label || '') : i?.inferred ? `${ROLE_LABEL[i.inferred.role] || i.inferred.role}${i.inferred.score != null ? ` (${Math.round(i.inferred.score * 100)} %)` : ''}` : ''}</span>}
+                  : <span className="text-hv-text-3 truncate" title={m?.src ? m.label : undefined}>{m?.src ? (m.label || '') : i?.inferred ? `${ROLE_LABEL[i.inferred.role] || i.inferred.role}${i.inferred.score != null ? ` (${Math.round(i.inferred.score * 100)} %)` : ''}` : ''}</span>}
                 <button className="text-hv-text-3 hover:text-hv-error-fg disabled:opacity-30" disabled={!m} aria-label="Unmap" onClick={() => set(ch, null)}><Trash2 size={14} /></button>
               </React.Fragment>
             );

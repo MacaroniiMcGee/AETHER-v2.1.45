@@ -15,19 +15,23 @@ interface DoorSum {
 }
 interface Summary { doors: DoorSum[]; run: { id: string; name: string } | null; sync: { by: string; at: number } | null; configSavedAt: string | null; error?: string }
 
+const PAGE_LOADED = Date.now();   // pairings changed in Event Trace after this are newer than what this page shows
+
 // ── one poll for every door card on the page ─────────────────────────────
 const store = (() => {
   let data: Summary | null = null;
   let off = false;          // Event Trace not installed: stop asking
   let timer: ReturnType<typeof setInterval> | null = null;
   const subs = new Set<() => void>();
+  let busy = false;         // one request at a time (a slow Pi must not pile them up)
   const tick = async () => {
-    if (off) return;
+    if (off || busy) return;
+    busy = true;
     try {
       const r = await fetch(`${defaultBackend()}/api/trace/doors`, { credentials: 'include' });
       if (r.status === 404) { off = true; return; }
       if (r.ok) { data = await r.json(); subs.forEach(f => f()); }
-    } catch { /* offline: keep the last data */ }
+    } catch { /* offline: keep the last data */ } finally { busy = false; }
   };
   return {
     subscribe(f: () => void) {
@@ -80,8 +84,8 @@ export const DoorTraceStrip: React.FC<{ doorId: number }> = ({ doorId }) => {
           ))}
         </div>
       ) : <div className="text-[11px] text-hv-text-3">No traces yet — start a run in Tools › Event Trace.</div>}
-      {d.by && /event trace/.test(d.by) && d.updatedAt && (
-        <div className="text-[10px] text-hv-warning-fg mt-0.5">Pairing changed in Event Trace {new Date(d.updatedAt).toLocaleTimeString()} — reload this page before saving doors, or the older copy wins.</div>
+      {d.by && /event trace/.test(d.by) && d.updatedAt && Date.parse(d.updatedAt) > PAGE_LOADED && (
+        <div className="text-[10px] text-hv-info-fg mt-0.5">Pairing changed in Event Trace at {new Date(d.updatedAt).toLocaleTimeString()}. Saving doors keeps it; reload to see it in Settings.</div>
       )}
     </div>
   );

@@ -31,27 +31,35 @@ function doorsFrom(json) {
 
 /** Wiring entries implied by one door. */
 function doorChannels(d) {
-  const id = Number(d.id);
   const out = [];
   if (!d || d.enabled === false) return out;
+  const id = Number(d.id);
   const t = d.trace || {};
   const name = String(d.name || `Door ${id}`).slice(0, 60);
   const base = { src: `door:${id}`, doorName: name, ...(t.oncafeDoorId ? { door: String(t.oncafeDoorId) } : {}), ...(t.note ? { note: String(t.note).slice(0, 300) } : {}) };
+  // The door entry (door:N:dps …) carries the logical level from the Doors page (reverseSense already applied, so a
+  // DPS is always "on = open"). The raw wire (relay:3, opto:5, emu:11:in:2) keeps its real role and polarity, so sync
+  // pulses and Log Analytics › Product Test still work on it, and points at the door entry with `via`; Event Trace
+  // traces the door entry and skips the raw wire while the door is reporting, so nothing is traced twice.
   const add = (key, role, dir, raw, extra = {}) => {
-    out.push({ key: `door:${id}:${key}`, entry: { role, dir, label: `${name} · ${extra.word || ROLE_WORD[role] || role}`, ...base, ...(role === 'dps' ? { active: 'open' } : {}) } });
-    for (const r of [].concat(raw || [])) out.push({ key: r, entry: { role: 'ignore', label: `${name} (traced as door:${id}:${key})`, src: base.src, doorName: name } });
+    const word = extra.word || ROLE_WORD[role] || role;
+    out.push({ key: `door:${id}:${key}`, entry: { role, dir, label: `${name} · ${word}`, ...base, ...(role === 'dps' ? { active: 'open' } : {}) } });
+    for (const r of [].concat(raw || [])) {
+      out.push({ key: r, entry: { role, dir, label: `${name} · ${word} (wire)`, ...base, via: `door:${id}:${key}`,
+        ...(role === 'dps' ? { active: extra.io && extra.io.reverseSense ? 'closed' : 'open' } : {}) } });
+    }
   };
   const emulated = d.ioSource === 'emulated';
   const b = Number(d.emuBoard) & 0x7F;
   if (emulated) {
     if (!b) return out;
-    if (assigned(d.dps)) add('dps', 'dps', 'in', `emu:${b}:in:${d.dps.channel}`);
+    if (assigned(d.dps)) add('dps', 'dps', 'in', `emu:${b}:in:${d.dps.channel}`, { io: d.dps });
     if (assigned(d.rexIn)) add('rex', 'rex', 'in', `emu:${b}:in:${d.rexIn.channel}`);
     if (assigned(d.lock)) add('lock', 'lock', 'out', `emu:${b}:out:${d.lock.channel}`);
     return out;
   }
   const rawRelay = io => (assigned(io) && kindOf(io) === 'relay' && stack0(io) ? `relay:${io.channel}` : null);
-  if (assigned(d.dps)) add('dps', 'dps', 'in', rawRelay(d.dps));
+  if (assigned(d.dps)) add('dps', 'dps', 'in', rawRelay(d.dps), { io: d.dps });
   if (assigned(d.rexIn)) add('rex', 'rex', 'in', rawRelay(d.rexIn));
   if (assigned(d.lock)) {
     const k = kindOf(d.lock);

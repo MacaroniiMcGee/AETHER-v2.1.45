@@ -767,7 +767,8 @@ try {
   app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { try { doorActivity.invalidate(); } catch (_) {} }); next(); });
   process.on('exit', () => { try { doorActivity.flushSync(); } catch (_) {} });
 } catch (e) { doorActivity = null; console.warn('[DoorActivity] not mounted:', e.message); }
-app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page'); } catch (e) { console.warn('[Trace] door import:', e.message); } } }); next(); });   // AETHER_TRACE: a door save updates the wiring map
+app.post('/api/doors/config', (req, res, next) => { try { require('./routes/trace').getEngine().mergeDoorSave(req.body); } catch (e) { console.warn('[Trace] door merge:', e.message); } res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page'); } catch (e) { console.warn('[Trace] door import:', e.message); } } }); next(); });   // AETHER_TRACE: a door save keeps newer Event Trace pairings, then updates the wiring map
+app.delete('/api/doors/config', (req, res, next) => { res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page (config deleted)'); } catch (_) { /* */ } } }); next(); });   // AETHER_TRACE
 app.use('/api/doors', require('./routes-doors')());
 app.use('/api/switch', require('./routes-switch')(io, () => switchManager, logSystemEvent));
 app.use('/api/vms', require('./routes-vms')(io));   // Stream View / RTSP support

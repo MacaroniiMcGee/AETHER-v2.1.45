@@ -203,6 +203,8 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
   const roles = {};
   for (const [ch, list] of byCh) {
     const w = wiring[ch];
+    // a raw wire owned by a door (via door:N:…) is traced through the door while the door reports; otherwise as itself
+    if (w && w.role && w.via && byCh.has(w.via)) { roles[ch] = { ...w, role: 'ignore', auto: false, kind: list[0].type, count: list.length }; continue; }
     if (w && w.role) { roles[ch] = { ...w, auto: false, kind: list[0].type, count: list.length }; continue; }
     const cands = DRIVE.has(list[0].type) ? [['dps', { active: 'open' }], ['dps', { active: 'closed' }], ['rex', {}], ['input', {}]] : [['lock', {}], ['output', {}]];
     let best = null;

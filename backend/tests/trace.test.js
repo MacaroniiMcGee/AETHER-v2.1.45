@@ -524,12 +524,14 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     assert.deepStrictEqual(Object.keys(m).sort(), ['door:1:dps', 'door:1:io:Sounder', 'door:1:io:sf1', 'door:1:lock', 'door:1:rex', 'door:2:dps', 'door:2:lock', 'door:2:rex', 'emu:11:in:2', 'emu:11:in:3', 'emu:11:out:0', 'opto:5', 'relay:0', 'relay:1', 'relay:6'].sort());
     assert.strictEqual(m['door:1:dps'].role, 'dps'); assert.strictEqual(m['door:1:dps'].door, OD); assert.strictEqual(m['door:1:dps'].note, 'NC DPS on REL 1');
     assert.strictEqual(m['door:1:lock'].role, 'lock'); assert.strictEqual(m['door:1:lock'].dir, 'out'); assert(/EOL watch/.test(m['door:1:lock'].label));
-    assert.strictEqual(m['relay:0'].role, 'ignore'); assert.strictEqual(m['door:1:io:sf1'].role, 'output'); assert.strictEqual(m['door:1:io:Sounder'].role, 'input');
-    assert.strictEqual(m['door:2:lock'].role, 'lock'); assert.strictEqual(m['emu:11:out:0'].role, 'ignore');
+    assert.strictEqual(m['relay:0'].role, 'dps'); assert.strictEqual(m['relay:0'].via, 'door:1:dps'); assert.strictEqual(m['relay:0'].active, 'closed', 'raw NC wire keeps its polarity');
+    assert.strictEqual(m['door:1:io:sf1'].role, 'output'); assert.strictEqual(m['door:1:io:Sounder'].role, 'input');
+    assert.strictEqual(m['door:2:lock'].role, 'lock'); assert.strictEqual(m['emu:11:out:0'].role, 'lock'); assert.strictEqual(m['emu:11:out:0'].via, 'door:2:lock');
+    assert.deepStrictEqual(doorChannels(null), []);
     assert.strictEqual(channelOfActivity('1:dps:relay:0'), 'door:1:dps'); assert.strictEqual(channelOfActivity('2:rexIn:emu:11:3'), 'door:2:rex');
     assert.strictEqual(channelOfActivity('1:io:sf1:opto:5'), 'door:1:io:sf1'); assert.strictEqual(channelOfActivity('1:lock:analog:7'), 'door:1:lock');
     assert.deepStrictEqual(readerChannels('ctrl-emu-11-0'), ['emu:11:rdr:0']);
-    ok('door → channels: physical (analog EOL lock watch, NC DPS, custom I/O), emulated; raw wires marked "via door"; door activity keys');
+    ok('door → channels: physical (analog EOL lock watch, NC DPS, custom I/O), emulated; raw wires keep their role and point at the door; door activity keys');
 
     const { TraceEngine } = require('../trace/engine');
     const eng = new TraceEngine();
@@ -543,31 +545,87 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     assert.strictEqual(r1.doors, 2);
     let w = eng.wiring();
     assert.strictEqual(w['relay:9'].role, 'rex', 'manual entries kept');
-    assert.strictEqual(w['relay:0'].role, 'ignore', 'the door owns relay:0 now (last save wins)');
+    assert.strictEqual(w['relay:0'].via, 'door:1:dps', 'the door owns relay:0 now (last save wins)'); assert.strictEqual(w['relay:0'].was.role, 'dps', 'the manual mapping is remembered');
     assert.strictEqual(w['door:1:dps'].src, 'door:1'); assert.strictEqual(w['door:1:dps'].at, savedAt);
     assert.strictEqual(JSON.parse(fs.readFileSync(ap, 'utf8')).thresholds.latencyWarnMs, 99);
     // Event Trace edits the pairing → it goes back to the door
     w = JSON.parse(JSON.stringify(w));
     w['door:1:lock'].door = OD2; w['door:1:lock'].note = 'moved to the lab door'; w['door:1:dps'].active = 'closed';
-    eng.saveWiring(w, 'event trace (tester)');
+    eng.saveWiring(w, 'event trace (tester)', Math.max(...Object.values(w).map(e => e.at || 0)));
     const cfg = JSON.parse(fs.readFileSync(dc, 'utf8'));
     const d1 = cfg.doors.find(d => d.id === 1);
     assert.strictEqual(d1.trace.oncafeDoorId, OD2); assert.strictEqual(d1.trace.note, 'moved to the lab door'); assert.strictEqual(d1.trace.by, 'event trace (tester)');
     assert.strictEqual(d1.dps.reverseSense, false, 'DPS sense flipped on the door');
     w = eng.wiring();
     assert.strictEqual(w['door:1:dps'].door, OD2, 'every channel of the door follows'); assert.strictEqual(w['door:1:rex'].note, 'moved to the lab door');
-    assert.strictEqual(w['door:1:dps'].active, 'open');
+    assert.strictEqual(w['door:1:dps'].active, 'open'); assert.strictEqual(w['relay:0'].active, 'open', 'the raw wire follows the new sense'); assert.strictEqual(d1.trace.dpsSense, false);
     ok('door save → wiring (manual entries kept, raw wires taken over); wiring save → door (OnCAFE door, description, DPS sense) for every channel of that door');
     // last save wins at start-up: an older door config does not overwrite newer edits; a newer one does
-    w = JSON.parse(JSON.stringify(eng.wiring())); w['door:1:rex'].role = 'input';
+    w = JSON.parse(JSON.stringify(eng.wiring())); w['door:1:rex'].note = 'edited in trace';
     eng.saveWiring(w);
-    const older = JSON.parse(fs.readFileSync(dc, 'utf8')); older.savedAt = new Date(Date.now() - 60000).toISOString(); fs.writeFileSync(dc, JSON.stringify(older));
+    const older = JSON.parse(fs.readFileSync(dc, 'utf8')); older.savedAt = new Date(Date.now() - 60000).toISOString(); older.doors[0].trace.note = 'old door note'; fs.writeFileSync(dc, JSON.stringify(older));
     const e2 = new TraceEngine(); e2._importIfNewer();
-    assert.strictEqual(e2.wiring()['door:1:rex'].role, 'input', 'older door config does not win');
+    assert.strictEqual(e2.wiring()['door:1:rex'].note, 'edited in trace', 'older door config does not win');
     older.savedAt = new Date(Date.now() + 2000).toISOString(); fs.writeFileSync(dc, JSON.stringify(older));
     e2._importIfNewer();
-    assert.strictEqual(e2.wiring()['door:1:rex'].role, 'rex', 'newer door config wins');
+    assert.strictEqual(e2.wiring()['door:1:rex'].note, 'old door note', 'newer door config wins');
+    const again = fs.readFileSync(ap, 'utf8'); e2._importIfNewer();
+    assert.strictEqual(fs.readFileSync(ap, 'utf8'), again, 'no re-import once imported');
     ok('last save wins at start-up (door config vs wiring timestamps)');
+
+    // review fixes: stale tabs, overrides, manual mappings, Doors page merge, deletes, pulse sync on a door wire
+    {
+      const keepDc = fs.readFileSync(dc, 'utf8'), keepAp = fs.readFileSync(ap, 'utf8');
+      const fresh = () => { fs.writeFileSync(ap, JSON.stringify({ wiring: { 'relay:3': { role: 'input', label: 'manual bell' } } })); fs.writeFileSync(dc, JSON.stringify({ savedAt: new Date(Date.now() - 9000).toISOString(), doors: [JSON.parse(JSON.stringify(phys))] })); };
+      fresh();
+      const e3 = new TraceEngine(); e3.importDoors();
+      const stale = JSON.parse(JSON.stringify(e3.wiring())); const staleBase = Math.max(...Object.values(stale).map(e => e.at || 0));
+      const cfg2 = JSON.parse(fs.readFileSync(dc, 'utf8')); cfg2.doors[0].trace.note = 'newer from the door'; cfg2.savedAt = new Date().toISOString(); fs.writeFileSync(dc, JSON.stringify(cfg2));
+      e3.importDoors();
+      stale['door:1:dps'].note = 'stale tab';
+      assert.throws(() => e3.saveWiring(stale, 'x', staleBase), e => e.status === 409 || /changed since you opened/.test(e.message));
+      assert.strictEqual(e3.wiring()['door:1:dps'].note, 'newer from the door');
+      // an override survives door saves until reset
+      let cur = JSON.parse(JSON.stringify(e3.wiring())); cur['door:1:rex'].role = 'input'; delete cur['door:1:io:Sounder'];
+      e3.saveWiring(cur, 'x', Math.max(...Object.values(cur).map(e => e.at || 0)));
+      e3.importDoors();
+      cur = e3.wiring();
+      assert.strictEqual(cur['door:1:rex'].role, 'input'); assert(cur['door:1:rex'].pin);
+      assert.strictEqual(cur['door:1:io:Sounder'].role, 'ignore', 'removed door entry stays off');
+      assert(e3.doorsSummary().doors[0].channels.find(c => c.key === 'door:1:rex').overridden);
+      cur = JSON.parse(JSON.stringify(cur)); cur['door:1:rex'] = { ...cur['door:1:rex'], reset: true };
+      e3.saveWiring(cur, 'x', Math.max(...Object.values(cur).map(e => e.at || 0)));
+      assert.strictEqual(e3.wiring()['door:1:rex'].role, 'rex'); assert(!e3.wiring()['door:1:rex'].pin);
+      // a door takes relay:3 over, then lets go: the manual mapping comes back
+      const cfg3 = JSON.parse(fs.readFileSync(dc, 'utf8')); cfg3.doors[0].rexIn = { hardwareType: 'relay', channel: 3 }; cfg3.savedAt = new Date().toISOString(); fs.writeFileSync(dc, JSON.stringify(cfg3));
+      e3.importDoors(); assert.strictEqual(e3.wiring()['relay:3'].via, 'door:1:rex');
+      cfg3.doors[0].rexIn = { hardwareType: 'relay', channel: 1 }; fs.writeFileSync(dc, JSON.stringify(cfg3));
+      e3.importDoors(); assert.deepStrictEqual({ role: e3.wiring()['relay:3'].role, label: e3.wiring()['relay:3'].label, src: e3.wiring()['relay:3'].src }, { role: 'input', label: 'manual bell', src: undefined });
+      // a stale Doors page posting an older pairing keeps the newer one (and the DPS sense Event Trace set)
+      cur = JSON.parse(JSON.stringify(e3.wiring())); cur['door:1:dps'].door = OD2; cur['door:1:dps'].active = 'closed';
+      const oldPage = JSON.parse(fs.readFileSync(dc, 'utf8'));
+      e3.saveWiring(cur, 'event trace (t)', Math.max(...Object.values(cur).map(e => e.at || 0)));
+      oldPage.doors[0].name = 'Renamed on the page';
+      assert.strictEqual(e3.mergeDoorSave(oldPage), 1);
+      assert.strictEqual(oldPage.doors[0].trace.oncafeDoorId, OD2); assert.strictEqual(oldPage.doors[0].dps.reverseSense, false); assert.strictEqual(oldPage.doors[0].name, 'Renamed on the page');
+      const mine = JSON.parse(JSON.stringify(oldPage)); mine.doors[0].trace = { ...mine.doors[0].trace, oncafeDoorId: OD, updatedAt: new Date(Date.now() + 1000).toISOString(), by: 'doors page' };
+      assert.strictEqual(e3.mergeDoorSave(mine), 0, 'a newer edit on the Doors page wins');
+      // pulse sync works on a relay a door owns (role and NC polarity from the wire)
+      e3.saveSettings({ sync: { mode: 'pulse', channel: { kind: 'relay', relay: 0 } } });
+      const pz = e3._pulseSync(); assert.strictEqual(pz.ch, 'relay:0'); assert.strictEqual(pz.rest, e3.wiring()['relay:0'].active === 'closed' ? 1 : 0);
+      // config deleted: door entries go
+      fs.unlinkSync(dc); e3.importDoors();
+      assert(!Object.keys(e3.wiring()).some(k => /^door:/.test(k))); assert.strictEqual(e3.wiring()['relay:3'].label, 'manual bell');
+      // correlate: a door wire is traced through the door while the door reports, as itself otherwise
+      const { correlate: corr } = require('../trace/correlate');
+      const wv = { 'relay:0': { role: 'dps', via: 'door:1:dps' }, 'door:1:dps': { role: 'dps', src: 'door:1' } };
+      const T0 = Date.now() - 30000;
+      const both = [fromJournal({ t: T0, k: 'relay', ch: 'relay:0', v: 1 }), { ...fromJournal({ t: T0 + 5, k: 'relay', ch: 'door:1:dps', v: 1 }), type: 'door-in', journal: { ch: 'door:1:dps', v: 1, k: 'door-in' } }];
+      assert.strictEqual(corr(both, [], {}, { wiring: wv }).roles['relay:0'].role, 'ignore');
+      assert.strictEqual(corr([both[0]], [], {}, { wiring: wv }).roles['relay:0'].role, 'dps');
+      fs.writeFileSync(dc, keepDc); fs.writeFileSync(ap, keepAp);
+    }
+    ok('review: stale Setup tab refused (409); overrides kept until reset; removed door rows stay off; manual mappings restored; stale Doors page keeps newer pairing; deleted config; pulse sync on a door wire; door wires traced once');
 
     // door activity → traces: DPS from the door, strike watched on the analog zone, card on the door's reader
     const T = Date.now() - 60000;

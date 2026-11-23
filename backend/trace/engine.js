@@ -94,16 +94,27 @@ function writeAtomic(file, text, mode) {
   fs.writeFileSync(tmp, text, mode ? { mode } : undefined);
   fs.renameSync(tmp, file);
 }
+function cleanEntry(v, nested = false) {
+  if (!v || typeof v !== 'object' || !WIRING_ROLES.includes(v.role)) return null;
+  const was = !nested && v.was ? cleanEntry(v.was, true) : null;
+  return { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 80) } : {}),
+    ...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), ...(Number(v.at) > 0 ? { at: Number(v.at) } : {}),
+    ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), ...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}),
+    ...(/^door:\d+:[\w:.\-]{1,70}$/.test(String(v.via || '')) ? { via: String(v.via) } : {}),
+    ...(v.pin === true ? { pin: true } : {}),      // edited in Event Trace: door imports leave it alone until reset
+    ...(was ? { was } : {}) };                     // the manual mapping a door took over; put back when the door lets go
+}
 function cleanWiring(wiring) {
   const w = {};
   for (const [ch, v] of Object.entries(wiring && typeof wiring === 'object' ? wiring : {})) {
-    if (!v || typeof v !== 'object' || !/^[\w:.\-]{1,80}$/.test(ch) || !WIRING_ROLES.includes(v.role)) continue;
-    w[ch] = { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 80) } : {}),
-      ...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), ...(Number(v.at) > 0 ? { at: Number(v.at) } : {}),
-      ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), ...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}) };
+    if (!/^[\w:.\-]{1,80}$/.test(ch)) continue;
+    const e = cleanEntry(v);
+    if (e) w[ch] = e;
   }
   return w;
 }
+/** Version of the wiring map a client edited: the newest entry time. */
+function wiringVersion(w) { return Math.max(0, ...Object.values(w || {}).map(e => Number(e.at) || 0)); }
 
 class TraceEngine extends EventEmitter {
   constructor() {
@@ -378,9 +389,10 @@ class TraceEngine extends EventEmitter {
     try { return JSON.parse(fs.readFileSync(ANALYTICS_SETTINGS, 'utf8')) || {}; }
     catch { throw err('Log Analytics settings.json is damaged; fix or remove it before saving the wiring (it also holds thresholds and the Show raw switch)', 409); }
   }
-  _writeWiring(wiring) {
+  _writeWiring(wiring, doorsAt) {
     const s = this._readAnalytics();
     s.wiring = wiring;
+    if (doorsAt) s.wiringDoorsAt = doorsAt;   // door config version last imported (start-up check)
     writeAtomic(ANALYTICS_SETTINGS, JSON.stringify(s, null, 1));
     this._wiring = null; this._cache = null;
     return s.wiring;
@@ -395,24 +407,46 @@ class TraceEngine extends EventEmitter {
    * Save the wiring map. Entries that came from a door (src "door:N") push their OnCAFE door, description
    * and DPS sense back to that door on the Doors page, so the two stay paired. Last save wins.
    */
-  saveWiring(w, by = 'event trace') {
+  saveWiring(w, by = 'event trace', base = null) {
     const prev = this.wiring();
+    // a Setup tab opened before a door was saved would push its older copy back: refuse, ask for a reload
+    if (base != null && Number.isFinite(Number(base)) && wiringVersion(prev) > Number(base)) {
+      throw err('The wiring changed since you opened it (a door was saved on the Doors page, or another tab saved). Press Refresh, then make your change again.', 409);
+    }
+    const resets = Object.entries(w && typeof w === 'object' ? w : {}).filter(([, e]) => e && e.reset).map(([k]) => k);
     const next = cleanWiring(w);
     const now = Date.now();
+    let cfg = null, damaged = false;
+    try { cfg = this._readDoorConfig(); } catch { damaged = true; }   // a damaged door config: wiring still saves, nothing goes back to doors
+    const owned = new Map();   // key -> door entry, from the door config as it is now
+    if (cfg) for (const d of doorsFrom(cfg)) for (const { key, entry } of doorChannels(d)) owned.set(key, entry);
+    const owns = k => damaged || owned.has(k);
+    // door entries the client still has but no door owns any more (door deleted / moved): gone, or back to the manual mapping
+    for (const [k, e] of Object.entries(next)) {
+      if (!/^door:\d+$/.test(e.src || '') || owns(k)) continue;
+      if (e.was) next[k] = e.was; else delete next[k];
+    }
+    // a door entry removed in Setup stays off (pinned "ignore") so the next door save does not bring it back
+    for (const [k, e] of Object.entries(prev)) {
+      if (/^door:\d+$/.test(e.src || '') && owns(k) && !next[k]) next[k] = { ...e, role: 'ignore', pin: true };
+    }
     const patch = new Map();   // door id -> { oncafeDoorId, note, flipDps }
     for (const [k, e] of Object.entries(next)) {
       const m = /^door:(\d+)$/.exec(e.src || '');
       if (!m) continue;
       const before = prev[k] || {};
+      const doorDps = /^door:\d+:dps$/.test(k);
+      // anything other than pairing / description / door DPS sense is an override: imports keep it until reset
+      if ((e.role !== before.role && before.role) || ((e.label || '') !== (before.label || '') && before.label) || (!doorDps && (e.active || 'open') !== (before.active || 'open') && before.role)) e.pin = true;
       const p = patch.get(m[1]) || {};
       if ((e.door || '') !== (before.door || '')) p.oncafeDoorId = e.door || '';
       if ((e.note || '') !== (before.note || '')) p.note = e.note || '';
-      if (e.role === 'dps' && /^door:\d+:dps$/.test(k) && (e.active || 'open') !== (before.active || 'open')) { p.flipDps = true; e.active = 'open'; }   // the door keeps the sense
+      if (e.role === 'dps' && doorDps && (e.active || 'open') !== (before.active || 'open')) { p.flipDps = true; e.active = 'open'; }   // the door keeps the sense
       if (Object.keys(p).length) patch.set(m[1], p);
     }
-    if (patch.size) {
-      const cfg = this._readDoorConfig();
-      const list = cfg && (cfg.config && cfg.config.doors ? cfg.config.doors : cfg.doors);
+    for (const k of resets) if (next[k]) delete next[k].pin;
+    if (patch.size && cfg) {
+      const list = cfg.config && cfg.config.doors ? cfg.config.doors : cfg.doors;
       if (Array.isArray(list)) {
         const inv = this.cloud.inv || {};
         for (const d of list) {
@@ -421,11 +455,17 @@ class TraceEngine extends EventEmitter {
           const t = { ...(d.trace || {}) };
           if ('oncafeDoorId' in p) { t.oncafeDoorId = p.oncafeDoorId || undefined; t.oncafeDoorName = ((inv.doors || []).find(x => x.id === p.oncafeDoorId) || {}).name || undefined; }
           if ('note' in p) t.note = p.note || undefined;
+          if (p.flipDps && d.dps) { d.dps = { ...d.dps, reverseSense: !d.dps.reverseSense }; t.dpsSense = d.dps.reverseSense; }
           t.updatedAt = new Date(now).toISOString(); t.by = by;
           d.trace = t;
-          if (p.flipDps && d.dps) d.dps = { ...d.dps, reverseSense: !d.dps.reverseSense };
           // every entry of that door follows (one door = one OnCAFE door, one description)
-          for (const e of Object.values(next)) if (e.src === `door:${d.id}`) { if ('oncafeDoorId' in p) { if (p.oncafeDoorId) e.door = p.oncafeDoorId; else delete e.door; } if ('note' in p) { if (p.note) e.note = p.note; else delete e.note; } }
+          for (const [k, e] of Object.entries(next)) {
+            if (e.src !== `door:${d.id}`) continue;
+            if ('oncafeDoorId' in p) { if (p.oncafeDoorId) e.door = p.oncafeDoorId; else delete e.door; }
+            if ('note' in p) { if (p.note) e.note = p.note; else delete e.note; }
+            if (p.flipDps && e.via === `door:${d.id}:dps` && !e.pin) e.active = d.dps.reverseSense ? 'closed' : 'open';   // the raw wire's polarity follows
+            void k;
+          }
         }
         cfg.savedAt = new Date(now).toISOString();
         writeAtomic(DOORS_CONFIG, JSON.stringify(cfg, null, 2));
@@ -433,7 +473,37 @@ class TraceEngine extends EventEmitter {
       }
     }
     for (const [k, e] of Object.entries(next)) if (JSON.stringify(e) !== JSON.stringify(prev[k] || null)) e.at = now;
-    return this._writeWiring(next);
+    const saved = this._writeWiring(next);
+    if (resets.length) { this.importDoors(by); return this.wiring(); }   // reset entries are rebuilt from their door
+    return saved;
+  }
+
+  /**
+   * A Doors page save is about to overwrite door-config.json. A page opened before Event Trace changed a door's
+   * pairing would post its older copy; keep the newer pairing (and the DPS sense it set) instead. Last save wins.
+   */
+  mergeDoorSave(body) {
+    const list = body && Array.isArray(body.doors) ? body.doors : null;
+    if (!list) return 0;
+    let disk;
+    try { disk = this._readDoorConfig(); } catch { return 0; }
+    const dl = disk && (disk.config && disk.config.doors ? disk.config.doors : disk.doors);
+    if (!Array.isArray(dl)) return 0;
+    const byId = new Map(dl.filter(d => d && d.id != null).map(d => [String(d.id), d]));
+    let n = 0;
+    for (const d of list) {
+      if (!d || typeof d !== 'object') continue;
+      const old = byId.get(String(d.id));
+      const dt = old && old.trace;
+      if (!dt || !dt.updatedAt) continue;
+      const it = d.trace;
+      const newer = !it || !it.updatedAt || Date.parse(dt.updatedAt) > Date.parse(it.updatedAt);
+      if (!newer) continue;
+      d.trace = dt;
+      if (typeof dt.dpsSense === 'boolean' && d.dps && typeof d.dps === 'object' && /event trace/.test(dt.by || '')) d.dps = { ...d.dps, reverseSense: dt.dpsSense };
+      n++;
+    }
+    return n;
   }
 
   /**
@@ -441,16 +511,29 @@ class TraceEngine extends EventEmitter {
    * Called after the Doors page saves, and at start-up when the door config is newer than the wiring.
    */
   importDoors(by = 'doors page') {
-    const cfg = this._readDoorConfig();
-    if (!cfg) return { doors: 0, entries: 0 };
-    const at = Date.parse(cfg.savedAt || cfg.timestamp || '') || Date.now();
-    const doors = doorsFrom(cfg);
+    const cfg = this._readDoorConfig();              // throws on a damaged file: the wiring is left as it is
+    const at = cfg ? Date.parse(cfg.savedAt || cfg.timestamp || '') || Date.now() : Date.now();
+    const doors = cfg ? doorsFrom(cfg) : [];          // no file (config deleted): every door entry goes
+    const owned = new Map();
+    for (const d of doors) for (const { key, entry } of doorChannels(d)) owned.set(key, entry);
     const prev = this.wiring();
     const next = {};
-    for (const [k, e] of Object.entries(prev)) if (!/^door:\d+$/.test(e.src || '')) next[k] = e;
+    for (const [k, e] of Object.entries(prev)) {
+      if (!/^door:\d+$/.test(e.src || '')) { next[k] = e; continue; }
+      if (owned.has(k) && e.pin) { next[k] = e; continue; }        // edited in Event Trace: kept until reset
+      if (!owned.has(k) && e.was) next[k] = e.was;                 // the door let go: the manual mapping comes back
+    }
     let n = 0;
-    for (const d of doors) for (const { key, entry } of doorChannels(d)) { next[key] = { ...entry, at }; n++; }
-    this._writeWiring(cleanWiring(next));
+    for (const [k, entry] of owned) {
+      const cur = next[k];
+      if (cur && cur.pin && /^door:\d+$/.test(cur.src || '')) continue;
+      const p = prev[k];
+      const was = p && !/^door:\d+$/.test(p.src || '') ? p : p && p.was ? p.was : null;
+      const keep = p && p.src === entry.src && JSON.stringify({ ...p, at: 0 }) === JSON.stringify({ ...entry, ...(was ? { was } : {}), at: 0 });
+      next[k] = { ...entry, ...(was ? { was } : {}), at: keep ? p.at : at };
+      n++;
+    }
+    this._writeWiring(cleanWiring(next), at);
     this.doorSync = { by, at: Date.now(), doors: doors.map(d => d.id) };
     return { doors: doors.length, entries: n };
   }
@@ -459,7 +542,7 @@ class TraceEngine extends EventEmitter {
       const cfg = this._readDoorConfig();
       if (!cfg) return;
       const at = Date.parse(cfg.savedAt || cfg.timestamp || '') || 0;
-      const latest = Math.max(0, ...Object.values(this.wiring()).filter(e => /^door:/.test(e.src || '')).map(e => e.at || 0));
+      const latest = Math.max(Number(this._readAnalytics().wiringDoorsAt) || 0, ...Object.values(this.wiring()).filter(e => /^door:/.test(e.src || '')).map(e => e.at || 0));
       if (at > latest + 1000) this.importDoors('doors page (newer at start-up)');
     } catch (e) { console.warn('[Trace] door import at start-up:', e.message); }
   }
@@ -509,7 +592,7 @@ class TraceEngine extends EventEmitter {
         id: d.id, name: d.name, enabled: d.enabled !== false, ioSource: d.ioSource || 'physical',
         oncafe: oc ? { id: oc, name: t.oncafeDoorName || ((inv.doors || []).find(x => x.id === oc) || {}).name || null } : null,
         note: t.note || '', updatedAt: t.updatedAt || null, by: t.by || null,
-        channels: own.filter(k => /^door:/.test(k)).map(k => ({ key: k, role: (wiring[k] || {}).role || null, label: (wiring[k] || {}).label || k, overridden: !!(wiring[k] && wiring[k].src !== `door:${d.id}`) })),
+        channels: own.filter(k => /^door:/.test(k)).map(k => ({ key: k, role: (wiring[k] || {}).role || null, label: (wiring[k] || {}).label || k, overridden: !!(wiring[k] && wiring[k].pin) })),
         grantMs: oc && dcfg[oc] ? dcfg[oc].grantMs : null,
         counts: { pass: mine.filter(x => x.status === 'pass').length, warn: mine.filter(x => x.status === 'warn').length, fail: mine.filter(x => x.status === 'fail').length },
         last: { card: brief(last('card')), input: brief(last('input')), output: brief(last('output')), command: brief(last('command')) },
