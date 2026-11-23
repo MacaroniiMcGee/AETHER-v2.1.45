@@ -44,12 +44,15 @@ module.exports = function traceRoutes() {
   const isAdmin = req => !req.aetherUser || req.aetherUser.role === 'admin' || req.aetherUser.local === true;
   router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
-  router.get('/status', (_req, res) => res.json(eng.status()));
+  router.get('/status', (req, res) => res.json({ ...eng.status(), me: { admin: isAdmin(req) } }));
   router.put('/settings', express.json({ limit: '256kb' }), (req, res) => {
     try {
       const body = { ...(req.body || {}) };
       if ('allowRaw' in body && body.allowRaw !== eng.settings.allowRaw && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change who may see plain text' });
       if (body.commands && !!body.commands.enabled !== eng.settings.commands.enabled && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can turn commands on or off' });
+      const changed = (k, a, b) => JSON.stringify(a) !== JSON.stringify(b);
+      if (body.sync && body.sync.channel && changed('ch', { ...eng.settings.sync.channel, ...body.sync.channel }, eng.settings.sync.channel) && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change what the sync markers drive' });
+      if (body.cloud && body.cloud.zones && changed('z', body.cloud.zones, eng.settings.cloud.zones) && !isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the zones under test' });
       res.json(eng.saveSettings(body));
     } catch (e) { fail(res, e); }
   });
@@ -70,11 +73,18 @@ module.exports = function traceRoutes() {
 
   // wiring map (shared with Log Analytics › Product Test) and the channels Aether used lately
   router.get('/wiring', (_req, res) => { try { res.json({ wiring: eng.wiring(), channels: eng.channelsSeen() }); } catch (e) { fail(res, e); } });
-  router.put('/wiring', express.json({ limit: '64kb' }), (req, res) => { try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}) }); } catch (e) { fail(res, e); } });
+  router.put('/wiring', express.json({ limit: '64kb' }), (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the wiring map' });
+    try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}) }); } catch (e) { fail(res, e); } });
 
   // a door / area / zone command sent to OnCAFE by Aether (admins only; doors under test only)
   router.post('/command', express.json(), async (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can send commands to OnCAFE' });
+    // a page from another site must not be able to make the Pi send commands (even a local, signed-out browser)
+    const origin = req.headers.origin;
+    let own = !origin;
+    if (origin) { try { own = require('../lib/authManager').isOwnOrigin(origin, req); } catch { own = false; } }
+    if (!own) return res.status(403).json({ error: 'Commands are only accepted from the Aether page itself' });
     try { res.json(await eng.command(req.body || {}, who(req))); } catch (e) { fail(res, e); }
   });
 

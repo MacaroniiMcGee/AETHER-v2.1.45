@@ -111,7 +111,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
           </div>
         </div>
         {actionErr && <span className="max-w-[360px] truncate text-xs text-hv-error-fg flex items-center gap-1.5" title={actionErr}><AlertTriangle size={13} className="shrink-0" />{actionErr}</span>}
-        {status.settings.commands.enabled && <Button size="sm" icon={<Cloud size={13} />} onClick={() => setCmdOpen(true)} title="Send a door / area / zone command to OnCAFE and trace it">Command</Button>}
+        {status.settings.commands.enabled && status.me?.admin !== false && <Button size="sm" icon={<Cloud size={13} />} onClick={() => setCmdOpen(true)} title="Send a door / area / zone command to OnCAFE and trace it">Command</Button>}
         <Button size="sm" icon={<Send size={13} />} busy={busy === 'sync' || status.syncBusy} onClick={sync} title="Send the sync markers now">Sync</Button>
         {run
           ? <Button tone="danger-soft" icon={<Square size={13} />} busy={busy === 'stop'} onClick={stopRun}>{withSync && status.settings.sync.atEnd ? 'Sync and stop' : 'Stop'}</Button>
@@ -147,6 +147,9 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
       ) : (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="px-3 pt-3 space-y-2 shrink-0">
+            {(status.pendingReverts || []).map(p => (
+              <div key={p.id} className="text-xs rounded-hv-xs px-2 py-1 bg-hv-warning-tint text-hv-warning-fg">Turning back {p.kind} on {String(p.target)} at {new Date(p.due).toLocaleTimeString()} (automatic)</div>
+            ))}
             {note && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-success-tint text-hv-success-fg flex items-center gap-2"><span className="flex-1">{note}</span><button className="opacity-70 hover:opacity-100" onClick={() => setNote(null)}>×</button></div>}
             {analysis && <Summary a={analysis} kind={kind} />}
             {analysis && <ClockCard a={analysis} />}

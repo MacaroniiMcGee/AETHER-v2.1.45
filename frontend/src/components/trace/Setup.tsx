@@ -102,7 +102,7 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
           <>
             <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
               <Field label="Organisation">
-                <Select value={s.cloud.org} onChange={e => { upd(x => { x.cloud.org = e.target.value; x.cloud.controllers = []; x.cloud.doors = []; return x; }); setInv(null); }}>
+                <Select value={s.cloud.org} onChange={e => { upd(x => { x.cloud.org = e.target.value; x.cloud.controllers = []; x.cloud.doors = []; x.cloud.zones = []; return x; }); setInv(null); }}>
                   <option value="">Pick…</option>{(session.orgs || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </Select>
               </Field>
@@ -133,6 +133,19 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
                       </label>
                     ))}
                   </div>
+                </div>
+              </div>
+            )}
+            {inv && inv.zones.length > 0 && (
+              <div>
+                <div className="text-xs font-semibold text-hv-text-2 mb-1">Zones under test <span className="font-normal text-hv-text-3">(the only zones Commands may change)</span></div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 max-h-24 overflow-auto rounded-hv-xs ring-1 ring-inset ring-hv-line px-2 py-1">
+                  {inv.zones.map(z => (
+                    <label key={z.id} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input type="checkbox" checked={s.cloud.zones.includes(z.id)} onChange={() => upd(x => { x.cloud.zones = toggleIn(x.cloud.zones, z.id); return x; })} />
+                      <span className="text-hv-text">{z.name}</span><span className="text-hv-text-3">{z.type}</span>
+                    </label>
+                  ))}
                 </div>
               </div>
             )}

@@ -26,6 +26,7 @@ const { parseCommand, commandEvent, buildRequest, reverseOf } = require('./comma
 const BASE = path.join(__dirname, '..', 'data', 'trace');
 const RUNS = path.join(BASE, 'runs');
 const SETTINGS = path.join(BASE, 'settings.json');
+const REVERTS = path.join(BASE, 'pending-reverts.json');   // commands to turn back, kept across restarts
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
 const ANALYTICS_SETTINGS = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');   // wiring map shared with Product Test
 const KEEP_RUNS = 40;
@@ -33,7 +34,7 @@ const LIVE_MAX = 4000;
 const RUN_MAX = 50000;
 
 const DEFAULTS = {
-  cloud: { url: '', org: '', controllers: [], doors: [], poll: true, pollMs: 2000, autoConnect: false, doorConfig: {} },
+  cloud: { url: '', org: '', controllers: [], doors: [], zones: [], poll: true, pollMs: 2000, autoConnect: false, doorConfig: {} },
   sync: {
     channel: { kind: 'wiegand', readerId: '', address: 1, port: 0, relay: 1, input: 0 },
     format: 'w26',
@@ -63,6 +64,7 @@ function cleanSettings(s = {}) {
       url: String(c.url || '').trim().slice(0, 200), org: /^[0-9a-f-]{36}$/i.test(c.org || '') ? c.org : '',
       controllers: (Array.isArray(c.controllers) ? c.controllers : []).filter(x => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 64),
       doors: (Array.isArray(c.doors) ? c.doors : []).filter(x => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 50),
+      zones: (Array.isArray(c.zones) ? c.zones : []).filter(x => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 50),
       poll: c.poll !== false, pollMs: int(c.pollMs, 1000, 30000, d.cloud.pollMs), autoConnect: !!c.autoConnect,
       doorConfig: Object.fromEntries(Object.entries(c.doorConfig && typeof c.doorConfig === 'object' ? c.doorConfig : {}).filter(([k]) => /^[0-9a-f-]{36}$/i.test(k)).slice(0, 50)
         .map(([k, v]) => [k, { grantMs: Number.isFinite(Number(v && v.grantMs)) && v.grantMs !== null ? Number(v.grantMs) : null, extendedMs: Number.isFinite(Number(v && v.extendedMs)) && v.extendedMs !== null ? Number(v.extendedMs) : null, name: String((v && v.name) || '').slice(0, 80) }])),
@@ -84,6 +86,12 @@ function cleanSettings(s = {}) {
 
 const WIRING_ROLES = ['dps', 'rex', 'card', 'keypad', 'lock', 'input', 'output', 'ignore'];
 function readAnalyticsSettings() { try { return JSON.parse(fs.readFileSync(ANALYTICS_SETTINGS, 'utf8')) || {}; } catch { return {}; } }
+function writeAtomic(file, text, mode) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text, mode ? { mode } : undefined);
+  fs.renameSync(tmp, file);
+}
 function cleanWiring(wiring) {
   const w = {};
   for (const [ch, v] of Object.entries(wiring && typeof wiring === 'object' ? wiring : {})) {
@@ -129,6 +137,7 @@ class TraceEngine extends EventEmitter {
     }
     // a run left open by a restart is closed, not resumed
     for (const r of this.listRuns()) if (!r.end) this._patchMeta(r.id, { end: r.lastAt || r.start, endReason: 'backend restarted' });
+    for (const p of this._reverts()) this._armRevert(p);   // turn-backs that were waiting when the backend stopped
   }
 
   _hookTraffic() {
@@ -242,8 +251,7 @@ class TraceEngine extends EventEmitter {
     const merged = cleanSettings({ ...this.settings, ...s, commands: { ...this.settings.commands, ...(s.commands || {}) }, thresholds: { ...this.settings.thresholds, ...(s.thresholds || {}) }, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
     this.settings = merged;
     this._settingsRev = (this._settingsRev || 0) + 1;
-    fs.mkdirSync(BASE, { recursive: true });
-    fs.writeFileSync(SETTINGS, JSON.stringify(merged, null, 1));
+    writeAtomic(SETTINGS, JSON.stringify(merged, null, 1));
     return merged;
   }
 
@@ -287,7 +295,10 @@ class TraceEngine extends EventEmitter {
     if (!w || !['dps', 'rex', 'input'].includes(w.role)) throw err(`Map ${ch} as a DPS, REX or input in Setup › Wiring before using it for sync`);
     const { expectFor } = require('./correlate');
     const on = expectFor({ journal: { v: 1 } }, w.role, w), off = expectFor({ journal: { v: 0 } }, w.role, w);
-    return { ch, door: w.door || null, on: on.types, off: off.types };
+    // drive away from the resting state and back: a normally-closed DPS rests ON, so it pulses OFF then ON
+    const rest = w.role === 'dps' && w.active === 'closed' ? 1 : 0;
+    const first = { journal: { v: rest ? 0 : 1 } }, second = { journal: { v: rest } };
+    return { ch, door: w.door || null, rest, first: expectFor(first, w.role, w).types, second: expectFor(second, w.role, w).types };
   }
   async _drive(v) {
     const c = this.settings.sync.channel;
@@ -313,12 +324,26 @@ class TraceEngine extends EventEmitter {
       if (this.journal) this.journal.record('marker', 'trace', 1, 'ui', { event: 'sync-' + set, trace: true });
       if (s.channel.kind === 'relay' || s.channel.kind === 'emu-in') {
         const p = this._pulseSync();
-        for (const [i, v] of [[0, 1], [1, 0]]) {
+        let away = false;
+        try {
           const at = Date.now();
-          await this._drive(v);
-          keep({ at, set, idx: i, batch, ch: p.ch, v, types: v ? p.on : p.off, door: p.door });
-          await sleep(s.gapsMs[i] ?? 2000);
+          away = true;
+          await this._drive(p.rest ? 0 : 1);
+          keep({ at, set, idx: 0, batch, ch: p.ch, v: p.rest ? 0 : 1, types: p.first, door: p.door });
+          await sleep(s.gapsMs[0] ?? 2000);
+        } finally {
+          if (away) {   // always put the input back, even if the first step failed half-way
+            let ok = false, last = null;
+            for (let k = 0; k < 3 && !ok; k++) { try { const at = Date.now(); await this._drive(p.rest); ok = true; keep({ at, set, idx: 1, batch, ch: p.ch, v: p.rest, types: p.second, door: p.door }); } catch (e) { last = e; await sleep(300); } }
+            if (!ok) {
+              const m = `Sync pulse could not put ${p.ch} back to ${p.rest ? 'on' : 'off'}: ${last && last.message}. Check the relay now.`;
+              console.error('[Trace] ' + m);
+              if (this.run) this._patchMeta(this.run.id, { syncError: m });
+              throw err(m, 500);
+            }
+          }
         }
+        await sleep(s.gapsMs[1] ?? 2000);
         return sent;
       }
       for (let i = 0; i < s.cards.length; i++) {
@@ -344,10 +369,13 @@ class TraceEngine extends EventEmitter {
     } catch { return {}; }
   }
   saveWiring(w) {
-    const s = readAnalyticsSettings();
+    let s = {};
+    if (fs.existsSync(ANALYTICS_SETTINGS)) {
+      try { s = JSON.parse(fs.readFileSync(ANALYTICS_SETTINGS, 'utf8')) || {}; }
+      catch { throw err('Log Analytics settings.json is damaged; fix or remove it before saving the wiring (it also holds thresholds and the Show raw switch)', 409); }
+    }
     s.wiring = cleanWiring(w);
-    fs.mkdirSync(path.dirname(ANALYTICS_SETTINGS), { recursive: true });
-    fs.writeFileSync(ANALYTICS_SETTINGS, JSON.stringify(s, null, 1));
+    writeAtomic(ANALYTICS_SETTINGS, JSON.stringify(s, null, 1));
     this._wiring = null; this._cache = null;
     return s.wiring;
   }
@@ -387,7 +415,7 @@ class TraceEngine extends EventEmitter {
     const st = this.settings;
     if (!st.commands.enabled) throw err('Sending commands is turned off (Setup › Commands)', 403);
     if (!st.cloud.url || !st.cloud.org) throw err('Set up OnCAFE first (Setup › OnCAFE)', 400);
-    const inv = this.cloud.inv && this.cloud.inv.org === st.cloud.org ? this.cloud.inv : await this.cloud.inventory(st.cloud.url, st.cloud.org);
+    const inv = this.cloud.inv && this.cloud.inv.org === st.cloud.org && Date.now() - this.cloud.inv.at < 10 * 60000 ? this.cloud.inv : await this.cloud.inventory(st.cloud.url, st.cloud.org);
     const kind = String(c.kind || '');
     const target = String(c.target || '');
     const doors = st.cloud.doors;
@@ -403,21 +431,46 @@ class TraceEngine extends EventEmitter {
     } else if (kind === 'outputzone' || kind === 'inputzone') {
       const z = inv.zones.find(x => x.id === target);
       if (!z) throw err('Unknown zone', 400);
+      if (!st.cloud.zones.includes(target)) throw err('Commands only go to the zones under test (Setup › OnCAFE)', 403);
       cmd = { kind, target, value: kind === 'outputzone' ? (c.value === 'activate' ? 'activate' : 'deactivate') : (c.value === 'arm' ? 'arm' : 'disarm'), targetName: z.name };
     } else throw err('Unknown command', 400);
     const area = cmd.area && inv.areas.find(a => a.id === cmd.area);
-    const req = buildRequest(cmd, { tz: area && area.tz });
-    const at = Date.now();
-    const r = await this.cloud.command(st.cloud.url, st.cloud.org, req);
-    const e = this.add(commandEvent(cmd, { src: 'command', at, by: `Aether (${String(who || '?').slice(0, 40)})`, ackMs: r.ackMs, status: r.status, error: r.ok ? undefined : r.error, via: 'Aether' }), { request: req, response: r.data !== undefined ? r.data : r.error });
-    const back = reverseOf(cmd);
+    const { r, e } = await this._send(cmd, { tz: area && area.tz }, `Aether (${String(who || '?').slice(0, 40)})`);
+    // only an "on" command is turned back (lockdown on, maintenance on, shunt, activate, arm) — never an "off"
+    const engaging = (cmd.kind === 'lockdown' || cmd.kind === 'maintenance' || cmd.kind === 'shunt') ? cmd.value === true : cmd.kind === 'outputzone' ? cmd.value === 'activate' : cmd.kind === 'inputzone' ? cmd.value === 'arm' : false;
+    const back = engaging ? reverseOf(cmd) : null;
     const revertSec = Math.max(0, Math.min(3600, Number(c.revertSec) || 0));
-    if (r.ok && back && revertSec) {
-      const t = setTimeout(() => this.command({ ...back, kind: back.kind, target: back.target, value: back.value }, `${who} (auto)`).catch(x => console.warn('[Trace] revert failed:', x.message)), revertSec * 1000);
-      if (t.unref) t.unref();
-    }
+    if (r.ok && back && revertSec) this._scheduleRevert({ id: e.id, due: Date.now() + revertSec * 1000, cmd: back, who: String(who || '?').slice(0, 40), url: st.cloud.url, org: st.cloud.org });
     return { ok: r.ok, status: r.status, ackMs: r.ackMs, error: r.error || null, event: e.id, revertIn: r.ok && back && revertSec ? revertSec : null };
   }
+
+  /** Send a command and record it (used by command() and by reverts, which skip the on/off and scope checks on purpose). */
+  async _send(cmd, ctx, by, target = this.settings.cloud) {
+    const req = buildRequest(cmd, ctx);
+    const at = Date.now();
+    let r;
+    try { r = await this.cloud.command(target.url, target.org, req); } catch (x) { r = { ok: false, status: 0, ackMs: Date.now() - at, error: x.message }; }
+    const e = this.add(commandEvent(cmd, { src: 'command', at, by, ackMs: r.ackMs, status: r.status, error: r.ok ? undefined : r.error, via: 'Aether' }), { request: req, response: r.data !== undefined ? r.data : r.error });
+    return { r, e };
+  }
+
+  // pending reverts survive a backend restart; an overdue one runs as soon as Aether is back
+  _reverts() { try { return JSON.parse(fs.readFileSync(REVERTS, 'utf8')) || []; } catch { return []; } }
+  _saveReverts(list) { try { writeAtomic(REVERTS, JSON.stringify(list)); } catch { /* */ } }
+  _scheduleRevert(p) {
+    const list = this._reverts().filter(x => x.id !== p.id).concat(p);
+    this._saveReverts(list);
+    this._armRevert(p);
+  }
+  _armRevert(p) {
+    const t = setTimeout(async () => {
+      const { r } = await this._send(p.cmd, {}, `Aether (${p.who}, automatic turn-back)`, { url: p.url, org: p.org });
+      this._saveReverts(this._reverts().filter(x => x.id !== p.id));
+      if (!r.ok) console.error(`[Trace] automatic turn-back failed (${p.cmd.kind} ${p.cmd.targetName || p.cmd.target}): ${r.error}`);
+    }, Math.max(0, p.due - Date.now()));
+    if (t.unref) t.unref();
+  }
+  pendingReverts() { return this._reverts().map(p => ({ id: p.id, due: p.due, kind: p.cmd.kind, value: p.cmd.value, target: p.cmd.targetName || p.cmd.target })); }
 
   // ── runs ───────────────────────────────────────────────────────────────
   _metaPath(id) { return path.join(runDir(id), 'meta.json'); }
@@ -627,6 +680,7 @@ class TraceEngine extends EventEmitter {
       channels: this.channels(),
       settings: this.settings,
       wiring: this.wiring(),
+      pendingReverts: this.pendingReverts(),
       inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,
     };
   }

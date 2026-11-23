@@ -18,7 +18,7 @@ export const CommandDialog: React.FC<{ open: boolean; onClose: () => void; api: 
   const inv = status.inventory;
   const doors = useMemo(() => (inv ? inv.doors.filter(d => status.settings.cloud.doors.includes(d.id)) : []), [inv, status.settings.cloud.doors]);
   const areas = useMemo(() => (inv ? inv.areas.filter(a => doors.some(d => d.areaIds.includes(a.id))) : []), [inv, doors]);
-  const zones = inv ? inv.zones : [];
+  const zones = inv ? inv.zones.filter(z => status.settings.cloud.zones.includes(z.id)) : [];
   const [kind, setKind] = useState<K>('override');
   const [target, setTarget] = useState('');
   const [on, setOn] = useState(true);
@@ -31,7 +31,8 @@ export const CommandDialog: React.FC<{ open: boolean; onClose: () => void; api: 
   const targets = k.target === 'door' ? doors : k.target === 'area' ? areas : zones;
   const tName = (targets as { id: string; name: string }[]).find(x => x.id === target)?.name || '';
   const value = kind === 'override' ? (on ? 'unlock' : 'lock') : kind === 'outputzone' ? (on ? 'activate' : 'deactivate') : kind === 'inputzone' ? (on ? 'arm' : 'disarm') : on;
-  const canRevert = kind !== 'override';
+  const canRevert = kind !== 'override' && on;   // only an "on" command is turned back
+  React.useEffect(() => { if (open) { setTarget(''); setConfirm(false); setErr(null); } }, [open]);
   const send = async () => {
     setBusy(true); setErr(null);
     try {
@@ -69,7 +70,7 @@ export const CommandDialog: React.FC<{ open: boolean; onClose: () => void; api: 
           <Field label="Command">
             <Select value={kind} onChange={e => { setKind(e.target.value as K); setTarget(''); }}>{KINDS.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}</Select>
           </Field>
-          <Field label={k.target === 'door' ? 'Door (doors under test only)' : k.target === 'area' ? 'Area (areas with a door under test)' : 'Zone'}>
+          <Field label={k.target === 'door' ? 'Door (doors under test only)' : k.target === 'area' ? 'Area (areas with a door under test)' : 'Zone (zones under test only)'}>
             <Select value={target} onChange={e => setTarget(e.target.value)}>
               <option value="">{targets.length ? 'Pick…' : 'none available'}</option>
               {(targets as { id: string; name: string }[]).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -78,8 +79,8 @@ export const CommandDialog: React.FC<{ open: boolean; onClose: () => void; api: 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Action"><Select value={on ? '1' : '0'} onChange={e => setOn(e.target.value === '1')}><option value="1">{k.on}</option><option value="0">{k.off}</option></Select></Field>
             {kind === 'override'
-              ? <Field label="For (seconds)" hint="OnCAFE ends it by itself"><Input type="number" min={5} max={3600} value={seconds} onChange={e => setSeconds(Number(e.target.value))} /></Field>
-              : <Field label="Turn it back after (s)" hint="0 = leave it"><Input type="number" min={0} max={3600} value={revert} onChange={e => setRevert(Number(e.target.value))} /></Field>}
+              ? <Field label="For (seconds)" hint="OnCAFE ends it by itself"><Input type="number" min={5} max={3600} value={seconds} onChange={e => setSeconds(Math.max(5, Math.min(3600, Number(e.target.value) || 5)))} /></Field>
+              : canRevert ? <Field label="Turn it back after (s)" hint="0 = leave it"><Input type="number" min={0} max={3600} value={revert} onChange={e => setRevert(Number(e.target.value))} /></Field> : <div />}
           </div>
           <div className="text-[11px] text-hv-text-3">The trace follows it: OnCAFE's answer → the controller's event → the door state in the cloud → Aether seeing the strike or output (map them in Setup › Wiring).</div>
         </div>

@@ -34,7 +34,16 @@ function statsOf(arr) {
   return a.length ? { n: a.length, min: Math.min(...a), p50: pct(a, 0.5), p95: pct(a, 0.95), max: Math.max(...a) } : { n: 0 };
 }
 const median = a => pct(a, 0.5);
-const typeIn = (t, list) => list.some(x => (x.endsWith('*') ? t.startsWith(x.slice(0, -1)) : t === x));
+// 'open' exact · 'lockdown*' prefix · '*activated' suffix. A suffix never matches its own negation:
+// '*activated' ≠ 'deactivated', '*active' ≠ 'inactive', '*armed' ≠ 'disarmed' / 'zonedisarmed'.
+const typeIn = (t, list) => list.some(x => {
+  if (x.startsWith('*')) {
+    const suf = x.slice(1);
+    if (!t.endsWith(suf)) return false;
+    return !/(de|in|dis|un|non)$/.test(t.slice(0, t.length - suf.length));
+  }
+  return x.endsWith('*') ? t.startsWith(x.slice(0, -1)) : t === x;
+});
 
 /** What the controller should report for a journal edge under a role. */
 function expectFor(e, role, opt = {}) {
@@ -61,7 +70,7 @@ function expectForCommand(c) {
     case 'maintenance': return { types: ['maintenancemode*'], label: v ? 'maintenance on' : 'maintenance off' };
     case 'shunt': return { types: v ? ['readershunted'] : ['readerunshunted'], label: v ? 'reader shunted' : 'reader unshunted' };
     case 'outputzone': return { types: v === 'activate' ? ['activated', '*activated'] : ['deactivated', '*deactivated'], label: `output zone ${v}`, outTo: v === 'activate' ? 1 : 0 };
-    case 'inputzone': return { types: [`${v}*`, `*${v}ed`, `*${v}`], label: `input zone ${v}` };
+    case 'inputzone': return { types: v === 'arm' ? ['armed', 'zonearmed', '*armed', 'arm'] : ['disarmed', 'zonedisarmed', '*disarmed', 'disarm'], label: `input zone ${v}` };
     default: return { types: [], label: c.kind };
   }
 }
@@ -233,6 +242,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
   const doorOf = ch => (roles[ch] && roles[ch].door) || null;
   const lockChannels = door => Object.entries(roles).filter(([, r]) => r.role === 'lock' && (!door || !r.door || r.door === door)).map(([ch]) => ch);
   const traces = [];
+  const cmdUsed = new Set();   // controller events a command trace claimed: the strike/output trace may share them
 
   // ── 1. cards ───────────────────────────────────────────────────────────
   const cards = journalEv.filter(e => e.type === 'card' || e.type === 'keypad');
@@ -335,7 +345,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
         const grant = traces.find(t => t.kind === 'card' && t.result === 'grant' && t0 - t.at >= 0 && (!door || !t.decision.door || t.decision.door.id === door)
           && t0 - t.at <= ((doorCfg[door] && doorCfg[door].grantMs) || 5000) + 1000);
         if (lastEdge && lastEdge.journal.v === 1) bad(`Door opened while the strike (${lastEdge.journal.ch}) was unlocked, but the controller reported FORCED OPEN`);
-        else if (!strikes.length && grant) bad(`Door opened ${Math.round((t0 - grant.at) / 100) / 10} s after a granted card (inside the grant time), but the controller reported FORCED OPEN`);
+        else if ((!strikes.length || !lastEdge) && grant) bad(`Door opened ${Math.round((t0 - grant.at) / 100) / 10} s after a granted card (inside the grant time), but the controller reported FORCED OPEN`);
         else notes.push('Controller reported forced open (the door was locked when it opened)');
       }
       const ms = ch.decided - t0;
@@ -369,7 +379,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
       g = groups.filter(h => !used.has(h) && h.door && targets.includes(String(h.door.id)) && gPi(h) >= t0 - 500 && gPi(h) <= t0 + 10000).sort((p, q) => gPi(p) - gPi(q))[0];
       if (g) matchedBy = 'target and time';
     }
-    if (g) used.add(g);
+    if (g) { used.add(g); cmdUsed.add(g); }
     const hops = [{ id: 'sent', label: `${c.src === 'command' ? 'Aether sent' : c.src === 'har' ? 'Browser sent' : 'Seen on the wire'}: ${x.label}`, at: t0, ms: 0, clock: c.clock || 'pi' }];
     if (c.info && Number.isFinite(c.info.ackMs)) hops.push({ id: 'ack', label: `OnCAFE answered ${c.info.status || ''}`.trim(), at: t0 + c.info.ackMs, ms: c.info.ackMs, clock: c.clock || 'pi' });
     let ch = null;
@@ -417,7 +427,8 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     const v = o.journal.v;
     // the controller's own report of this change (usually just before Aether sees it)
     // (an "unlocked" claimed by a command trace is the same event that fired this strike: outputs share it, but never with another output)
-    const g = groups.filter(h => !usedOut.has(h) && typeIn(h.type, x.types) && (!door || !h.door || h.door.id === door)
+    const g = groups.filter(h => !usedOut.has(h) && (!used.has(h) || cmdUsed.has(h)) && typeIn(h.type, x.types) && (!door || !h.door || h.door.id === door)
+      && (!x.io || !r.ioId || String(h.ioId || '').includes(String(r.ioId).replace(/^.*#(input_|output_)?/, '')))
       && gPi(h) - o.at >= -th.outputWindowMs && gPi(h) - o.at <= 2000).sort((p, q) => Math.abs(gPi(p) - o.at) - Math.abs(gPi(q) - o.at))[0];
     if (g) usedOut.add(g);
     // what asked for it (only for "on" edges)
@@ -426,7 +437,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
       const lo = o.at - 15000;
       const cands = traces.filter(t => t.at >= lo && t.at <= o.at && (
         (t.kind === 'card' && t.result === 'grant') || (t.kind === 'input' && t.role === 'rex' && t.action.v === 1) ||
-        (t.kind === 'command' && ((r.role === 'lock' && expectForCommand(t.action.cmd).lockTo === 1) || (r.role === 'output' && expectForCommand(t.action.cmd).outTo === 1))))
+        (t.kind === 'command' && !t.notes.some(n => /refused/.test(n)) && ((r.role === 'lock' && expectForCommand(t.action.cmd).lockTo === 1) || (r.role === 'output' && expectForCommand(t.action.cmd).outTo === 1))))
         && (!door || r.role === 'output' || !t.decision || !t.decision.door || t.decision.door.id === door || (t.kind === 'command' && [].concat(t.action.cmd.target || []).includes(door))));
       const best = cands.sort((a, b) => b.at - a.at)[0];
       if (best) cause = { kind: best.kind, label: best.kind === 'card' ? `card ${credKey(best.action.cred)} granted` : best.kind === 'input' ? 'REX' : best.expect, at: best.at, traceId: best.id };

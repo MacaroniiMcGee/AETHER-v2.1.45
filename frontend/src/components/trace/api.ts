@@ -38,7 +38,7 @@ export interface InvDoor { id: string; name: string; controllerId: string; areaI
 export interface InvArea { id: string; name: string; locationId: string; location: string; tz: string | null }
 export interface InvZone { id: string; name: string; type: string; state: string }
 export interface Settings {
-  cloud: { url: string; org: string; controllers: string[]; doors: string[]; poll: boolean; pollMs: number; autoConnect: boolean; doorConfig: Record<string, { grantMs: number | null; extendedMs: number | null; name: string }> };
+  cloud: { url: string; org: string; controllers: string[]; doors: string[]; zones: string[]; poll: boolean; pollMs: number; autoConnect: boolean; doorConfig: Record<string, { grantMs: number | null; extendedMs: number | null; name: string }> };
   sync: { channel: { kind: 'wiegand' | 'osdp' | 'emu' | 'relay' | 'emu-in'; readerId: string; address: number; port: number; relay: number; input: number }; format: string; cards: { fc: number; cn: string }[]; gapsMs: number[]; atStart: boolean; atEnd: boolean; everyMin: number };
   wire: { controllerIps: string[] };
   thresholds: { decisionWarn: number; decisionFail: number; pushWarn: number; pushFail: number; matchWindowMs: number; inputWindowMs: number; outputWindowMs: number; commandWarn: number; commandFail: number; heldToleranceMs: number };
@@ -57,6 +57,8 @@ export interface Status {
   channels: { wiegand: { id: string; name: string }[]; osdp: { id: string; name: string }[]; emu: { id: string; name: string }[]; relay?: boolean };
   settings: Settings;
   wiring: Wiring;
+  me?: { admin: boolean };
+  pendingReverts?: { id: string; due: number; kind: string; value: unknown; target: string | string[] }[];
   inventory: { org: string; at: number; doors: InvDoor[]; areas: InvArea[]; zones: InvZone[]; controllers: Inventory['controllers'] } | null;
 }
 export interface RunMeta { id: string; name: string; start: number; end: number | null; endReason?: string; count?: number; imports?: { at: number; what: string; count: number }[] }

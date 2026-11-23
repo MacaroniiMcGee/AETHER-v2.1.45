@@ -449,7 +449,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     const { TraceEngine } = require('../trace/engine');
     const eng = new TraceEngine();
     eng.saveSettings({ cloud: { url: 'https://qa.oncafe.hanwhavision.cloud', org: ORG, doors: [DOOR] }, commands: { enabled: false } });
-    eng.cloud.inv = { org: ORG, doors: [{ id: DOOR, name: 'Lab door', areaIds: [AREA] }], areas: [{ id: AREA, name: 'Lab', tz: 'UTC' }], zones: [{ id: Z, name: 'Siren' }], controllers: [] };
+    eng.cloud.inv = { org: ORG, at: Date.now(), doors: [{ id: DOOR, name: 'Lab door', areaIds: [AREA] }], areas: [{ id: AREA, name: 'Lab', tz: 'UTC' }], zones: [{ id: Z, name: 'Siren' }], controllers: [] };
     const sentReq = [];
     eng.cloud.command = async (_u, _o, req) => { sentReq.push(req); return { ok: true, status: 200, ackMs: 321, data: { success: true } }; };
     await assert.rejects(eng.command({ kind: 'lockdown', target: AREA, value: true }, 't'), /turned off/);
@@ -480,7 +480,35 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     assert.deepStrictEqual(sent.map(x => [x.ch, x.v]), [['relay:6', 1], ['relay:6', 0]]);
     eng.saveSettings({ sync: { channel: { kind: 'relay', relay: 3 } } });
     await assert.rejects(eng.sendSync('check'), /Map relay:3/);
-    ok('commands: off by default, scoped, sent with the session, logged with who, auto-reverted; wiring shared with Product Test; DPS pulse sync');
+    // review fixes: only "on" commands are turned back; zones are scoped; turn-backs survive a restart
+    const before = sentReq.length;
+    const off = await eng.command({ kind: 'lockdown', target: AREA, value: false, revertSec: 1 }, 'tester');
+    assert.strictEqual(off.revertIn, null, 'lockdown OFF is never turned back on');
+    await sleep(1200); assert.strictEqual(sentReq.length, before + 1);
+    await assert.rejects(eng.command({ kind: 'outputzone', target: Z, value: 'activate' }, 't'), /zones under test/);
+    eng.saveSettings({ cloud: { zones: [Z] } });
+    await eng.command({ kind: 'maintenance', target: DOOR, value: true, revertSec: 60 }, 'tester');
+    assert.strictEqual(eng.pendingReverts().length, 1);
+    const eng2 = new TraceEngine(); eng2.cloud.command = eng.cloud.command;
+    assert.strictEqual(eng2.pendingReverts()[0].kind, 'maintenance', 'turn-back kept on disk');
+    // normally-closed DPS pulses off then on; a failing "back" step is retried and reported
+    eng.saveWiring({ 'relay:6': { role: 'dps', door: DOOR, active: 'closed' } });
+    q.calls = [];
+    eng.saveSettings({ sync: { channel: { kind: 'relay', relay: 6 }, gapsMs: [300, 300] } });
+    const nc = await eng.sendSync('check');
+    assert.deepStrictEqual(q.calls, [['setRelay', 6, false], ['setRelay', 6, true]]);
+    assert.deepStrictEqual(nc.map(x => x.types[0]), ['open', 'closed']);
+    let fails = 2; q.calls = [];
+    const orig = q.enqueue; q.enqueue = async function (op, ch, v) { if (v === true && fails-- > 0) throw new Error('i2c busy'); return orig.call(this, op, ch, v); };
+    await eng.sendSync('check');
+    assert.deepStrictEqual(q.calls.at(-1), ['setRelay', 6, true], 'put back after two failures');
+    fails = 9;
+    await assert.rejects(eng.sendSync('check'), /could not put relay:6 back/);
+    q.enqueue = orig;
+    // a damaged Log Analytics settings file is never overwritten by a wiring save
+    fs.writeFileSync(ap, '{ "thresholds": {"latencyWarnMs": 1');
+    assert.throws(() => eng.saveWiring({}), /damaged/);
+    ok('commands: off by default, scoped (doors, areas, zones), sent with the session, logged with who; only "on" commands turned back, kept across restarts; wiring shared and never clobbers a damaged file; pulse sync honours NC DPS and always releases');
   }
 
   console.log(`\n${passed} checks passed`);

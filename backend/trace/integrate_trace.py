@@ -119,6 +119,8 @@ def main():
         if 'module.exports.bearer = bearer' in s:
             return None
         if 'module.exports.api = api' in s:   # TRACE-1 line
+            if 'async function bearer(' not in s:
+                raise LookupError('bearer() not found')
             return '\n'.join(full if 'module.exports.api = api' in l else l for l in s.split('\n'))
         if 'async function api(' not in s or 'function status(' not in s or 'async function bearer(' not in s:
             raise LookupError('api()/status()/bearer() not found')
