@@ -26,6 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
+const http = require('http');   // AETHER_HTTP80
 const crypto = require('crypto');
 const dnsP = require('dns').promises;
 
@@ -95,7 +96,9 @@ function lanIps() {
 /** Rewrite rule used by the browser shim, shared so it can be tested here. (pure) */
 const SHIM_SOURCE = function shim(SELF) {
   try {
-    if (location.protocol !== 'https:') return;
+    var SEC = location.protocol === 'https:';
+    // AETHER_HTTP80: a plain-HTTP page opened without a port (port 80) also sends this Pi's :3001 calls to its own address
+    if (!SEC && !(location.protocol === 'http:' && (location.port === '' || location.port === '80'))) return;
     var hosts = {};
     ['localhost', '127.0.0.1', '[::1]', location.hostname].concat(SELF.hosts || []).forEach(function (h) { if (h) hosts[String(h).toLowerCase()] = 1; });
     var PORT = String(SELF.port || 3001);
@@ -108,11 +111,12 @@ const SHIM_SOURCE = function shim(SELF) {
       if (x.port !== PORT) return u;
       var host = x.hostname.toLowerCase();
       if (!hosts[host]) {
+        if (!SEC) return u;
         if (!warned[host]) { warned[host] = 1; try { console.warn('[Aether HTTPS] ' + x.origin + ' is another device over plain HTTP; the browser blocks it on an HTTPS page. Open that device by its own HTTPS address.'); } catch (e) { /* */ } }
         return u;
       }
       var ws = /^wss?:$/i.test(x.protocol);
-      return (ws ? 'wss://' : 'https://') + location.host + x.pathname + x.search + x.hash;
+      return (ws ? (SEC ? 'wss://' : 'ws://') : (SEC ? 'https://' : 'http://')) + location.host + x.pathname + x.search + x.hash;
     };
     window.__aetherHttpsRewrite = rw;
     var of = window.fetch;
@@ -454,6 +458,7 @@ class HttpsManager {
       success: true,
       config: { domain: this.cfg.domain, host: this.cfg.host, fqdn: this.fqdn(), email: this.cfg.email, agreed: !!this.cfg.agreed, staging: !!this.cfg.staging,
         redirect: !!this.cfg.redirect, ipOverride: this.cfg.ipOverride || '', tokenSet: this.tokenSet() },
+      http80: this.http80 || { port: null, error: null },   // AETHER_HTTP80
       https: { listening: !!this.listenPort, port: this.listenPort, error: this.listenError, url: this.url(), certSource: this.source },
       letsencrypt: le ? { ...le, usable: this.realCertOk() } : null,
       dns: { ip: this.ip(), ips: lanIps(), recordIp: this.state.recordIp, recordFor: this.state.recordFor || null, lastSync: this.state.lastSync, error: this.state.dnsError },
@@ -476,7 +481,7 @@ class HttpsManager {
         const b = req.body || {};
         const next = { ...this.cfg };
         if (b.domain !== undefined) { const d = String(b.domain).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.$/, ''); if (d && !DOMAIN_RE.test(d)) return bad(res, 'That domain doesn\'t look right (example: example.com)'); next.domain = d; }
-        if (b.host !== undefined) { const h = String(b.host).trim().toLowerCase(); if (h && !HOST_RE.test(h)) return bad(res, 'Pi name: letters, numbers and dashes only (example: bench1)'); next.host = h; }
+        if (b.host !== undefined) { const h = String(b.host).trim().toLowerCase(); if (h && !HOST_RE.test(h)) return bad(res, 'Pi name: letters, numbers and dashes only (example: bench1)'); if (/^r-/.test(h)) return bad(res, 'Names starting with r- are kept for Remote Access addresses; pick another name');   /* AETHER_REMOTE */ next.host = h; }
         if (b.email !== undefined) { const m = String(b.email).trim(); if (m && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)) return bad(res, 'That email doesn\'t look right'); next.email = m; }
         if (b.ipOverride !== undefined) { const ip = String(b.ipOverride).trim(); if (ip && !/^\d+\.\d+\.\d+\.\d+$/.test(ip)) return bad(res, 'IP must look like 192.168.1.50'); next.ipOverride = ip; }
         for (const k of ['agreed', 'staging', 'redirect']) if (b[k] !== undefined) next[k] = !!b[k];
@@ -538,6 +543,8 @@ class HttpsManager {
         if (ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1') return next();
         if (req.query && req.query.http === '1') { res.setHeader('Set-Cookie', 'aether_http=1; Path=/; Max-Age=31536000; SameSite=Lax'); return next(); }
         if (/(?:^|;\s*)aether_http=1/.test(String(req.headers.cookie || ''))) return next();
+        // AETHER_HTTPS_PERBROWSER: only browsers that reached the HTTPS name themselves (set by the sign-in page's check).
+        if (!/(?:^|;\s*)aether_https_ok=1/.test(String(req.headers.cookie || ''))) return next();
         const accept = String(req.headers.accept || '');
         if (!accept.includes('text/html')) return next();
         const target = `https://${this.fqdn()}${this.listenPort === 443 ? '' : ':' + this.listenPort}${req.originalUrl}`;
@@ -546,8 +553,23 @@ class HttpsManager {
     };
   }
 
+  // AETHER_HTTP80: plain HTTP on port 80 as well, so http://<pi> works without :3001.
+  // Requests are handed to the main :3001 server untouched (same Express app, same
+  // socket.io, same sign-in; the visitor's own address is kept, so nobody looks local).
+  startHttp80() {
+    if (process.env.AETHER_HTTP80 === '0' || this.httpPort === 80 || !this.httpServer) return;
+    const main = this.httpServer;
+    const srv = http.createServer();
+    srv.on('request', (req, res) => main.emit('request', req, res));
+    srv.on('upgrade', (req, sock, head) => main.emit('upgrade', req, sock, head));
+    srv.once('error', (e) => { this.http80 = { port: null, error: `80: ${e.code || e.message}` }; this.log.warn(`[HTTP80] could not listen on 80 (${e.code || e.message}); http://<pi>:${this.httpPort} keeps working`); });
+    srv.listen(80, '0.0.0.0', () => { this.http80 = { port: 80, error: null }; srv.on('error', (e) => this.log.warn(`[HTTP80] ${e.message}`)); this.log.log('[HTTP80] listening on 80 (http://<pi> without a port)'); });
+    this.http80Server = srv;
+  }
+
   async start() {
     try { await this.startServer(); } catch (e) { this.log.warn(`[HTTPS] not started: ${e.message}`); }
+    this.startHttp80();   // AETHER_HTTP80
     const t1 = setTimeout(() => this.dnsTick(), 20000);
     const t2 = setTimeout(() => this.renewTick(), 120000);
     const i1 = setInterval(() => this.dnsTick(), DNS_SYNC_MS);

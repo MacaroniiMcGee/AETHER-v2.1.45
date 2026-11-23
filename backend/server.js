@@ -716,16 +716,22 @@ const CHIP = 'gpiochip0';
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*", methods: ["GET","POST","PUT","PATCH","DELETE"] } });
+const io = new Server(server, { cors: require('./lib/authManager').socketCors() });   // AETHER_AUTH: this Pi on other ports may send the sign-in cookie
 
-app.use(cors());
+app.use(cors(require('./lib/authManager').corsDelegate()));
+// ---- Sign-in (AETHER_AUTH): every page, /api route and socket needs a session; first sign-in admin / Aether01!, then a new password ----
+try { global.__aetherAuth = require('./lib/authManager').install({ app, io, express }); }
+catch (e) { require('./lib/authManager').failClosed(app, e); }
 app.use(['/api/config/restore', '/api/config/app'], express.json({ limit: '25mb' }));   // backups can be large
 app.use('/api/sunapi', express.json({ limit: '30mb' }));   // AETHER_SUNAPI (snapshots are larger than the global 100 kB limit)
+try { app.use('/api/blueprints', require('./routes/blueprints-remote')()); } catch (e) { console.warn('[Blueprints] not mounted:', e.message); }   // AETHER_BLUEPRINTS_GH: Board Blueprints on GitHub
 app.use(express.json());
 app.use('/api/oncafe', require('./routes-oncafe')());   // Board Blueprints: sign in to OnCafe and read a site (Update 58)
 // Device firmware: send Aether updates and script files from the browser
 try { app.use('/api/device-firmware', require('./routes-device-firmware')()); } catch (e) { console.warn('[DeviceFirmware] not mounted:', e.message); }
 try { app.use('/api/sunapi', require('./routes/sunapi')()); } catch (e) { console.warn('[SUNAPI] not mounted:', e.message); }   // AETHER_SUNAPI
+try { app.use('/api/traffic', require('./routes/traffic')()); } catch (e) { console.warn('[Traffic] not mounted:', e.message); }   // AETHER_TRAFFIC (mitmproxy)
+try { app.use('/api/sunapi/limits', require('./routes/sunapi-limits')()); } catch (e) { console.warn('[SUNAPI limits] not mounted:', e.message); }   // AETHER_SUNAPI_LIMITS
 try { app.use('/api/analytics', require('./routes-analytics')()); } catch (e) { console.warn('[Analytics] not mounted:', e.message); }   // AETHER-ANALYTICS route
 app.use(i2cBus.middleware);   // tags I2C calls with the request that caused them
 app.use('/api/formats', formatRoutes);
@@ -2947,6 +2953,8 @@ osdpTrace.on('events', evs => io.emit('osdp-trace-events', evs));
 osdpTrace.on('rules', fired => io.emit('osdp-trace-rules', fired));
 osdpTrace.on('cleared', () => io.emit('osdp-trace-cleared', {}));
 
+// AETHER_AZURE_DEBUG: Azure Debugger (Tools › Azure Debugger) — routes/azure-debug.js
+try { app.use('/api/azure-debug', require('./routes/azure-debug')({ trace: () => osdpTrace, osdp: () => osdpManager, sniffer: () => { try { return osdpSniffer; } catch { return null; } } })); } catch (e) { console.warn('[AzureDebug] not mounted:', e.message); }   // AETHER_AZURE_FW
 app.get('/api/osdp/trace/snapshot', (req, res) => res.json({ success: true, ...osdpTrace.snapshot(Number(req.query.since) || 0) }));
 app.post('/api/osdp/trace/clear', (_req, res) => { osdpTrace.clear(); res.json({ success: true }); });
 app.get('/api/osdp/trace/export', (req, res) => {
@@ -3422,6 +3430,9 @@ process.on('SIGTERM', () => {
 // Registered before the built pages so its page redirect runs first; /api routes above are untouched.
 try { global.__aetherHttps = require('./lib/httpsManager').install({ app, io, server, port: process.env.PORT || 3001 }); }
 catch (e) { console.warn('[HTTPS] not available:', e.message); }
+// ---- Remote Access (AETHER_REMOTE): this Pi's own Cloudflare Tunnel; Setup > Remote Access ----
+try { global.__aetherRemote = require('./lib/remoteAccess').install({ app }); }
+catch (e) { console.warn('[REMOTE] not available:', e.message); }
 
 // ---- Built frontend (for the VMS Stream View capture) ----
 // When frontend/dist exists (npm run build), serve it so the RTSP capture can

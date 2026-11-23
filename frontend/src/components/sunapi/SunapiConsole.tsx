@@ -9,12 +9,14 @@ import { parseAttributes, type Catalog } from './catalog';
 import { Explorer, type Target } from './Explorer';
 import { Snapshots } from './Snapshots';
 import { ReaderFile } from './ReaderFile';
+import { LimitsTest } from './LimitsTest';   // AETHER_SUNAPI_LIMITS
+import { Compare } from './Compare';         // AETHER_SUNAPI_LIMITS
 import { Devices } from './Devices';
 import { ResponseView } from './ResponseView';
 import { KINDS, KindIcon, kindLabel } from './kinds';
 import { Badge, Button, Dialog, Empty, Field, IconButton, Input, Select, Tabs, Toggle, actionTone, cx, fmtBytes, fmtTime, lsGet, lsSet, statusTone } from './ui';
 
-type Page = 'devices' | 'explorer' | 'capabilities' | 'history' | 'snapshots' | 'readerfile';
+type Page = 'devices' | 'explorer' | 'capabilities' | 'history' | 'snapshots' | 'readerfile' | 'limits' | 'compare';   // AETHER_SUNAPI_LIMITS
 type Conn = { state: 'idle' | 'connecting' | 'online' | 'error'; message?: string; ms?: number; auth?: string };
 
 const SunapiConsole: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
@@ -31,6 +33,7 @@ const SunapiConsole: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [jump, setJump] = useState<Target | null>(null);
   const [histTick, setHistTick] = useState(0);
+  const [cmpPreset, setCmpPreset] = useState<{ a?: string; b?: string } | null>(null);   // AETHER_SUNAPI_LIMITS
   const fileRef = useRef<HTMLInputElement>(null);
 
   const device = devices?.find(d => d.id === deviceId) || null;
@@ -171,6 +174,8 @@ const SunapiConsole: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
         { id: 'history', label: 'History', disabled: !device || !!fileCatalog },
         { id: 'snapshots', label: 'Snapshots', disabled: !device || !!fileCatalog },
         { id: 'readerfile', label: 'Reader file', disabled: !device || !!fileCatalog },
+        { id: 'limits', label: 'Limits test', disabled: !!fileCatalog },   // AETHER_SUNAPI_LIMITS
+        { id: 'compare', label: 'Compare' },
       ]} />
 
       <div className="flex-1 min-h-0">
@@ -180,6 +185,11 @@ const SunapiConsole: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
           <Devices api={api} devices={devices} primaryId={deviceId} targets={targets} setTargets={setTargets}
             onPrimary={id => { setFileCatalog(null); if (id === deviceId && device) connect(device); else setDeviceId(id); setPage('explorer'); }}
             onEdit={setEditing} onAdded={() => loadDevices().then(d => { if (!deviceId && d[0]) setDeviceId(d[0].id); })} />
+        ) : page === 'limits' ? (   // AETHER_SUNAPI_LIMITS
+          <LimitsTest backend={backendUrl || defaultBackend()} device={fileCatalog ? null : device} onCompare={(a, b) => { setCmpPreset({ a, b }); setPage('compare'); }}
+            onUseDevice={id => { setFileCatalog(null); loadDevices().then(() => { lastAuto.current = null; setDeviceId(id); }); }} />
+        ) : page === 'compare' ? (
+          <Compare backend={backendUrl || defaultBackend()} preset={cmpPreset} />
         ) : page === 'readerfile' && device && !fileCatalog ? (
           <ReaderFile api={api} device={device} onSent={() => setHistTick(t => t + 1)} />
         ) : needsCatalog && !shownCatalog ? (

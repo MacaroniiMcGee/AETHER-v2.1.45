@@ -13,10 +13,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft, ChevronRight, Plus, Trash2, Edit2, Check, X,
   Wifi, WifiOff, Server, LayoutGrid, Circle, Cpu, AlertTriangle,
-  GripVertical
+  GripVertical, Video, Loader2, ExternalLink
 } from 'lucide-react';
 import IOAccessEmulator, { defaultHost, isLoopbackHost } from '../components/IOAccessEmulator';
 import { TopBar } from '../components/shell/AppShell';
+// AETHER_CLUSTER / AETHER_CAMERAS: cluster list kept on the main Pi; live RTSP tiles
+import { ClusterInfo, CameraList, getCluster, removeNode as apiRemoveNode, renameNode, listCameras, deleteCamera, NodeKey } from './clusterApi';
+import CameraTile from './CameraTile';
+import StreamViewTile from './StreamViewTile';
+import { EnrollDialog, AddStreamDialog, SourceDialog } from './ClusterDialogs';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +46,33 @@ interface ClusterNode {
   name: string;
   ip: string;
   color: NodeColor;
+  key?: NodeKey;      // AETHER_CLUSTER: 'self' or "host:port" when the list comes from the main Pi
+}
+
+const norm = (ip: string) => String(ip || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+const asColor = (c: string, i: number): NodeColor => (NODE_COLORS as readonly string[]).includes(c) ? c as NodeColor : NODE_COLORS[i % NODE_COLORS.length];
+
+/** Build the node list from the main Pi, keeping this browser's old node ids so each node's saved screen settings stay. */
+function nodesFromServer(info: ClusterInfo): { nodes: ClusterNode[]; pending: ClusterNode[] } {
+  let old: ClusterNode[] = [];
+  try { const raw = JSON.parse(localStorage.getItem(STORAGE_KEY_CLUSTER) || '[]'); if (Array.isArray(raw)) old = raw.filter(n => n && typeof n.ip === 'string'); } catch { /* */ }
+  const used = new Set<string>();
+  const take = (match: (n: ClusterNode) => boolean, fallback: string) => {
+    const m = old.find(n => !used.has(n.id) && match(n));
+    if (m) { used.add(m.id); return m.id; }
+    return fallback;
+  };
+  const selfHosts = new Set([...(info.self.hosts || []), defaultHost(), 'localhost'].map(norm));
+  const self: ClusterNode = {
+    id: take(n => selfHosts.has(norm(n.ip)) || isLoopbackHost(n.ip), 'srv-self'),
+    name: info.self.name || 'Pi Unit 1', ip: defaultHost(), color: asColor(info.self.color, 0), key: 'self',
+  };
+  const remote: ClusterNode[] = info.nodes.map((n, i) => {
+    const host = n.key.replace(/:\d+$/, '');
+    return { id: take(o => norm(o.ip) === norm(host), `srv-${n.key}`), name: n.name, ip: host, color: asColor(n.color, i + 1), key: n.key };
+  });
+  const pending = old.filter(n => !used.has(n.id) && !selfHosts.has(norm(n.ip)) && !isLoopbackHost(n.ip) && /\d+\.\d+\.\d+\.\d+|[a-z]/i.test(n.ip));
+  return { nodes: [self, ...remote], pending };
 }
 
 const STORAGE_KEY_CLUSTER = 'aether_cluster_nodes';
@@ -107,13 +139,17 @@ interface OverviewCardProps {
   node: ClusterNode;
   connected: boolean;
   onSelect: () => void;
+  onAddStream?: () => void;
+  note?: string;
 }
 
-const OverviewCard: React.FC<OverviewCardProps> = ({ node, connected, onSelect }) => {
+const OverviewCard: React.FC<OverviewCardProps> = ({ node, connected, onSelect, onAddStream, note }) => {
   const c = COLOR_MAP[node.color];
   return (
-    <button
+    <div
+      role="button" tabIndex={0}
       onClick={onSelect}
+      onKeyDown={e => { if (e.key === 'Enter') onSelect(); }}
       className={`rounded-xl p-5 border text-left transition-all hover:scale-[1.02] active:scale-[0.98] ring-2 ring-transparent hover:${c.ring}`}
       style={{ background: 'linear-gradient(to bottom right, rgb(var(--hv-widget)), rgb(var(--hv-widget)))', borderColor: 'rgb(var(--hv-line-strong))' }}
     >
@@ -131,16 +167,38 @@ const OverviewCard: React.FC<OverviewCardProps> = ({ node, connected, onSelect }
       <h3 className={`text-lg font-bold mb-1 ${c.text}`}>{node.name}</h3>
       <p className="text-slate-400 text-sm font-mono">{node.ip}:3001</p>
       <p className="text-slate-500 text-xs mt-2">Click to open →</p>
-    </button>
+      {onAddStream && (
+        <div className="mt-2 flex items-center gap-3">
+          <button type="button" onClick={e => { e.stopPropagation(); onAddStream(); }}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-hv-brand hover:underline">
+            <Video size={13} /> Add stream
+          </button>
+          {note && <span className="text-[11px] text-hv-text-3 truncate">{note}</span>}
+        </div>
+      )}
+    </div>
   );
 };
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const ClusterManager: React.FC = () => {
-  const [nodes, setNodes]           = useState<ClusterNode[]>(loadNodes);
-  const [activeId, setActiveId]     = useState<string | 'overview'>(() =>
-    localStorage.getItem(STORAGE_KEY_ACTIVE) || 'overview'
+  // AETHER_CLUSTER: 'server' = the list lives on the main Pi (shared by every browser);
+  // 'local' = older backend, keep the per-browser list.
+  const [mode, setMode]             = useState<'loading' | 'server' | 'local'>('loading');
+  const [info, setInfo]             = useState<ClusterInfo | null>(null);
+  const [nodes, setNodes]           = useState<ClusterNode[]>([]);
+  const [pending, setPending]       = useState<ClusterNode[]>([]);
+  const [cameras, setCameras]       = useState<Record<string, CameraList | { error: string }>>({});
+  const [enroll, setEnroll]         = useState<null | { name?: string; host?: string }>(null);
+  const [addStream, setAddStream]   = useState<null | { key?: NodeKey }>(null);
+  const [swap, setSwap]             = useState<null | { key: NodeKey; name: string }>(null);
+  const [loadError, setLoadError]   = useState('');
+  // AETHER_CLUSTER_HOME: every load starts on the cluster overview (the last open node is no longer restored).
+  const [activeId, setActiveId]     = useState<string | 'overview'>(() => {
+    try { localStorage.removeItem(STORAGE_KEY_ACTIVE); } catch { /* */ }
+    return 'overview';
+  }
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [connectionMap, setConnectionMap] = useState<Record<string, boolean>>({});
@@ -151,9 +209,33 @@ const ClusterManager: React.FC = () => {
   const [editIp, setEditIp]           = useState('');
   const editNameRef = useRef<HTMLInputElement>(null);
 
-  // Persist nodes + active selection
-  useEffect(() => { saveNodes(nodes); }, [nodes]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEY_ACTIVE, activeId); }, [activeId]);
+  const loadCluster = useCallback(async () => {
+    try {
+      const i = await getCluster();
+      if (!i) { setMode('local'); setNodes(loadNodes()); return; }
+      const { nodes: n, pending: p } = nodesFromServer(i);
+      setInfo(i); setNodes(n); setPending(p); setMode('server'); setLoadError('');
+    } catch (e: any) {
+      setLoadError(e?.message || 'Could not load the cluster');
+      setMode(m => { if (m === 'loading') { setNodes(loadNodes()); return 'local'; } return m; });
+    }
+  }, []);
+  useEffect(() => { loadCluster(); }, [loadCluster]);
+
+  const loadCameras = useCallback(async (only?: NodeKey) => {
+    const keys = nodes.map(n => n.key).filter((k): k is NodeKey => !!k && (!only || k === only));
+    const results = await Promise.all(keys.map(k => listCameras(k).then(r => [k, r] as const, (e: any) => [k, { error: e?.message || 'unavailable' }] as const)));
+    setCameras(prev => { const next = { ...prev }; for (const [k, r] of results) next[k] = r; return next; });
+  }, [nodes]);
+  useEffect(() => {
+    if (mode !== 'server') return;
+    loadCameras();
+    const t = setInterval(() => { if (!document.hidden) loadCameras(); }, 30000);
+    return () => clearInterval(t);
+  }, [mode, loadCameras]);
+
+  // Persist nodes + active selection (the per-browser list only in 'local' mode)
+  useEffect(() => { if (mode === 'local') saveNodes(nodes); }, [nodes, mode]);
   useEffect(() => {
     if (editingId && editNameRef.current) editNameRef.current.focus();
   }, [editingId]);
@@ -174,6 +256,7 @@ const ClusterManager: React.FC = () => {
   }, []);
 
   const addNode = () => {
+    if (mode === 'server') { setEnroll({}); return; }
     const id    = makeId();
     const color = NODE_COLORS[nodes.length % NODE_COLORS.length];
     const node: ClusterNode = { id, name: `Pi Unit ${nodes.length + 1}`, ip: '192.168.1.', color };
@@ -185,10 +268,32 @@ const ClusterManager: React.FC = () => {
     setEditIp(node.ip);
   };
 
-  const removeNode = (id: string) => {
+  const removeNode = async (id: string) => {
+    const node = nodes.find(n => n.id === id);
+    if (mode === 'server' && node?.key) {
+      if (node.key === 'self') { alert('This is the Pi you are signed in to. It is always part of its own cluster.'); return; }
+      if (!confirm(`Remove ${node.name} from the cluster for everyone? It stops trusting this Pi; enroll it again with its password to add it back.`)) return;
+      try { await apiRemoveNode(node.key); } catch (e: any) { alert(e?.message || 'Could not remove the node'); return; }
+      await loadCluster();
+      return;
+    }
     if (!confirm('Remove this node from the cluster? Its saved config will remain in local storage.')) return;
     setNodes(prev => prev.filter(n => n.id !== id));
   };
+  const forgetPending = (id: string) => {
+    setPending(p => p.filter(n => n.id !== id));
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY_CLUSTER) || '[]');
+      if (Array.isArray(raw)) localStorage.setItem(STORAGE_KEY_CLUSTER, JSON.stringify(raw.filter((n: any) => n && n.id !== id)));
+    } catch { /* */ }
+  };
+  const removeStream = async (key: NodeKey, camId: string, camName: string) => {
+    if (!confirm(`Remove the stream "${camName}"?`)) return;
+    try { await deleteCamera(key, camId); } catch (e: any) { alert(e?.message || 'Could not remove the stream'); }
+    loadCameras(key);
+  };
+  // A new node needs the page's gateway list refreshed (it is loaded with the page).
+  const enrolled = () => { setEnroll(null); window.location.reload(); };
 
   const startEdit = (node: ClusterNode) => {
     setEditingId(node.id);
@@ -198,6 +303,16 @@ const ClusterManager: React.FC = () => {
 
   const commitEdit = () => {
     if (!editingId) return;
+    const editing = nodes.find(n => n.id === editingId);
+    if (mode === 'server' && editing?.key) {
+      const name = editName.trim();
+      if (name && name !== editing.name) {
+        renameNode(editing.key, name).then(() => loadCluster(), (e: any) => alert(e?.message || 'Could not rename'));
+        setNodes(prev => prev.map(n => n.id === editingId ? { ...n, name } : n));
+      }
+      setEditingId(null);
+      return;
+    }
     setNodes(prev => prev.map(n => n.id === editingId
       ? { ...n, name: editName.trim() || n.name, ip: editIp.trim() || n.ip }
       : n
@@ -209,7 +324,21 @@ const ClusterManager: React.FC = () => {
 
   const connectedCount = nodes.filter(n => connectionMap[n.id]).length;
 
+  const hostOf = (u: string) => { try { return new URL(u).hostname; } catch { return ''; } };
+  const streamTargets = nodes.filter(n => n.key).map(n => {
+    const cl = cameras[n.key as string];
+    const list = cl && 'cameras' in cl ? [...cl.cameras, ...(cl.primary && cl.primary.type === 'camera' && cl.primary.url ? [{ url: cl.primary.url, source: null }] : [])] : [];
+    return { key: n.key as NodeKey, name: n.name, online: !!connectionMap[n.id], cameraHosts: list.map((c: any) => (c.source && c.source.host) || hostOf(c.url)).filter(Boolean) };
+  });
+
   // ── Render ────────────────────────────────────────────────────────────────
+  if (mode === 'loading') {
+    return (
+      <div className="flex h-screen items-center justify-center bg-hv-surface text-hv-text-3 text-sm gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading cluster...
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-hv-surface">
       {/* HV top bar for the cluster overview. Each node page brings its own top bar
@@ -292,6 +421,8 @@ const ClusterManager: React.FC = () => {
                     />
                     <input
                       value={editIp}
+                      disabled={mode === 'server'}
+                      title={mode === 'server' ? 'To change the address, remove the node and enroll it again' : undefined}
                       onChange={e => setEditIp(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit(); }}
                       placeholder="IP address"
@@ -389,9 +520,24 @@ const ClusterManager: React.FC = () => {
               <h1 className="mt-1 text-2xl leading-8 font-bold text-hv-text">
                 Aurora Aether Cluster
               </h1>
-              <p className="mt-1 text-sm text-hv-text-2">
-                {nodes.length} node{nodes.length !== 1 ? 's' : ''} registered · {connectedCount} online
-              </p>
+              <div className="mt-1 flex items-center gap-4">
+                <p className="text-sm text-hv-text-2">
+                  {nodes.length} node{nodes.length !== 1 ? 's' : ''} registered · {connectedCount} online
+                </p>
+                {mode === 'server' && (
+                  <button type="button" onClick={() => setAddStream({})}
+                    className="ml-auto h-8 px-3 rounded-hv-xs text-sm font-semibold inline-flex items-center gap-2 bg-hv-brand hover:bg-hv-brand-hover text-white">
+                    <Video size={15} /> Add stream
+                  </button>
+                )}
+              </div>
+              {info && info.managedBy.length > 0 && (
+                <div className="mt-4 flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm border" style={{ borderColor: 'rgb(var(--hv-line-strong))', background: 'rgb(var(--hv-widget))' }}>
+                  <span className="text-hv-text-2">This Pi is enrolled in <b className="text-hv-text">{info.managedBy.map(m => m.name).join(', ')}</b>. Manage the cluster there.</span>
+                  {info.managedBy[0].url && <a href={info.managedBy[0].url} className="ml-auto inline-flex items-center gap-1 text-hv-brand font-semibold">Open <ExternalLink size={13} /></a>}
+                </div>
+              )}
+              {loadError && <div className="mt-4 text-xs text-amber-300">Cluster list: {loadError}. Showing this browser's saved list.</div>}
             </div>
 
             {/* Status bar */}
@@ -419,13 +565,77 @@ const ClusterManager: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-                {nodes.map(node => (
-                  <OverviewCard
-                    key={node.id}
-                    node={node}
-                    connected={!!connectionMap[node.id]}
-                    onSelect={() => setActiveId(node.id)}
-                  />
+                {nodes.map(node => {
+                  const cl = node.key ? cameras[node.key] : undefined;
+                  const cams = cl && 'cameras' in cl ? cl.cameras : [];
+                  const primary = cl && 'cameras' in cl ? cl.primary : undefined;
+                  // The node's own tile: its Stream View drawn in the page (default, needs nothing on the Pi),
+                  // or an RTSP camera when switched (needs the Pi's streaming service).
+                  if (mode === 'server' && node.key) {
+                    const swapIt = () => setSwap({ key: node.key as NodeKey, name: node.name });
+                    const own = !(primary && primary.type === 'camera') ? [(
+                      <StreamViewTile
+                        key={`${node.id}:streamview`}
+                        host={node.ip}
+                        nodeName={node.name}
+                        dotClass={COLOR_MAP[node.color].dot}
+                        nodeOnline={!!connectionMap[node.id]}
+                        onOpen={() => setActiveId(node.id)}
+                        onSwap={cl && 'cameras' in cl ? swapIt : undefined}
+                      />
+                    )] : [(
+                      <CameraTile
+                        key={`${node.id}:main:${primary.type}:${primary.url || ''}`}
+                        nodeKey={node.key as NodeKey}
+                        cameraId="main"
+                        name={primary.name}
+                        nodeName={node.name}
+                        source="IP camera"
+                        dotClass={COLOR_MAP[node.color].dot}
+                        nodeOnline={!!connectionMap[node.id]}
+                        onOpen={() => setActiveId(node.id)}
+                        onSwap={swapIt}
+                      />
+                    )];
+                    return own.concat(cams.map(cam => (
+                      <CameraTile
+                        key={`${node.id}:${cam.id}`}
+                        nodeKey={node.key as NodeKey}
+                        cameraId={cam.id}
+                        name={cam.name}
+                        nodeName={node.name}
+                        dotClass={COLOR_MAP[node.color].dot}
+                        nodeOnline={!!connectionMap[node.id]}
+                        onOpen={() => setActiveId(node.id)}
+                        onRemove={() => removeStream(node.key as NodeKey, cam.id, cam.name)}
+                      />
+                    )));
+                  }
+                  const note = cl && 'cameras' in cl && !cl.streaming ? 'Streaming service not installed' : undefined;
+                  return (
+                    <OverviewCard
+                      key={node.id}
+                      node={node}
+                      connected={!!connectionMap[node.id]}
+                      onSelect={() => setActiveId(node.id)}
+                      onAddStream={mode === 'server' && node.key ? () => setAddStream({ key: node.key }) : undefined}
+                      note={note}
+                    />
+                  );
+                })}
+                {mode === 'server' && pending.map(p => (
+                  <div key={p.id} className="rounded-xl p-5 border border-dashed flex flex-col justify-between min-h-[140px]" style={{ borderColor: 'rgb(var(--hv-line-strong))' }}>
+                    <div>
+                      <div className="text-xs font-semibold text-amber-300 mb-2">Not enrolled</div>
+                      <h3 className="text-lg font-bold text-hv-text">{p.name}</h3>
+                      <p className="text-slate-400 text-sm font-mono">{p.ip}:3001</p>
+                      <p className="text-[11px] text-hv-text-3 mt-1">Saved in this browser only. Enroll it so it works through this Pi for everyone.</p>
+                    </div>
+                    <div className="mt-3 flex gap-3 text-xs font-semibold">
+                      <button type="button" onClick={() => setEnroll({ name: p.name, host: p.ip })} className="text-hv-brand hover:underline">Enroll</button>
+                      <button type="button" onClick={() => forgetPending(p.id)} className="text-hv-text-3 hover:text-hv-text">Forget</button>
+                    </div>
+                  </div>
                 ))}
                 {/* Add node card */}
                 <button
@@ -434,7 +644,7 @@ const ClusterManager: React.FC = () => {
                   style={{ borderColor: 'rgb(var(--hv-line-strong))' }}
                 >
                   <Plus size={24} />
-                  <span className="text-sm font-semibold">Add Node</span>
+                  <span className="text-sm font-semibold">{mode === 'server' ? 'Enroll Node' : 'Add Node'}</span>
                 </button>
               </div>
             )}
@@ -470,6 +680,18 @@ const ClusterManager: React.FC = () => {
         ))}
       </main>
       </div>
+      {enroll && <EnrollDialog initial={enroll} onClose={() => setEnroll(null)} onDone={enrolled} />}
+      {addStream && (
+        <AddStreamDialog targets={streamTargets} initialKey={addStream.key} onClose={() => setAddStream(null)}
+          onDone={(k) => { setAddStream(null); loadCameras(k); }} />
+      )}
+      {swap && (() => {
+        const cl = cameras[swap.key];
+        return (
+          <SourceDialog nodeKey={swap.key} nodeName={swap.name} current={cl && 'cameras' in cl ? cl.primary : undefined}
+            onClose={() => setSwap(null)} onDone={() => { const k = swap.key; setSwap(null); loadCameras(k); }} />
+        );
+      })()}
     </div>
   );
 };

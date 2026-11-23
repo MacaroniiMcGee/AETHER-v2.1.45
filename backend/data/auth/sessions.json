@@ -1,0 +1,16 @@
+{
+  "c11f4f9cf3c5674eb684bf2422dff6b3bafc6379006569a04f47604ac4a74145": {
+    "user": "admin",
+    "created": 1794989197409,
+    "seen": 1795393584700,
+    "ip": "192.168.1.4",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+  },
+  "c06e793033053d4b22383c5bc03cf34dae45bb046d8b1d82b1f6991f536ab5c1": {
+    "user": "admin",
+    "created": 1795393132990,
+    "seen": 1795393583657,
+    "ip": "2600:4040:15b9:b900:919e:4262:d5c0:68f",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36"
+  }
+}

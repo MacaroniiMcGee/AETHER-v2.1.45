@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<capabilities xmlns="http://www.samsungtechwin.com/sunapi">
+ <attributes>
+  <group name="System">
+   <category name="Limit">
+    <attribute name="MaxUser" type="int" value="10"/>
+    <attribute name="MaxCredentialReaders" type="int" value="4"/>
+    <attribute name="MaxEventMonitorSessions" type="int" value="4"/>
+   </category>
+   <category name="Property">
+    <attribute name="ModelType" type="string" value="ACS"/>
+    <attribute name="HTTPS" type="bool" value="True"/>
+   </category>
+  </group>
+  <group name="Transfer"><category name="Support"><attribute name="HTTP" type="bool" value="False"/></category></group>
+ </attributes>
+ <cgis>
+  <cgi name="system">
+   <submenu name="deviceinfo"><action name="view">
+     <parameter name="Model" request="false" response="true"><dataType><string maxlen="32"/></dataType></parameter>
+   </action></submenu>
+   <submenu name="date"><action name="view"/><action name="set"/></submenu>
+   <submenu name="systemlog"><action name="view">
+     <parameter name="Type" request="true" response="false"><dataType><enum><entry value="All"/><entry value="Event"/></enum></dataType></parameter>
+   </action></submenu>
+  </cgi>
+  <cgi name="eventstatus">
+   <submenu name="eventstatus">
+    <action name="check"><parameter name="SchemaBased" request="false" response="false"><dataType><bool/></dataType></parameter></action>
+    <action name="monitor"/>
+    <action name="monitordiff"><parameter name="SchemaBased" request="false" response="false"><dataType><bool/></dataType></parameter></action>
+   </submenu>
+  </cgi>
+  <cgi name="eventsources">
+   <submenu name="alarminput"><action name="view"/><action name="set"/></submenu>
+  </cgi>
+  <cgi name="accesscontrol">
+   <submenu name="capabilities"><action name="view"/></submenu>
+   <submenu name="hostcommunication"><action name="view"/><action name="control"/></submenu>
+   <submenu name="door">
+    <action name="view"><parameter name="Token" request="true" response="true"><dataType><string maxlen="32"/></dataType></parameter></action>
+    <action name="check"><parameter name="Token" request="true" response="true"><dataType><string maxlen="32"/></dataType></parameter></action>
+    <action name="control">
+     <parameter name="Token" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+     <parameter name="Command" request="true" response="false"><dataType><enum><entry value="Access"/><entry value="Lock"/><entry value="Unlock"/><entry value="LockDown"/><entry value="LockDownRelease"/><entry value="LockOpen"/><entry value="LockOpenRelease"/></enum></dataType></parameter>
+    </action>
+    <action name="update"><parameter name="Doors.#.Name" request="true" response="false"><dataType><string maxlen="64"/></dataType></parameter></action>
+   </submenu>
+   <submenu name="area"><action name="view"/></submenu>
+   <submenu name="accesspoint"><action name="view"/></submenu>
+   <submenu name="accessprofile">
+    <action name="view"/>
+    <action name="add">
+     <parameter name="Token" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+     <parameter name="Name" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+    </action>
+    <action name="remove"><parameter name="Token" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter></action>
+   </submenu>
+   <submenu name="accessschedule">
+    <action name="view"/>
+    <action name="add">
+     <parameter name="Token" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+     <parameter name="Name" request="true" response="false"><dataType><string maxlen="64"/></dataType></parameter>
+     <parameter name="Description" request="false" response="false"><dataType><string maxlen="128"/></dataType></parameter>
+    </action>
+    <action name="remove"><parameter name="Token" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter></action>
+   </submenu>
+   <submenu name="specialdaygroup">
+    <action name="view"/>
+    <action name="add">
+     <parameter name="Token" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+     <parameter name="Name" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+    </action>
+    <action name="remove"><parameter name="Token" request="true" response="false"><dataType><string/></dataType></parameter></action>
+   </submenu>
+   <submenu name="accessgroup">
+    <action name="view"/>
+    <action name="add">
+     <parameter name="Name" request="true" response="false"><dataType><string maxlen="32"/></dataType></parameter>
+    </action>
+    <action name="remove"><parameter name="Token" request="true" response="false"><dataType><string/></dataType></parameter></action>
+   </submenu>
+   <submenu name="credentialreader">
+    <action name="view"><parameter name="Index" request="true" response="true"><dataType><int min="1" max="4"/></dataType></parameter></action>
+   </submenu>
+  </cgi>
+ </cgis>
+</capabilities>

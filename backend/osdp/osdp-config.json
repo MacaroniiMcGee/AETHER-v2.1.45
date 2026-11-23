@@ -9,7 +9,7 @@
     },
     {
       "port": "/dev/ttyACM0",
-      "baudRate": 9600,
+      "baudRate": 19200,
       "name": "USB OSDP Module",
       "type": "usb"
     },
@@ -19,7 +19,7 @@
     },
     {
       "port": "/dev/ttyACM5",
-      "baudRate": 38400
+      "baudRate": 9600
     },
     {
       "port": "/dev/ttyACM2",
@@ -31,7 +31,7 @@
     },
     {
       "port": "/dev/ttyACM4",
-      "baudRate": 38400
+      "baudRate": 9600
     },
     {
       "port": "/dev/ttyACM6",
@@ -127,7 +127,7 @@
         "KEYPAD"
       ],
       "serialPort": "/dev/ttyACM0",
-      "baudRate": 9600
+      "baudRate": 19200
     },
     {
       "id": "osdp-reader-8",
@@ -142,7 +142,7 @@
         "KEYPAD"
       ],
       "serialPort": "/dev/ttyACM0",
-      "baudRate": 9600
+      "baudRate": 19200
     },
     {
       "id": "osdp-reader-1787270372947",
@@ -174,7 +174,7 @@
         "amber": 0
       },
       "buzzerState": false,
-      "baudRate": 38400
+      "baudRate": 9600
     },
     {
       "id": "osdp-reader-1787336245571",
@@ -274,7 +274,7 @@
     },
     {
       "id": "osdp-reader-1787336329063",
-      "name": "Quad channel 4",
+      "name": "Mod5RDR1",
       "address": 0,
       "serialPort": "/dev/ttyACM4",
       "enabled": true,
@@ -302,7 +302,7 @@
         "amber": 0
       },
       "buzzerState": false,
-      "baudRate": 38400
+      "baudRate": 9600
     },
     {
       "id": "osdp-reader-1787336367306",
@@ -334,7 +334,7 @@
         "amber": 0
       },
       "buzzerState": false,
-      "baudRate": 9600
+      "baudRate": 19200
     },
     {
       "id": "osdp-reader-1787534464569",
@@ -642,7 +642,8 @@
         "green": 0,
         "amber": 0
       },
-      "buzzerState": false
+      "buzzerState": false,
+      "baudRate": 9600
     },
     {
       "id": "osdp-reader-1792031304139",
@@ -667,7 +668,7 @@
         "amber": 0
       },
       "buzzerState": false,
-      "baudRate": 38400
+      "baudRate": 9600
     },
     {
       "id": "osdp-reader-1792081756624",
@@ -691,7 +692,8 @@
         "green": 0,
         "amber": 0
       },
-      "buzzerState": false
+      "buzzerState": false,
+      "baudRate": 9600
     }
   ],
   "baudRate": 9600

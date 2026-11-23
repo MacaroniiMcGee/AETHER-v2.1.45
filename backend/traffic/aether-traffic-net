@@ -1,0 +1,139 @@
+#!/bin/bash
+# aether-traffic-net — root helper for the Traffic Inspector (AETHER_TRAFFIC, TRAFFIC-2).
+# Installed once to /usr/local/sbin by: sudo bash backend/traffic/setup-root.sh
+# The Aether backend runs it with "sudo -n" (one sudoers line for this file only).
+#
+#   status                                   one JSON line
+#   gw-on  <proxyPort> <dnsPort> <ip>...     send these devices' outgoing TCP to mitmproxy,
+#                                            their DNS to mitmproxy's DNS server, forward the rest
+#   gw-pass <ip>...                          only forward these devices (no capture) — used when the
+#                                            capture stops, so a device whose gateway is the Pi stays online
+#   gw-off                                   remove all of that and put the settings back
+#   pcap-start devices <iface> <ip>...       packet capture of these devices (Wireshark file)
+#   pcap-start all <iface>                   everything that interface sees (use with a switch mirror port)
+#   pcap-stop
+#
+# Every argument is checked against a strict pattern; nothing from the caller reaches a shell.
+# Rules live in their own chains (AETHER_TRAFFIC*) and are never saved: a reboot clears them.
+set -u
+VERSION=2
+CONF=/etc/aether-traffic.conf
+RUN=/run/aether-traffic
+CH=AETHER_TRAFFIC
+
+die() { echo "error: $*" >&2; exit 2; }
+[ "$(id -u)" = 0 ] || die "must run as root"
+[ -r "$CONF" ] || die "$CONF missing — run setup-root.sh"
+AUSER="$(sed -n 's/^AETHER_USER=\([a-z_][a-z0-9_-]\{0,31\}\)$/\1/p' "$CONF" | head -1)"
+ADIR="$(sed -n 's/^AETHER_DIR=\(\/[A-Za-z0-9._\/ -]*\)$/\1/p' "$CONF" | head -1)"
+[ -n "$AUSER" ] && [ -n "$ADIR" ] || die "bad $CONF"
+DATA="$ADIR/backend/data/traffic"
+PCAP="$DATA/capture.pcap"
+mkdir -p "$RUN"; chmod 700 "$RUN"
+
+is_ip() {
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  local o; for o in "${BASH_REMATCH[@]:1}"; do [ "$o" -le 255 ] || return 1; done
+}
+is_port() { [[ "$1" =~ ^[0-9]{4,5}$ ]] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]; }
+is_iface() { [[ "$1" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] && [ -e "/sys/class/net/$1" ]; }
+
+ipt() { iptables -w 5 "$@"; }
+gw_active() { ipt -t nat -S PREROUTING 2>/dev/null | grep -q -- "-j $CH\$"; }
+fwd_active() { ipt -t filter -S FORWARD 2>/dev/null | grep -q -- "-j ${CH}_FWD\$"; }
+pcap_pid() {
+  local p; p="$(cat "$RUN/pcap.pid" 2>/dev/null)" || return 1
+  [[ "$p" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q "^tcpdump .*$PCAP" && echo "$p"
+}
+
+gw_off() {
+  for t in "nat PREROUTING $CH" "filter FORWARD ${CH}_FWD" "filter INPUT ${CH}_IN"; do
+    set -- $t
+    while ipt -t "$1" -D "$2" -j "$3" 2>/dev/null; do :; done
+    ipt -t "$1" -F "$3" 2>/dev/null; ipt -t "$1" -X "$3" 2>/dev/null
+  done
+  # put back what gw-on changed
+  if [ -f "$RUN/sysctl.saved" ]; then
+    while IFS='=' read -r k v; do
+      [[ "$k" =~ ^net/ipv4/(ip_forward|conf/[A-Za-z0-9_.-]+/send_redirects)$ ]] && [[ "$v" =~ ^[01]$ ]] && echo "$v" > "/proc/sys/$k" 2>/dev/null
+    done < "$RUN/sysctl.saved"
+    rm -f "$RUN/sysctl.saved"
+  fi
+  rm -f "$RUN/gw.devices"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  status)
+    g=false; gw_active && g=true
+    f=false; fwd_active && f=true
+    p=false; pid="$(pcap_pid)" && p=true
+    tcpd=false; command -v tcpdump >/dev/null && tcpd=true
+    echo "{\"version\":$VERSION,\"gateway\":$g,\"forwarding\":$f,\"devices\":\"$(tr '\n' ' ' 2>/dev/null < "$RUN/gw.devices" | sed 's/ $//')\",\"forward\":$(cat /proc/sys/net/ipv4/ip_forward),\"pcap\":$p,\"tcpdump\":$tcpd}"
+    ;;
+  gw-on|gw-pass)
+    if [ "$cmd" = gw-on ]; then
+      [ $# -ge 3 ] || die "usage: gw-on <proxyPort> <dnsPort> <ip>..."
+      TP="$1"; DP="$2"; shift 2
+      is_port "$TP" && is_port "$DP" || die "bad port"
+    fi
+    [ $# -ge 1 ] && [ $# -le 32 ] || die "give 1 to 32 device IPs"
+    for ip in "$@"; do is_ip "$ip" || die "bad IP: $ip"; done
+    gw_off
+    # remember and change: forwarding on, ICMP redirects off (they would tell the device to skip the Pi)
+    : > "$RUN/sysctl.saved"
+    echo "net/ipv4/ip_forward=$(cat /proc/sys/net/ipv4/ip_forward)" >> "$RUN/sysctl.saved"
+    for f in /proc/sys/net/ipv4/conf/*/send_redirects; do
+      k="${f#/proc/sys/}"; echo "$k=$(cat "$f")" >> "$RUN/sysctl.saved"; echo 0 > "$f"
+    done
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    ipt -t filter -N "${CH}_FWD" || { gw_off; die "iptables failed"; }
+    for ip in "$@"; do
+      ipt -t filter -A "${CH}_FWD" -s "$ip" -j ACCEPT
+      ipt -t filter -A "${CH}_FWD" -d "$ip" -j ACCEPT
+      echo "$ip" >> "$RUN/gw.devices"
+    done
+    ipt -t filter -I FORWARD 1 -j "${CH}_FWD" || { gw_off; die "iptables failed"; }
+    if [ "$cmd" = gw-pass ]; then echo "ok forwarding only for $*"; exit 0; fi
+    ipt -t nat -N "$CH" && ipt -t filter -N "${CH}_IN" || { gw_off; die "iptables failed"; }
+    ipt -t nat -A "$CH" -m addrtype --dst-type LOCAL -p tcp -j RETURN   # the device talking to the Pi itself (Aether)
+    for ip in "$@"; do
+      ipt -t nat -A "$CH" -s "$ip" -p udp --dport 53 -j REDIRECT --to-ports "$DP"
+      ipt -t nat -A "$CH" -s "$ip" -p tcp --dport 53 -j RETURN
+      ipt -t nat -A "$CH" -s "$ip" -p tcp -j REDIRECT --to-ports "$TP"
+      ipt -t filter -A "${CH}_IN" -s "$ip" -p tcp --dport "$TP" -j ACCEPT
+      ipt -t filter -A "${CH}_IN" -s "$ip" -p udp --dport "$DP" -j ACCEPT
+    done
+    ipt -t nat -I PREROUTING 1 -j "$CH" && ipt -t filter -I INPUT 1 -j "${CH}_IN" || { gw_off; die "iptables failed"; }
+    echo "ok gateway for $*"
+    ;;
+  gw-off)
+    gw_off; echo "ok gateway off"
+    ;;
+  pcap-start)
+    MODE="${1:-}"; IF="${2:-}"; shift 2 2>/dev/null || die "usage: pcap-start devices|all <iface> [ip...]"
+    command -v tcpdump >/dev/null || die "tcpdump is not installed — run setup-root.sh again"
+    is_iface "$IF" || die "no network interface \"$IF\""
+    [ -d "$DATA" ] || die "$DATA missing"
+    FILTER=()
+    if [ "$MODE" = devices ]; then
+      [ $# -ge 1 ] && [ $# -le 32 ] || die "give 1 to 32 device IPs"
+      for ip in "$@"; do is_ip "$ip" || die "bad IP: $ip"; [ ${#FILTER[@]} -gt 0 ] && FILTER+=(or); FILTER+=(host "$ip"); done
+    elif [ "$MODE" = all ]; then
+      [ $# -eq 0 ] || die "all takes no IPs"
+      FILTER=(not tcp port 3001 and not tcp port 22)   # leave out Aether's own pages and SSH
+    else die "mode must be devices or all"; fi
+    if p="$(pcap_pid)"; then kill -INT "$p"; sleep 0.5; fi
+    rm -f "$PCAP"
+    setsid tcpdump -i "$IF" -n -s 0 -U -w "$PCAP" -Z "$AUSER" "${FILTER[@]}" </dev/null >"$RUN/pcap.log" 2>&1 &
+    echo $! > "$RUN/pcap.pid"
+    sleep 0.7
+    pcap_pid >/dev/null || { cat "$RUN/pcap.log" >&2; die "tcpdump did not start"; }
+    echo "ok capturing on $IF"
+    ;;
+  pcap-stop)
+    if p="$(pcap_pid)"; then kill -INT "$p"; for i in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done; kill -9 "$p" 2>/dev/null; fi
+    rm -f "$RUN/pcap.pid"; echo "ok capture stopped"
+    ;;
+  *) die "unknown command" ;;
+esac

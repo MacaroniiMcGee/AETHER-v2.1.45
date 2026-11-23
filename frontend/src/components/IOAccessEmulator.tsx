@@ -1226,7 +1226,7 @@ const IOAccessEmulator: React.FC<IOAccessEmulatorProps> = ({
               // panel's width (beside the cluster sidebar) and may go full screen.
               blueprint: (
                 <div style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 560 }}>
-                  <iframe src="/board-blueprint-studio.html?v=631550e4" title="Board Blueprint Studio" allowFullScreen
+                  <iframe src="/api/blueprints/page" title="Board Blueprint Studio" allowFullScreen
                     style={{ width: '100%', height: '100%', border: 'none', borderRadius: 8, display: 'block', background: 'rgb(var(--hv-surface))' }} />
                 </div>
               ),

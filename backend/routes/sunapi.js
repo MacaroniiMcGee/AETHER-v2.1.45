@@ -646,3 +646,4 @@ module.exports = function sunapiRoutes() {
 
 // exported for tests
 module.exports._internal = { parseChallenges, pickChallenge, authHeader, cleanHost, parseQuery };
+module.exports.sunapiCall = sunapiCall;   // AETHER_CAMERAS: Hanwha camera tiles reuse the Digest client

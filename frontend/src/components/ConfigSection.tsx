@@ -13,9 +13,12 @@ import SystemPage from './config/SystemPage';
 import PinoutPages from './config/PinoutPages';
 import DeviceFirmwareTool from './DeviceFirmwareTool';
 import HttpsSetupPanel from './config/HttpsSetupPanel';   // AETHER_HTTPS
+import RemoteAccessPanel from './config/RemoteAccessPanel';   // AETHER_REMOTE
 import AnalyticsTool from './analytics/AnalyticsTool';   // AETHER-ANALYTICS
 import { T } from './config/ui';
 import SunapiConsole from './sunapi/SunapiConsole';   // AETHER_SUNAPI
+import AzureDebugger from './azure/AzureDebugger';   // AETHER_AZURE_DEBUG
+import TrafficInspector from './traffic/TrafficInspector';   // AETHER_TRAFFIC
 
 type Item = { id: number; name: string; type: string; channel: number; active: boolean; [k: string]: any };
 
@@ -46,6 +49,7 @@ export const SETUP_TABS = [
   { id: 'system', label: 'System & Backup', description: 'Services, backup and restore' },
   { id: 'firmware', label: 'Device Firmware', description: 'Install Aether updates on this Pi' },
   { id: 'https', label: 'HTTPS & Domain', description: 'Secure address for this Pi: a Let\'s Encrypt certificate through Cloudflare' }, // AETHER_HTTPS
+  { id: 'remote', label: 'Remote Access', description: 'Reach this Pi from anywhere through its own secure Cloudflare address' }, // AETHER_REMOTE
   { id: 'howtokb', label: 'Aether How-to KBs', description: 'How-to, reference and troubleshooting articles for Aether' }, // AETHER_HOWTO_KB
 ] as const;
 export const TOOL_TABS = [
@@ -58,7 +62,9 @@ export const TOOL_TABS = [
   { id: 'stream', label: 'VMS Stream', description: 'Camera and VMS stream view' },
   { id: 'osdpacademy', label: 'OSDP Academy', description: 'Learn OSDP byte by byte: lessons, packet builder, live trace classroom and troubleshooting scenarios' }, // AETHER_OSDP_ACADEMY,
   { id: 'sunapi', label: 'SUNAPI Console', description: 'Hanwha cameras, recorders and access control over SUNAPI — scan, explore, and send to many devices at once' },   // AETHER_SUNAPI
+  { id: 'azure', label: 'Azure Debugger', description: 'Azure BLU-IC2 controllers: log bundles, RS-485 boards, the ASP SDK link, cloud start-up and live network checks' },   // AETHER_AZURE_DEBUG
   { id: 'qrcreds', label: 'QR Credentials', description: 'Test OSDP QR readers and bridge rotating QR badges to the panel' }, // AETHER_QR_CREDENTIALS
+  { id: 'traffic', label: 'Traffic Inspector', description: 'See what WAVE, the SUNAPI Test Client or an app sends to cameras and controllers — the Pi relays it (mitmproxy) and lists every call' },   // AETHER_TRAFFIC
 ] as const;
 export type SetupId = typeof SETUP_TABS[number]['id'];
 export type ToolId = typeof TOOL_TABS[number]['id'];
@@ -113,10 +119,13 @@ const ConfigSection: React.FC<ConfigSectionProps> = ({
           </div>
         )}
         {tab === 'https' && <HttpsSetupPanel api={api} />}
+        {tab === 'remote' && <RemoteAccessPanel api={api} />}{/* AETHER_REMOTE */}
       </>)}
       {mode === 'tools' && tool === 'analytics' && <AnalyticsTool backendUrl={api} />}
       {mode === 'tools' && tool !== 'analytics' && toolPanels[tool as keyof typeof toolPanels]}
       {mode === 'tools' && page === 'sunapi' && <SunapiConsole />}{/* AETHER_SUNAPI */}
+      {mode === 'tools' && page === 'traffic' && <TrafficInspector />}{/* AETHER_TRAFFIC */}
+      {mode === 'tools' && page === 'azure' && <AzureDebugger />}{/* AETHER_AZURE_DEBUG */}
     </div>
   );
 };

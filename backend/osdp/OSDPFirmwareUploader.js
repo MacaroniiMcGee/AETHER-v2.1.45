@@ -36,6 +36,8 @@ const REPLY_BUSY        = 0x79;
 
 const FILE_TYPE_OPAQUE  = 0x01;   // generic / firmware
 
+const FT_ERRORS = { '-1': 'abort', '-2': 'unrecognised file contents', '-3': 'file data not acceptable (malformed)' };
+const ftErr = st => `status ${st}${FT_ERRORS[st] ? ` = ${FT_ERRORS[st]}` : ''}`;
 const FT_STATUS = {
   OK:        0,
   PROCESSED: 1,
@@ -142,12 +144,24 @@ class OSDPFirmwareUploader extends EventEmitter {
 
     const fileType  = opts.fileType ?? FILE_TYPE_OPAQUE;
     const total     = fileBuffer.length;
-    const fragSize  = this.fragmentSize;
-    const fragCount = Math.ceil(total / fragSize);
+    let   fragSize  = this.fragmentSize;
+    // opts.records: send these pieces one per message instead of fixed-size fragments (Azure DebugTool sends an
+    // S-record (.e19) image one text line per FILETRANSFER; fileBuffer must then be their concatenation).
+    const records   = Array.isArray(opts.records) && opts.records.length ? opts.records : null;
+    let   recIdx    = 0;
+    let   fragCount = records ? records.length : Math.ceil(total / fragSize);
+    // Optional (defaults keep the old behaviour for other callers):
+    //   replyTimeoutMs  per-fragment reply timeout
+    //   fragmentRetries resend a fragment (same offset) this many times when its reply times out
+    //   honorMsgMax     shrink fragments when FTSTAT's UpdateMsgMax asks for smaller messages
+    const replyTimeoutMs  = opts.replyTimeoutMs || REPLY_TIMEOUT_MS;
+    const fragmentRetries = Math.max(0, opts.fragmentRetries | 0);
+    const honorMsgMax     = !!opts.honorMsgMax;
+    const FT_HDR = 11, OSDP_OVERHEAD = 8;   // FILETRANSFER header; SOM..CMD + CRC
 
     this.aborted = false;
     this._emitStatus('info',
-      `Starting transfer: ${total} bytes in ${fragCount} fragments of ${fragSize}B to addr 0x${this.address.toString(16).padStart(2,'0')}`);
+      `Starting transfer: ${total} bytes in ${fragCount} ${records ? 'records' : `fragments of ${fragSize}B`} to addr 0x${this.address.toString(16).padStart(2,'0')}`);
 
     // 0. Leading POLL re-sync.
     // OSDP seq=0 is the "re-sync" control packet. Some PDs interpret a seq=0
@@ -196,17 +210,63 @@ class OSDPFirmwareUploader extends EventEmitter {
 
     let offset = 0;
     let fragNo = 0;
+
+    // Optional opening message (opts.startMessage): a zero-length FILETRANSFER at offset 0 announcing the total size,
+    // as Azure's DebugTool sends before the first data block. An Azure application answers it with "rebooting"
+    // and restarts into its bootloader; the bootloader answers OK and then takes the data.
+    if (opts.startMessage) {
+      const startPayload = this._buildFtPayload(fileType, total, 0, Buffer.alloc(0));
+      let reply;
+      try { reply = await this._sendAndAwait(CMD_FILETRANSFER, startPayload, REPLY_FTSTAT, Math.max(opts.replyTimeoutMs || 0, 10000)); }
+      catch (e) {
+        if (opts.restartOnReset && /NAK \(code 0x04\)|Reply timeout/.test(e.message)) {
+          this._emitStatus('info', `No status for the start message (${e.message}) - the board is probably restarting`);
+          return { bytesSent: 0, fragments: 0, finalStatus: 'reset', early: true };
+        }
+        throw e;
+      }
+      const ft = this._parseFtStat(reply.data);
+      this._emitStatus('info', `Start message: reader status ${ft.status}${ft.status === FT_STATUS.REBOOTING ? ' (rebooting into its bootloader)' : ''}${ft.updateMsgMax ? `, max message ${ft.updateMsgMax} B` : ''}`);
+      if (ft.status === FT_STATUS.REBOOTING || ft.status === FT_STATUS.PROCESSED) return { bytesSent: 0, fragments: 0, finalStatus: ft.status, early: true };
+      if (ft.status < 0) throw new Error(`Reader rejected the start of the transfer (${ftErr(ft.status)})`);
+      if (ft.delay > 0) await this._sleep(ft.delay + 50);
+    }
     let interFragmentDelayMs = 0;
 
     // 1. Push all fragments
-    for (let i = 0; i < fragCount; i++) {
+    let msgMaxSeen = 0;
+    while (records ? recIdx < records.length : offset < total) {
       if (this.aborted) throw new Error('Aborted');
 
-      const end       = Math.min(offset + fragSize, total);
-      const fragment  = fileBuffer.slice(offset, end);
+      const fragment  = records ? records[recIdx++] : fileBuffer.slice(offset, Math.min(offset + fragSize, total));
       const ftPayload = this._buildFtPayload(fileType, total, offset, fragment);
 
-      const reply = await this._sendAndAwait(CMD_FILETRANSFER, ftPayload, REPLY_FTSTAT);
+      let reply;
+      for (let attempt = 0; ; attempt++) {
+        // A retry repeats the same packet with the same sequence number (OSDP retransmission), as DebugTool does.
+        // The first message gets a longer wait: an application may be handing over to its bootloader.
+        const wait = fragNo === 0 && opts.restartOnReset ? Math.max(replyTimeoutMs, 10000) : replyTimeoutMs;
+        try { reply = await this._sendAndAwait(CMD_FILETRANSFER, ftPayload, REPLY_FTSTAT, wait, { sameSeq: attempt > 0 }); break; }
+        catch (e) {
+          // NAK 0x04 (sequence error) means the board's OSDP link restarted, i.e. the board rebooted (an application
+          // handing over to its bootloader). The caller waits for it and starts the file again, like DebugTool.
+          if (opts.restartOnReset && /NAK \(code 0x04\)/.test(e.message)) {
+            this._emitStatus('info', `Sequence error on fragment ${fragNo + 1} - the board restarted`);
+            return { bytesSent: offset, fragments: fragNo, finalStatus: 'reset', early: true };
+          }
+          if (opts.restartOnReset && fragNo === 0 && /Reply timeout/.test(e.message) && attempt >= fragmentRetries) {
+            this._emitStatus('info', 'No answer to the first message - the board is probably restarting into its bootloader');
+            return { bytesSent: 0, fragments: 0, finalStatus: 'silent', early: true };
+          }
+          if (/Reply timeout/.test(e.message) && attempt >= fragmentRetries && records && recIdx === records.length && opts.finalizeSilentOk) {
+            // The last S-record (S7/S8/S9) makes the board check the image and restart; it often never answers it.
+            this._emitStatus('info', 'No answer to the last record - the board is checking the image and restarting');
+            return { bytesSent: offset + fragment.length, fragments: fragNo + 1, finalStatus: 'silent' };
+          }
+          if (!/Reply timeout/.test(e.message) || attempt >= fragmentRetries || this.aborted) throw new Error(`${e.message} (fragment ${fragNo + 1}/${fragCount}, offset ${offset})`);
+          this._emitStatus('warn', `No reply to fragment ${fragNo + 1}/${fragCount} - sending it again (${attempt + 1}/${fragmentRetries})`);
+        }
+      }
       const ft    = this._parseFtStat(reply.data);
 
       offset += fragment.length;
@@ -223,15 +283,28 @@ class OSDPFirmwareUploader extends EventEmitter {
         ftDelay:    ft.delay,
       });
 
+      if (ft.updateMsgMax && ft.updateMsgMax !== msgMaxSeen) {
+        msgMaxSeen = ft.updateMsgMax;
+        const want = ft.updateMsgMax - FT_HDR - OSDP_OVERHEAD;
+        if (honorMsgMax && !records && want >= 16 && want < fragSize) {
+          fragSize = want;
+          fragCount = fragNo + Math.ceil((total - offset) / fragSize);
+          this._emitStatus('info', `Board asked for messages of at most ${ft.updateMsgMax} B - fragments are now ${fragSize} B`);
+        }
+      }
+
       // Reader-requested pause before next fragment
       if (ft.status === FT_STATUS.OK || ft.status === FT_STATUS.FINISHING) {
         interFragmentDelayMs = ft.delay;
       } else if (ft.status < 0) {
-        throw new Error(`Reader reported file-transfer error (status ${ft.status}) after fragment ${fragNo}/${fragCount}`);
+        throw new Error(`Reader reported file-transfer error (${ftErr(ft.status)}) after fragment ${fragNo}/${fragCount}`);
       } else if (ft.status === FT_STATUS.PROCESSED || ft.status === FT_STATUS.REBOOTING) {
-        // Reader is satisfied before we finished iterating - rare but legal.
-        this._emitStatus('info', `Reader signalled early completion (status ${ft.status}) after fragment ${fragNo}`);
-        return { bytesSent: offset, fragments: fragNo, finalStatus: ft.status };
+        // Reader ended the transfer before the whole file was sent. For a reader that wanted only a header this
+        // is success; an Azure application restarting into its bootloader does this too (caller checks bytesSent).
+        this._emitStatus('info', offset >= total
+          ? `The board took the last fragment and ${ft.status === FT_STATUS.REBOOTING ? 'is restarting with the new image' : 'reported the image processed'} (status ${ft.status})`
+          : `Reader signalled early completion (status ${ft.status}) after fragment ${fragNo} of ${fragCount}`);
+        return { bytesSent: offset, fragments: fragNo, finalStatus: ft.status, early: offset < total };
       }
 
       if (interFragmentDelayMs > 0) {
@@ -246,17 +319,35 @@ class OSDPFirmwareUploader extends EventEmitter {
     const finalizeStart = Date.now();
     let   finalStatus   = FT_STATUS.FINISHING;
     let   pollDelayMs   = Math.max(interFragmentDelayMs, 200);
+    //   finalizeTimeoutMs  how long the PD may stay in OK/FINISHING after the last fragment (default 60 s)
+    //   finalizeSilentOk   a PD that stops answering during finalize is restarting to apply the image
+    const finalizeTimeoutMs = opts.finalizeTimeoutMs || FINALIZE_TIMEOUT_MS;
+    let   lastSeen = null, silent = 0;
 
     /* eslint-disable no-constant-condition */
     while (true) {
       if (this.aborted) throw new Error('Aborted');
-      if (Date.now() - finalizeStart > FINALIZE_TIMEOUT_MS) {
-        throw new Error(`Reader did not finalize within ${FINALIZE_TIMEOUT_MS / 1000}s`);
+      if (Date.now() - finalizeStart > finalizeTimeoutMs) {
+        throw new Error(`Reader did not finalize within ${Math.round(finalizeTimeoutMs / 1000)}s (last status ${lastSeen})`);
       }
 
       const finalPayload = this._buildFtPayload(fileType, total, total, Buffer.alloc(0));
-      const reply = await this._sendAndAwait(CMD_FILETRANSFER, finalPayload, REPLY_FTSTAT);
+      let reply;
+      try { reply = await this._sendAndAwait(CMD_FILETRANSFER, finalPayload, REPLY_FTSTAT, opts.finalizeSilentOk ? 5000 : REPLY_TIMEOUT_MS); }
+      catch (e) {
+        if (opts.finalizeSilentOk && /Reply timeout/.test(e.message) && ++silent >= 3) {
+          this._emitStatus('info', `Reader stopped answering ${Math.round((Date.now() - finalizeStart) / 1000)} s into finalize - it is restarting to apply the image`);
+          return { bytesSent: total, fragments: fragNo, finalStatus: 'silent' };
+        }
+        if (opts.finalizeSilentOk && /Reply timeout/.test(e.message)) continue;
+        throw e;
+      }
+      silent = 0;
       const ft    = this._parseFtStat(reply.data);
+      if (ft.status !== lastSeen) {
+        this._emitStatus('info', `Finalize: reader status ${ft.status}${ft.status === FT_STATUS.FINISHING ? ' (finishing)' : ft.status === FT_STATUS.OK ? ' (ok)' : ''}, delay ${ft.delay} ms`);
+        lastSeen = ft.status;
+      }
 
       this._emitProgress({
         phase:      'finalize',
@@ -277,8 +368,11 @@ class OSDPFirmwareUploader extends EventEmitter {
         finalStatus = ft.status;
         break;
       }
+      if (ft.status > 3) {
+        throw new Error(`Reader answered with an unknown file-transfer status ${ft.status} after receiving the whole file`);
+      }
       if (ft.status < 0) {
-        throw new Error(`Reader reported file-transfer error (status ${ft.status}) during finalize`);
+        throw new Error(`Reader rejected the file after receiving all of it (${ftErr(ft.status)})`);
       }
 
       pollDelayMs = ft.delay > 0 ? ft.delay : pollDelayMs;
@@ -317,7 +411,9 @@ class OSDPFirmwareUploader extends EventEmitter {
     const action       = data[0];
     const delay        = data.readUInt16LE(1);
     const rawStatus    = data.readUInt16LE(3);
-    const status       = rawStatus > 0x7FFF ? rawStatus - 0x10000 : rawStatus;   // sign-extend LE16
+    let   status       = rawStatus > 0x7FFF ? rawStatus - 0x10000 : rawStatus;   // sign-extend LE16
+    // Some PDs (an Azure Gen3 IO168 seen in the field) put a signed 8-bit status in the low byte: 0x00FE = -2.
+    if (status > 3 && status >= 0x80 && status <= 0xFF) status -= 0x100;
     const updateMsgMax = data.length >= 7 ? data.readUInt16LE(5) : 0;
     return { action, delay, status, updateMsgMax };
   }
@@ -406,10 +502,10 @@ class OSDPFirmwareUploader extends EventEmitter {
     return this.sequence;
   }
 
-  async _sendAndAwait(command, data, expectReply) {
+  async _sendAndAwait(command, data, expectReply, timeoutMs = REPLY_TIMEOUT_MS, { sameSeq = false } = {}) {
     if (this.pending) throw new Error('Internal: previous request not finished');
 
-    const seq    = this._nextSequence();
+    const seq    = sameSeq ? this.sequence : this._nextSequence();
     const packet = OSDPPacket.buildPacket({
       address:  this.address,
       command,
@@ -422,8 +518,8 @@ class OSDPFirmwareUploader extends EventEmitter {
     const replyPromise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending = null;
-        reject(new Error(`Reply timeout (>${REPLY_TIMEOUT_MS}ms) waiting for 0x${expectReply.toString(16)} from addr 0x${this.address.toString(16)}`));
-      }, REPLY_TIMEOUT_MS);
+        reject(new Error(`Reply timeout (>${timeoutMs}ms) waiting for 0x${expectReply.toString(16)} from addr 0x${this.address.toString(16)}`));
+      }, timeoutMs);
       this.pending = { resolve, reject, timer, expect: expectReply };
     });
 

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "users": {
+    "admin": {
+      "salt": "6a1fb086a28db33a70ef23755c7d7280",
+      "hash": "bfc08af9615b4deb30db2803de31ed64ac26bbe75ef72c523ea82b221657014d65338b99a65d7ca9db023c2c917e336c5fd03719632f22e67cf7aab577d8bf70",
+      "algo": "scrypt",
+      "N": 16384,
+      "role": "admin",
+      "mustChange": false,
+      "createdAt": "2026-11-18T07:53:37.401Z",
+      "changedAt": "2026-11-18T08:06:37.406Z"
+    }
+  }
+}

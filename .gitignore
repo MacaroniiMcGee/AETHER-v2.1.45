@@ -67,3 +67,22 @@ backend/data/sunapi/
 backend/data/https/
 backend/vendor/acme/
 backend/data/analytics/
+backend/tools/mock/mock.key
+backend/tools/mock/mock.crt
+backend/data/sunapi/limits/
+backend/data/azure-debug/
+
+# AETHER_BLUEPRINTS_GH: Board Blueprints machine credentials, page copies, cache and outbox stay on this Pi
+*blueprints-credentials*
+backend/data/blueprints/
+
+# AETHER_ONCAFE_SESSION_PRIVATE: OnCAFE sign-in tokens stay on this Pi
+backend/data/oncafe-session.json
+backend/data/azure-firmware/
+
+# AETHER_TRAFFIC
+backend/data/traffic/
+
+# AETHER_TRAFFIC
+backend/vendor/
+backend/vendor/cloudflared/

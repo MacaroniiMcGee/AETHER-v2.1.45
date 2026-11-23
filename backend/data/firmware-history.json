@@ -1,5 +1,35 @@
 [
   {
+    "ts": 1794605979499,
+    "result": "success",
+    "traceId": "fwt_20261113-212340_a00_n9ic",
+    "reader": "direct (/dev/ttyAMA0 @ 9600, addr 0x00)",
+    "readerId": "direct:/dev/ttyAMA0@9600#0",
+    "port": "/dev/ttyAMA0",
+    "baud": 9600,
+    "address": 0,
+    "filename": "library:fw_1790838233575_f2058403",
+    "sizeBytes": 633328,
+    "fragments": 5758,
+    "finalStatus": 2,
+    "rebooting": true
+  },
+  {
+    "ts": 1794528791417,
+    "result": "success",
+    "traceId": "fwt_20261112-235736_a00_krsq",
+    "reader": "direct (/dev/ttyAMA0 @ 9600, addr 0x00)",
+    "readerId": "direct:/dev/ttyAMA0@9600#0",
+    "port": "/dev/ttyAMA0",
+    "baud": 9600,
+    "address": 0,
+    "filename": "library:fw_1790838233575_f2058403",
+    "sizeBytes": 633328,
+    "fragments": 5758,
+    "finalStatus": 2,
+    "rebooting": true
+  },
+  {
     "ts": 1792183160717,
     "result": "failure",
     "traceId": "fwt_20261016-203848_a01_ebtl",
