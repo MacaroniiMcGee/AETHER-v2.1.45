@@ -144,6 +144,83 @@ def main():
         return s.replace(old, "record('card', `osdp:${args[0]}`, 1, 'osdp', { format: args[2], fc: args[1] && args[1].facility, cn: args[1] && args[1].card /* AETHER_TRACE */ });")
     P.edit('backend/analytics/journal.js', 'OSDP card numbers in the journal', journal, required=False)
 
+    # ── TRACE-3: Doors page pairing ─────────────────────────────────────
+    def server_door_activity(s):
+        if 'getEngine().onDoorActivity(' in s:
+            return None
+        old = "io.emit('door_activity', entry);"
+        if old not in s:
+            raise LookupError('doorActivity emit not found')
+        return s.replace(old, old + " try { require('./routes/trace').getEngine().onDoorActivity(entry, meta); } catch (_) { /* AETHER_TRACE */ }", 1)
+    P.edit('backend/server.js', 'door activity into Event Trace', server_door_activity, required=False)
+
+    def server_door_save(s):
+        if 'getEngine().importDoors(' in s:
+            return None
+        line = ("app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page'); } "
+                "catch (e) { console.warn('[Trace] door import:', e.message); } } }); next(); });   // AETHER_TRACE: a door save updates the wiring map")
+        return insert_before_line(s, r"^app\.use\('/api/doors', require\('\./routes-doors'\)\(\)\);", line)
+    P.edit('backend/server.js', 'door saves update the wiring map', server_door_save, required=False)
+
+    def analytics_keys(s):
+        if 'AETHER_TRACE wiring keys' in s:
+            return None
+        old = "...(v.label ? { label: String(v.label).slice(0, 60) } : {}) };"
+        if old not in s:
+            raise LookupError('wiring validation not found')
+        new = ("...(v.label ? { label: String(v.label).slice(0, 60) } : {}), "
+               "...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), "
+               "...(Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), "
+               "...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}) };   /* AETHER_TRACE wiring keys: keep Doors page pairing */")
+        return s.replace(old, new, 1)
+    P.edit('backend/routes-analytics.js', 'Product Test keeps the door pairing in the wiring map', analytics_keys, required=False)
+
+    ds = 'frontend/src/components/DoorSection.tsx'
+    def ds_import(s):
+        if "from './trace/DoorTrace'" in s:
+            return None
+        return insert_after_line(s, r"from '\.\./lib/workflowBridge';", "import { DoorTraceStrip } from './trace/DoorTrace';   // AETHER_TRACE")
+    P.edit(ds, 'import the door trace strip', ds_import, required=False)
+
+    def ds_save(s):
+        if 'trace: (door as any).trace' in s:
+            return None
+        old = "        reader: door.reader ?? null,\n        customEvents: door.customEvents\n      }))"
+        if old not in s:
+            raise LookupError('door save mapping not found')
+        return s.replace(old, "        reader: door.reader ?? null,\n        customEvents: door.customEvents,\n        trace: (door as any).trace   // AETHER_TRACE: OnCAFE pairing + description\n      }))", 1)
+    P.edit(ds, 'save the door pairing with the door', ds_save, required=False)
+
+    def ds_strip(s):
+        if '<DoorTraceStrip' in s:
+            return None
+        return insert_before_line(s, r"\{/\* AETHER_DOOR_ACTIVITY: what happened on this door's I/O and reader \*/\}",
+                                  "        <DoorTraceStrip doorId={door.id} />{/* AETHER_TRACE */}\n")
+    P.edit(ds, 'Event Trace strip on each door', ds_strip, required=False)
+
+    dset = 'frontend/src/components/DoorSettings.tsx'
+    def dset_import(s):
+        if "from './trace/DoorTrace'" in s:
+            return None
+        return insert_after_line(s, r"^import .*;\s*(//.*)?$", "import { DoorTracePairing } from './trace/DoorTrace';   // AETHER_TRACE", first=False)
+    P.edit(dset, 'import the door pairing', dset_import, required=False)
+
+    def dset_pairing(s):
+        if '<DoorTracePairing' in s:
+            return None
+        mark = 'This reader is used for presenting credentials to this door (single reader per door).'
+        i = s.find(mark)
+        if i < 0:
+            raise LookupError('reader card not found')
+        j = s.find('\n              </div>\n', i)
+        if j < 0:
+            raise LookupError('end of the reader card not found')
+        j += len('\n              </div>\n')
+        block = ("\n              {/* AETHER_TRACE: pair with the OnCAFE door + description (Event Trace) */}\n"
+                 "              <DoorTracePairing door={editedDoor as any} onChange={(trace: any) => setEditedDoor({ ...(editedDoor as any), trace } as any)} />\n")
+        return s[:j] + block + s[j:]
+    P.edit(dset, 'OnCAFE door + description in Settings › Basic', dset_pairing, required=False)
+
     # ── frontend: Tools › Event Trace ────────────────────────────────────
     cs = 'frontend/src/components/ConfigSection.tsx'
 

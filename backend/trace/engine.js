@@ -22,11 +22,13 @@ const { correlate } = require('./correlate');
 const { scrub, scrubString, hasSecrets, Vault } = require('./redact');
 const { decodePublishes } = require('./mqtt5');
 const { parseCommand, commandEvent, buildRequest, reverseOf } = require('./commands');
+const { doorsFrom, doorChannels, channelOfActivity, readerChannels } = require('./doors');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
 const RUNS = path.join(BASE, 'runs');
 const SETTINGS = path.join(BASE, 'settings.json');
-const REVERTS = path.join(BASE, 'pending-reverts.json');   // commands to turn back, kept across restarts
+const REVERTS = path.join(BASE, 'pending-reverts.json');
+const DOORS_CONFIG = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');   // Doors page (routes-doors.js)   // commands to turn back, kept across restarts
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
 const ANALYTICS_SETTINGS = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');   // wiring map shared with Product Test
 const KEEP_RUNS = 40;
@@ -96,7 +98,9 @@ function cleanWiring(wiring) {
   const w = {};
   for (const [ch, v] of Object.entries(wiring && typeof wiring === 'object' ? wiring : {})) {
     if (!v || typeof v !== 'object' || !/^[\w:.\-]{1,80}$/.test(ch) || !WIRING_ROLES.includes(v.role)) continue;
-    w[ch] = { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 60) } : {}) };
+    w[ch] = { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 80) } : {}),
+      ...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), ...(Number(v.at) > 0 ? { at: Number(v.at) } : {}),
+      ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), ...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}) };
   }
   return w;
 }
@@ -137,7 +141,8 @@ class TraceEngine extends EventEmitter {
     }
     // a run left open by a restart is closed, not resumed
     for (const r of this.listRuns()) if (!r.end) this._patchMeta(r.id, { end: r.lastAt || r.start, endReason: 'backend restarted' });
-    for (const p of this._reverts()) this._armRevert(p);   // turn-backs that were waiting when the backend stopped
+    for (const p of this._reverts()) this._armRevert(p);
+    this._importIfNewer();   // Doors page saved while Event Trace was not looking: its doors win   // turn-backs that were waiting when the backend stopped
   }
 
   _hookTraffic() {
@@ -368,17 +373,151 @@ class TraceEngine extends EventEmitter {
       return value;
     } catch { return {}; }
   }
-  saveWiring(w) {
-    let s = {};
-    if (fs.existsSync(ANALYTICS_SETTINGS)) {
-      try { s = JSON.parse(fs.readFileSync(ANALYTICS_SETTINGS, 'utf8')) || {}; }
-      catch { throw err('Log Analytics settings.json is damaged; fix or remove it before saving the wiring (it also holds thresholds and the Show raw switch)', 409); }
-    }
-    s.wiring = cleanWiring(w);
+  _readAnalytics() {
+    if (!fs.existsSync(ANALYTICS_SETTINGS)) return {};
+    try { return JSON.parse(fs.readFileSync(ANALYTICS_SETTINGS, 'utf8')) || {}; }
+    catch { throw err('Log Analytics settings.json is damaged; fix or remove it before saving the wiring (it also holds thresholds and the Show raw switch)', 409); }
+  }
+  _writeWiring(wiring) {
+    const s = this._readAnalytics();
+    s.wiring = wiring;
     writeAtomic(ANALYTICS_SETTINGS, JSON.stringify(s, null, 1));
     this._wiring = null; this._cache = null;
     return s.wiring;
   }
+  _readDoorConfig() {
+    let raw;
+    try { raw = fs.readFileSync(DOORS_CONFIG, 'utf8'); } catch { return null; }
+    try { return JSON.parse(raw); } catch { throw err('The Doors page config (door-config.json) is damaged; open the Doors page and save it again', 409); }
+  }
+
+  /**
+   * Save the wiring map. Entries that came from a door (src "door:N") push their OnCAFE door, description
+   * and DPS sense back to that door on the Doors page, so the two stay paired. Last save wins.
+   */
+  saveWiring(w, by = 'event trace') {
+    const prev = this.wiring();
+    const next = cleanWiring(w);
+    const now = Date.now();
+    const patch = new Map();   // door id -> { oncafeDoorId, note, flipDps }
+    for (const [k, e] of Object.entries(next)) {
+      const m = /^door:(\d+)$/.exec(e.src || '');
+      if (!m) continue;
+      const before = prev[k] || {};
+      const p = patch.get(m[1]) || {};
+      if ((e.door || '') !== (before.door || '')) p.oncafeDoorId = e.door || '';
+      if ((e.note || '') !== (before.note || '')) p.note = e.note || '';
+      if (e.role === 'dps' && /^door:\d+:dps$/.test(k) && (e.active || 'open') !== (before.active || 'open')) { p.flipDps = true; e.active = 'open'; }   // the door keeps the sense
+      if (Object.keys(p).length) patch.set(m[1], p);
+    }
+    if (patch.size) {
+      const cfg = this._readDoorConfig();
+      const list = cfg && (cfg.config && cfg.config.doors ? cfg.config.doors : cfg.doors);
+      if (Array.isArray(list)) {
+        const inv = this.cloud.inv || {};
+        for (const d of list) {
+          const p = patch.get(String(d.id));
+          if (!p) continue;
+          const t = { ...(d.trace || {}) };
+          if ('oncafeDoorId' in p) { t.oncafeDoorId = p.oncafeDoorId || undefined; t.oncafeDoorName = ((inv.doors || []).find(x => x.id === p.oncafeDoorId) || {}).name || undefined; }
+          if ('note' in p) t.note = p.note || undefined;
+          t.updatedAt = new Date(now).toISOString(); t.by = by;
+          d.trace = t;
+          if (p.flipDps && d.dps) d.dps = { ...d.dps, reverseSense: !d.dps.reverseSense };
+          // every entry of that door follows (one door = one OnCAFE door, one description)
+          for (const e of Object.values(next)) if (e.src === `door:${d.id}`) { if ('oncafeDoorId' in p) { if (p.oncafeDoorId) e.door = p.oncafeDoorId; else delete e.door; } if ('note' in p) { if (p.note) e.note = p.note; else delete e.note; } }
+        }
+        cfg.savedAt = new Date(now).toISOString();
+        writeAtomic(DOORS_CONFIG, JSON.stringify(cfg, null, 2));
+        this.doorSync = { by, at: now, doors: [...patch.keys()].map(Number) };
+      }
+    }
+    for (const [k, e] of Object.entries(next)) if (JSON.stringify(e) !== JSON.stringify(prev[k] || null)) e.at = now;
+    return this._writeWiring(next);
+  }
+
+  /**
+   * Doors page → wiring map: every door's channels replace what an earlier import (or edit) left for it.
+   * Called after the Doors page saves, and at start-up when the door config is newer than the wiring.
+   */
+  importDoors(by = 'doors page') {
+    const cfg = this._readDoorConfig();
+    if (!cfg) return { doors: 0, entries: 0 };
+    const at = Date.parse(cfg.savedAt || cfg.timestamp || '') || Date.now();
+    const doors = doorsFrom(cfg);
+    const prev = this.wiring();
+    const next = {};
+    for (const [k, e] of Object.entries(prev)) if (!/^door:\d+$/.test(e.src || '')) next[k] = e;
+    let n = 0;
+    for (const d of doors) for (const { key, entry } of doorChannels(d)) { next[key] = { ...entry, at }; n++; }
+    this._writeWiring(cleanWiring(next));
+    this.doorSync = { by, at: Date.now(), doors: doors.map(d => d.id) };
+    return { doors: doors.length, entries: n };
+  }
+  _importIfNewer() {
+    try {
+      const cfg = this._readDoorConfig();
+      if (!cfg) return;
+      const at = Date.parse(cfg.savedAt || cfg.timestamp || '') || 0;
+      const latest = Math.max(0, ...Object.values(this.wiring()).filter(e => /^door:/.test(e.src || '')).map(e => e.at || 0));
+      if (at > latest + 1000) this.importDoors('doors page (newer at start-up)');
+    } catch (e) { console.warn('[Trace] door import at start-up:', e.message); }
+  }
+
+  /** lib/doorActivity entries (Doors page I/O, already resolved per door) → Event Trace journal events. */
+  onDoorActivity(entry, meta) {
+    if (!entry || !meta || meta.initial) return;
+    if (!['lock', 'dps', 'rex', 'input'].includes(entry.kind)) return;
+    const ch = channelOfActivity(meta.key);
+    if (!ch) return;
+    const v = meta.value === 1 || meta.value === 0 ? meta.value : null;
+    const w = this.wiring()[ch] || {};
+    const type = w.dir === 'out' ? 'door-out' : w.dir === 'in' ? 'door-in' : entry.source === 'panel' ? 'door-out' : 'door-in';
+    const doorName = w.doorName || `Door ${entry.doorId}`;
+    if (v === null) {   // a zone fault (TROUBLE / TAMPER): show it, but it is not an edge
+      this.add({ id: newId(), src: 'journal', lane: 'aether', at: entry.t, t: entry.t, clock: 'pi', type: 'door-fault', label: `${doorName}: ${entry.text}`, door: null, controllerId: null, cred: null, clientType: null, eventId: null, topic: null, access: false, info: { doorId: entry.doorId, ch } });
+      return;
+    }
+    this.add({ id: newId(), src: 'journal', lane: 'aether', at: entry.t, t: entry.t, clock: 'pi', type, label: `${doorName}: ${entry.text}`,
+      door: null, controllerId: null, cred: null, clientType: null, eventId: null, topic: null, access: false,
+      info: { ch, v, doorId: entry.doorId, source: entry.source }, journal: { ch, v, k: type } });
+  }
+
+  /** What Event Trace knows about each Aether door (for the Doors page). */
+  doorsSummary() {
+    let cfg = null;
+    try { cfg = this._readDoorConfig(); } catch (e) { return { error: e.message, doors: [] }; }
+    const doors = cfg ? doorsFrom(cfg) : [];
+    const wiring = this.wiring();
+    let a = null;
+    try { a = this.analyze(this.run ? this.run.id : null); } catch { a = null; }
+    const traces = a ? a.traces.filter(t => !t.sync) : [];
+    const inv = this.cloud.inv || {};
+    const dcfg = this.settings.cloud.doorConfig || {};
+    const out = doors.map(d => {
+      const t = d.trace || {};
+      const own = doorChannels(d).map(x => x.key);
+      const readers = readerChannels(d.reader);
+      const oc = t.oncafeDoorId || null;
+      const mine = traces.filter(x => (x.action.ch && (own.includes(x.action.ch) || readers.includes(x.action.ch)))
+        || (oc && x.decision && x.decision.door && x.decision.door.id === oc && x.kind === 'card')
+        || (oc && x.kind === 'command' && [].concat((x.action.cmd || {}).target || []).includes(oc)));
+      const last = k => { const r = mine.filter(x => x.kind === k).sort((p, q) => q.at - p.at)[0]; return r || null; };
+      const brief = x => x && { at: x.at, status: x.status, label: x.kind === 'card' ? `${x.action.cred ? `${x.action.cred.fc ?? '?'}-${x.action.cred.cn ?? '?'}` : 'card'}` : x.action.label, result: x.result, notes: x.notes.slice(0, 2),
+        push: x.latency.push, decision: x.latency.decision, output: x.latency.output, hardware: x.latency.hardware, held: x.held ?? null, cause: x.cause ? x.cause.label : null };
+      return {
+        id: d.id, name: d.name, enabled: d.enabled !== false, ioSource: d.ioSource || 'physical',
+        oncafe: oc ? { id: oc, name: t.oncafeDoorName || ((inv.doors || []).find(x => x.id === oc) || {}).name || null } : null,
+        note: t.note || '', updatedAt: t.updatedAt || null, by: t.by || null,
+        channels: own.filter(k => /^door:/.test(k)).map(k => ({ key: k, role: (wiring[k] || {}).role || null, label: (wiring[k] || {}).label || k, overridden: !!(wiring[k] && wiring[k].src !== `door:${d.id}`) })),
+        grantMs: oc && dcfg[oc] ? dcfg[oc].grantMs : null,
+        counts: { pass: mine.filter(x => x.status === 'pass').length, warn: mine.filter(x => x.status === 'warn').length, fail: mine.filter(x => x.status === 'fail').length },
+        last: { card: brief(last('card')), input: brief(last('input')), output: brief(last('output')), command: brief(last('command')) },
+      };
+    });
+    return { doors: out, run: this.run ? { id: this.run.id, name: this.run.name } : null, sync: this.doorSync || null, configSavedAt: cfg ? cfg.savedAt || null : null };
+  }
+
   /** Channels Aether drove or saw in the last 24 h (for the wiring editor). */
   channelsSeen() {
     const out = new Map();
@@ -392,6 +531,7 @@ class TraceEngine extends EventEmitter {
     }
     let roles = {};
     try { roles = this.analyze(this.run ? this.run.id : null).roles || {}; } catch { roles = {}; }
+    for (const [k, e] of Object.entries(this.wiring())) if (/^door:/.test(k) && !out.has(k)) out.set(k, { ch: k, kind: e.dir === 'out' ? 'door-out' : 'door-in', count: 0, last: 0 });
     return [...out.values()].sort((a, b) => a.ch.localeCompare(b.ch, undefined, { numeric: true })).map(c => ({ ...c, inferred: roles[c.ch] && roles[c.ch].auto ? roles[c.ch] : null }));
   }
 
@@ -681,6 +821,7 @@ class TraceEngine extends EventEmitter {
       settings: this.settings,
       wiring: this.wiring(),
       pendingReverts: this.pendingReverts(),
+      doorSync: this.doorSync || null,
       inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,
     };
   }

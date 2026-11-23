@@ -219,7 +219,7 @@ module.exports = function analyticsRoutes() {
       for (const [ch, v] of Object.entries(b.wiring)) {
         if (!v || typeof v !== 'object' || !/^[\w:.\-]{1,80}$/.test(ch)) continue;
         if (!['dps', 'rex', 'card', 'keypad', 'lock', 'input', 'output', 'ignore'].includes(v.role)) continue;
-        w[ch] = { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 60) } : {}) };
+        w[ch] = { role: v.role, ...(v.door ? { door: String(v.door).slice(0, 64) } : {}), ...(v.active ? { active: v.active === 'closed' ? 'closed' : 'open' } : {}), ...(v.ioId ? { ioId: String(v.ioId).slice(0, 120) } : {}), ...(v.label ? { label: String(v.label).slice(0, 60) } : {}), ...(v.note ? { note: String(v.note).slice(0, 300) } : {}), ...(/^door:\d+$/.test(String(v.src || '')) ? { src: String(v.src) } : {}), ...(Number(v.at) > 0 ? { at: Number(v.at) } : {}), ...(v.dir === 'in' || v.dir === 'out' ? { dir: v.dir } : {}), ...(v.doorName ? { doorName: String(v.doorName).slice(0, 60) } : {}) };   /* AETHER_TRACE wiring keys: keep Doors page pairing */
       }
       s.wiring = w;
     }

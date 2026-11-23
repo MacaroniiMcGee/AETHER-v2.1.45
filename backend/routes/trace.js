@@ -8,6 +8,8 @@
 //   POST   /cloud/connect             start the OnCAFE push feed (+ event-log poll) with the saved settings
 //   POST   /cloud/disconnect
 //   GET    /wiring  PUT /wiring       wiring map shared with Log Analytics › Product Test (+ channels seen in 24 h)
+//   GET    /doors                     per Aether door: OnCAFE pairing, description, channels, last traces (Doors page)
+//   POST   /doors/import              re-read the Doors page config into the wiring map (admin)
 //   POST   /command                   {kind, target, value, seconds, revertSec} — door/area/zone command to OnCAFE (admin)
 //   POST   /sync                      send the sync markers now {set: start|end|check}
 //   POST   /runs/start  {name, sync}  start a run (sends the start pair unless sync:false)
@@ -75,7 +77,14 @@ module.exports = function traceRoutes() {
   router.get('/wiring', (_req, res) => { try { res.json({ wiring: eng.wiring(), channels: eng.channelsSeen() }); } catch (e) { fail(res, e); } });
   router.put('/wiring', express.json({ limit: '64kb' }), (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the wiring map' });
-    try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}) }); } catch (e) { fail(res, e); } });
+    try { res.json({ wiring: eng.saveWiring((req.body || {}).wiring || {}, `event trace (${who(req)})`) }); } catch (e) { fail(res, e); } });
+
+  // Doors page pairing: what Event Trace knows per Aether door, and a manual re-import of the door config
+  router.get('/doors', (_req, res) => { try { res.json(eng.doorsSummary()); } catch (e) { fail(res, e); } });
+  router.post('/doors/import', express.json(), (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the wiring map' });
+    try { res.json(eng.importDoors(`event trace (${who(req)})`)); } catch (e) { fail(res, e); }
+  });
 
   // a door / area / zone command sent to OnCAFE by Aether (admins only; doors under test only)
   router.post('/command', express.json(), async (req, res) => {

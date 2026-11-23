@@ -21,8 +21,8 @@
 const num = v => (v === undefined || v === null || v === '' ? null : String(v).replace(/^0+(?=\d)/, ''));
 const credEq = (a, b) => !!(a && b && num(a.cn) !== null && num(a.cn) === num(b.cn) && (num(a.fc) === null || num(b.fc) === null || num(a.fc) === num(b.fc)));
 const credKey = c => (c ? `${num(c.fc) ?? '?'}-${num(c.cn) ?? '?'}` : '');
-const DRIVE = new Set(['relay', 'gpio', 'emu-in']);
-const OBSERVE = new Set(['opto', 'emu-out']);
+const DRIVE = new Set(['relay', 'gpio', 'emu-in', 'door-in']);      // door-in / door-out: Doors page I/O (lib/doorActivity)
+const OBSERVE = new Set(['opto', 'emu-out', 'door-out']);
 
 function pct(arr, p) {
   if (!arr.length) return null;

@@ -511,6 +511,92 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     ok('commands: off by default, scoped (doors, areas, zones), sent with the session, logged with who; only "on" commands turned back, kept across restarts; wiring shared and never clobbers a damaged file; pulse sync honours NC DPS and always releases');
   }
 
+  console.log('TRACE-3: Doors page pairing');
+  {
+    const { doorChannels, channelOfActivity, readerChannels } = require('../trace/doors');
+    const OD = '33333333-3333-3333-3333-333333333333', OD2 = '55555555-5555-5555-5555-555555555555';
+    const phys = { id: 1, name: 'Main Entrance', enabled: true, ioSource: 'physical', reader: 'wg-1',
+      lock: { hardwareType: 'analog-in', channel: 7 }, dps: { hardwareType: 'relay', channel: 0, reverseSense: true }, rexIn: { hardwareType: 'relay', channel: 1 },
+      ios: [{ id: 'sf1', name: 'Strike Follower', hardwareType: 'opto', channel: 5 }, { name: 'Sounder', hardwareType: 'relay', channel: 6 }],
+      trace: { oncafeDoorId: OD, note: 'NC DPS on REL 1' } };
+    const emu = { id: 2, name: 'Back Door', enabled: true, ioSource: 'emulated', emuBoard: 11, lock: { hardwareType: 'relay', channel: 0 }, dps: { channel: 2 }, rexIn: { channel: 3 } };
+    const m = Object.fromEntries([...doorChannels(phys), ...doorChannels(emu)].map(x => [x.key, x.entry]));
+    assert.deepStrictEqual(Object.keys(m).sort(), ['door:1:dps', 'door:1:io:Sounder', 'door:1:io:sf1', 'door:1:lock', 'door:1:rex', 'door:2:dps', 'door:2:lock', 'door:2:rex', 'emu:11:in:2', 'emu:11:in:3', 'emu:11:out:0', 'opto:5', 'relay:0', 'relay:1', 'relay:6'].sort());
+    assert.strictEqual(m['door:1:dps'].role, 'dps'); assert.strictEqual(m['door:1:dps'].door, OD); assert.strictEqual(m['door:1:dps'].note, 'NC DPS on REL 1');
+    assert.strictEqual(m['door:1:lock'].role, 'lock'); assert.strictEqual(m['door:1:lock'].dir, 'out'); assert(/EOL watch/.test(m['door:1:lock'].label));
+    assert.strictEqual(m['relay:0'].role, 'ignore'); assert.strictEqual(m['door:1:io:sf1'].role, 'output'); assert.strictEqual(m['door:1:io:Sounder'].role, 'input');
+    assert.strictEqual(m['door:2:lock'].role, 'lock'); assert.strictEqual(m['emu:11:out:0'].role, 'ignore');
+    assert.strictEqual(channelOfActivity('1:dps:relay:0'), 'door:1:dps'); assert.strictEqual(channelOfActivity('2:rexIn:emu:11:3'), 'door:2:rex');
+    assert.strictEqual(channelOfActivity('1:io:sf1:opto:5'), 'door:1:io:sf1'); assert.strictEqual(channelOfActivity('1:lock:analog:7'), 'door:1:lock');
+    assert.deepStrictEqual(readerChannels('ctrl-emu-11-0'), ['emu:11:rdr:0']);
+    ok('door → channels: physical (analog EOL lock watch, NC DPS, custom I/O), emulated; raw wires marked "via door"; door activity keys');
+
+    const { TraceEngine } = require('../trace/engine');
+    const eng = new TraceEngine();
+    const dc = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');
+    const ap = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');
+    fs.mkdirSync(path.dirname(dc), { recursive: true });
+    fs.writeFileSync(ap, JSON.stringify({ thresholds: { latencyWarnMs: 99 }, wiring: { 'relay:9': { role: 'rex' }, 'relay:0': { role: 'dps' } } }));
+    const savedAt = Date.now() - 5000;
+    fs.writeFileSync(dc, JSON.stringify({ version: '3.0', savedAt: new Date(savedAt).toISOString(), doors: [phys, emu] }));
+    const r1 = eng.importDoors();
+    assert.strictEqual(r1.doors, 2);
+    let w = eng.wiring();
+    assert.strictEqual(w['relay:9'].role, 'rex', 'manual entries kept');
+    assert.strictEqual(w['relay:0'].role, 'ignore', 'the door owns relay:0 now (last save wins)');
+    assert.strictEqual(w['door:1:dps'].src, 'door:1'); assert.strictEqual(w['door:1:dps'].at, savedAt);
+    assert.strictEqual(JSON.parse(fs.readFileSync(ap, 'utf8')).thresholds.latencyWarnMs, 99);
+    // Event Trace edits the pairing → it goes back to the door
+    w = JSON.parse(JSON.stringify(w));
+    w['door:1:lock'].door = OD2; w['door:1:lock'].note = 'moved to the lab door'; w['door:1:dps'].active = 'closed';
+    eng.saveWiring(w, 'event trace (tester)');
+    const cfg = JSON.parse(fs.readFileSync(dc, 'utf8'));
+    const d1 = cfg.doors.find(d => d.id === 1);
+    assert.strictEqual(d1.trace.oncafeDoorId, OD2); assert.strictEqual(d1.trace.note, 'moved to the lab door'); assert.strictEqual(d1.trace.by, 'event trace (tester)');
+    assert.strictEqual(d1.dps.reverseSense, false, 'DPS sense flipped on the door');
+    w = eng.wiring();
+    assert.strictEqual(w['door:1:dps'].door, OD2, 'every channel of the door follows'); assert.strictEqual(w['door:1:rex'].note, 'moved to the lab door');
+    assert.strictEqual(w['door:1:dps'].active, 'open');
+    ok('door save → wiring (manual entries kept, raw wires taken over); wiring save → door (OnCAFE door, description, DPS sense) for every channel of that door');
+    // last save wins at start-up: an older door config does not overwrite newer edits; a newer one does
+    w = JSON.parse(JSON.stringify(eng.wiring())); w['door:1:rex'].role = 'input';
+    eng.saveWiring(w);
+    const older = JSON.parse(fs.readFileSync(dc, 'utf8')); older.savedAt = new Date(Date.now() - 60000).toISOString(); fs.writeFileSync(dc, JSON.stringify(older));
+    const e2 = new TraceEngine(); e2._importIfNewer();
+    assert.strictEqual(e2.wiring()['door:1:rex'].role, 'input', 'older door config does not win');
+    older.savedAt = new Date(Date.now() + 2000).toISOString(); fs.writeFileSync(dc, JSON.stringify(older));
+    e2._importIfNewer();
+    assert.strictEqual(e2.wiring()['door:1:rex'].role, 'rex', 'newer door config wins');
+    ok('last save wins at start-up (door config vs wiring timestamps)');
+
+    // door activity → traces: DPS from the door, strike watched on the analog zone, card on the door's reader
+    const T = Date.now() - 60000;
+    const live = new TraceEngine();
+    live.saveSettings({ cloud: { doorConfig: { [OD2]: { grantMs: 5000 } } } });
+    live.onDoorActivity({ t: T, doorId: 1, kind: 'dps', text: 'DPS OPEN · REL 1', source: 'aether' }, { key: '1:dps:relay:0', value: 1 });
+    live.onDoorActivity({ t: T - 10, doorId: 1, kind: 'dps', text: 'x', source: 'aether' }, { key: '1:dps:relay:0', value: 1, initial: true });
+    live.add(fromCloud({ eventTimestamp: T + 40, doorId: OD2, eventMeta: { eventId: 'o1', events: [{ event: [{ eventType: 'open' }] }] } }, { src: 'cloud-mqtt', at: T + 800 })[0]);
+    live.add(fromJournal({ t: T + 10000, k: 'card', ch: 'wiegand:wg-1', v: 1, src: 'wiegand', m: { fc: 1, cn: 7 } }));
+    live.add(fromCloud({ eventTimestamp: T + 10050, doorId: OD2, cardNumber: '7', facilityCode: '1', eventMeta: { eventId: 'g1', events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: T + 10700 })[0]);
+    live.add(fromCloud({ eventTimestamp: T + 10060, doorId: OD2, eventMeta: { eventId: 'u1', events: [{ event: [{ eventType: 'unlocked' }] }] } }, { src: 'cloud-mqtt', at: T + 10750 })[0]);
+    live.onDoorActivity({ t: T + 10300, doorId: 1, kind: 'lock', text: 'Lock UNLOCKED by panel · ADC 8', source: 'panel' }, { key: '1:lock:analog:7', value: 1 });
+    live.onDoorActivity({ t: T + 15300, doorId: 1, kind: 'lock', text: 'Lock relocked · ADC 8', source: 'panel' }, { key: '1:lock:analog:7', value: 0 });
+    live.onDoorActivity({ t: T + 16000, doorId: 1, kind: 'lock', text: 'Lock zone TROUBLE', source: 'panel' }, { key: '1:lock:analog:7', value: 'TROUBLE' });
+    const a = live.analyze(null);
+    const dps = a.traces.find(t => t.kind === 'input' && t.action.ch === 'door:1:dps');
+    assert(dps && dps.result === 'open', JSON.stringify(dps && dps.notes));
+    const strike = a.traces.find(t => t.kind === 'output' && t.action.ch === 'door:1:lock' && t.action.v === 1);
+    assert(strike.cause && /card 1-7 granted/.test(strike.cause.label), 'analog strike traced back to the card');
+    const off = a.traces.find(t => t.kind === 'output' && t.action.ch === 'door:1:lock' && t.action.v === 0);
+    assert.strictEqual(off.held, 5000);
+    assert(live.live.some(e => e.type === 'door-fault'));
+    const sum = live.doorsSummary();
+    const s1 = sum.doors.find(d => d.id === 1);
+    assert.strictEqual(s1.oncafe.id, OD2); assert.strictEqual(s1.last.card.label, '1-7'); assert.strictEqual(s1.last.output.held, 5000); assert.strictEqual(s1.grantMs, 5000);
+    assert.strictEqual(s1.last.input.result, 'open');
+    ok('door activity (incl. analog EOL strike) → input/output traces; per-door summary for the Doors page');
+  }
+
   console.log(`\n${passed} checks passed`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Save, AlertCircle, Plus, Trash2, Play, RefreshCw, Copy, ExternalLink, Wand2, Workflow } from 'lucide-react';
 // AETHER_DOOR_WORKFLOWS: Custom Events run Emulation workflows (shared on the Pi)
 import { requestEditWorkflow, navigateToEmulation, onWorkflowSaved, convertDoorStepsToWorkflow, uniqueWorkflowName, nodeScope } from '../lib/workflowBridge';
+import { DoorTracePairing } from './trace/DoorTrace';   // AETHER_TRACE
 import { DoorOutputKind, DOOR_OUTPUT_CHANNELS, DOOR_OUTPUT_ROLES, doorOutputKind, doorOutputChannelLabel, isValidActiveVolts, LOCK_WATCH_TYPE, isLockWatch, lockWatchLabel,
   // AETHER_ANALOG_IN (Update 72): Lock watched on an EOL zone; custom input ios
   LOCK_WATCH_ANALOG_TYPE, isAnalogLockWatch, isValidLockWatchThreshold, DEFAULT_LOCK_WATCH_THRESHOLD, customIOLabel } from '../lib/doorOutputs';
@@ -637,6 +638,9 @@ const DoorSettings: React.FC<DoorSettingsProps> = ({ door, readers, emuBoard, on
                   This reader is used for presenting credentials to this door (single reader per door).
                 </p>
               </div>
+
+              {/* AETHER_TRACE: pair with the OnCAFE door + description (Event Trace) */}
+              <DoorTracePairing door={editedDoor as any} onChange={(trace: any) => setEditedDoor({ ...(editedDoor as any), trace } as any)} />
 
               <div className="bg-hv-widget/40 rounded-lg p-4 border border-hv-line-strong/60">
                 <div className="flex items-start gap-3">

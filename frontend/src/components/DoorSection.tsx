@@ -19,6 +19,7 @@ import {
 // AETHER_READER_DIR (Update 71): every enrolled Wiegand / OSDP reader on the Pi
 import { DirReader, loadEnrolledReaders, dirReaderLabel, resolveLegacyReaderId, sendCardToDirReader } from '../lib/readerDirectory';
 import { requestRunWorkflow, onWorkflowSaved, nodeScope } from '../lib/workflowBridge';   // AETHER_DOOR_WORKFLOWS
+import { DoorTraceStrip } from './trace/DoorTrace';   // AETHER_TRACE
 
 /** ---------- Types ---------- */
 
@@ -1842,7 +1843,8 @@ const DoorSection: React.FC<DoorSectionProps> = ({
         rexIn: door.rexIn,
         ios: door.ios,
         reader: door.reader ?? null,
-        customEvents: door.customEvents
+        customEvents: door.customEvents,
+        trace: (door as any).trace   // AETHER_TRACE: OnCAFE pairing + description
       }))
     };
 
@@ -2272,6 +2274,8 @@ const DoorSection: React.FC<DoorSectionProps> = ({
             </div>
           </div>
         </div>
+
+        <DoorTraceStrip doorId={door.id} />{/* AETHER_TRACE */}
 
         {/* AETHER_DOOR_ACTIVITY: what happened on this door's I/O and reader */}
         <DoorActivityLog doorId={door.id} store={activityStore} onClear={clearDoorActivity} disabled={!connected} />

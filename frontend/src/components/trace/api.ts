@@ -32,7 +32,7 @@ export interface Analysis {
 }
 export interface KindStats { actions: number; pass: number; warn: number; fail: number; decision: Stat; push: Stat; api: Stat; decisionToPush: Stat; output: Stat; hardware: Stat; ack: Stat; credMismatch: number; unexplained?: number; verdict: 'pass' | 'warn' | 'fail' | 'no-data' }
 export interface Role { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; auto?: boolean; score?: number; kind?: string; count?: number }
-export type Wiring = Record<string, { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string }>;
+export type Wiring = Record<string, { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; note?: string; src?: string; at?: number; dir?: 'in' | 'out'; doorName?: string }>;
 export interface SeenChannel { ch: string; kind: string; count: number; last: number; inferred: Role | null }
 export interface InvDoor { id: string; name: string; controllerId: string; areaIds: string[]; locationId?: string }
 export interface InvArea { id: string; name: string; locationId: string; location: string; tz: string | null }

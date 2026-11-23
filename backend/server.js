@@ -760,13 +760,14 @@ let doorActivity = null;
 try {
   doorActivity = require('./lib/doorActivity').createDoorActivity({
     // AETHER_AEGIS_AUTOMATION: meta = { value, initial, key } from doorActivity; POSTed page entries have none
-    emit: (entry, meta) => { io.emit('door_activity', entry); feedAutomation('door_event', { ...entry, ...(meta || {}) }); },
+    emit: (entry, meta) => { io.emit('door_activity', entry); try { require('./routes/trace').getEngine().onDoorActivity(entry, meta); } catch (_) { /* AETHER_TRACE */ } feedAutomation('door_event', { ...entry, ...(meta || {}) }); },
     onCleared: (doorId) => io.emit('door_activity_cleared', { doorId }),   // every open page drops that door's lines
   });
   app.use('/api/doors', doorActivity.router(express));
   app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { try { doorActivity.invalidate(); } catch (_) {} }); next(); });
   process.on('exit', () => { try { doorActivity.flushSync(); } catch (_) {} });
 } catch (e) { doorActivity = null; console.warn('[DoorActivity] not mounted:', e.message); }
+app.post('/api/doors/config', (req, res, next) => { res.on('finish', () => { if (res.statusCode < 300) { try { require('./routes/trace').getEngine().importDoors('doors page'); } catch (e) { console.warn('[Trace] door import:', e.message); } } }); next(); });   // AETHER_TRACE: a door save updates the wiring map
 app.use('/api/doors', require('./routes-doors')());
 app.use('/api/switch', require('./routes-switch')(io, () => switchManager, logSystemEvent));
 app.use('/api/vms', require('./routes-vms')(io));   // Stream View / RTSP support

@@ -293,7 +293,7 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
 
 const DRIVE_ROLES = ['dps', 'rex', 'input', 'ignore'];
 const OBSERVE_ROLES = ['lock', 'output', 'ignore'];
-const isDrive = (kind: string) => ['relay', 'gpio', 'emu-in'].includes(kind);
+const isDrive = (kind: string) => ['relay', 'gpio', 'emu-in', 'door-in'].includes(kind);
 
 /** Wiring map editor — the same map Log Analytics › Product Test uses. */
 export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: string; name: string }[] }> = ({ api, status, doors }) => {
@@ -307,23 +307,25 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const rows = [...new Set([...seen.map(c => c.ch), ...Object.keys(w)])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const info = (ch: string) => seen.find(c => c.ch === ch);
-  const kindOf = (ch: string) => info(ch)?.kind || (/^(relay|gpio):|:in:/.test(ch) ? 'relay' : 'opto');
+  const kindOf = (ch: string) => info(ch)?.kind || (w[ch]?.dir === 'out' ? 'door-out' : w[ch]?.dir === 'in' ? 'door-in' : /^(relay|gpio):|:in:/.test(ch) ? 'relay' : 'opto');
   const set = (ch: string, patch: Partial<Wiring[string]> | null) => {
     setW(x => { const n = { ...x }; if (patch === null) delete n[ch]; else n[ch] = { ...(n[ch] || { role: isDrive(kindOf(ch)) ? 'dps' : 'lock' }), ...patch }; return n; });
     setDirty(true);
   };
-  const save = async () => { setBusy(true); setMsg(null); try { const r = await api.saveWiring(w); setW(r.wiring); setDirty(false); setMsg('Saved — Log Analytics › Product Test uses the same map.'); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
+  const save = async () => { setBusy(true); setMsg(null); try { const r = await api.saveWiring(w); setW(r.wiring); setDirty(false); setMsg(Object.values(r.wiring).some(e => e.src) ? 'Saved — door pairings go back to the Doors page; Product Test uses the same map.' : 'Saved — Log Analytics › Product Test uses the same map.'); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
   return (
-    <Card icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Shared with Log Analytics › Product Test. Unmapped channels get a role guessed from what the controller reported."
+    <Card icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Doors from the Doors page fill this in (and get your changes back — the last save wins). Shared with Log Analytics › Product Test."
       right={<div className="flex items-center gap-2">{msg && <span className="text-[11px] text-hv-text-3">{msg}</span>}<Button size="sm" icon={<RefreshCw size={13} />} onClick={load}>Refresh</Button><Button size="sm" tone="primary" icon={<Save size={13} />} disabled={!dirty} busy={busy} onClick={save}>Save wiring</Button></div>}>
       {!rows.length ? <div className="text-xs text-hv-text-3">No relays, inputs or outputs used in the last 24 h. Add a channel by name (relay:6, opto:2, emu:2:in:3, emu:2:out:0).</div> : (
         <div className="grid grid-cols-[110px_110px_190px_minmax(0,1fr)_140px_minmax(0,1fr)_28px] gap-2 items-center text-xs">
-          <span className="text-hv-text-3">Channel</span><span className="text-hv-text-3">Direction</span><span className="text-hv-text-3">Role</span><span className="text-hv-text-3">Door</span><span className="text-hv-text-3">DPS on means</span><span className="text-hv-text-3">Guess from the controller</span><span />
+          <span className="text-hv-text-3">Channel</span><span className="text-hv-text-3">Direction</span><span className="text-hv-text-3">Role</span><span className="text-hv-text-3">Door</span><span className="text-hv-text-3">DPS on means</span><span className="text-hv-text-3">Guess / description</span><span />
           {rows.map(ch => {
             const i = info(ch), m = w[ch], drive = isDrive(kindOf(ch));
             return (
               <React.Fragment key={ch}>
-                <span className="font-mono text-hv-text truncate" title={i ? `${i.count} changes in 24 h` : ''}>{ch}</span>
+                {m?.src && /^door:/.test(ch)
+                  ? <span className="text-hv-text truncate" title={`${ch} — from the Doors page`}>{m.label || ch}<span className="ml-1 text-[10px] text-hv-info-fg">Doors page</span></span>
+                  : <span className="font-mono text-hv-text truncate" title={i ? `${i.count} changes in 24 h` : ''}>{ch}{m?.src && m.role === 'ignore' ? <span className="ml-1 font-sans text-[10px] text-hv-text-3">via door</span> : null}</span>}
                 <span className="text-hv-text-3">{drive ? 'Aether → panel' : 'panel → Aether'}</span>
                 <Select value={m?.role || ''} onChange={e => set(ch, e.target.value ? { role: e.target.value } : null)}>
                   <option value="">not mapped</option>{(drive ? DRIVE_ROLES : OBSERVE_ROLES).map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
@@ -332,7 +334,9 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
                   <option value="">{doors.length ? 'any door' : 'load doors in OnCAFE'}</option>{doors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </Select>
                 <Select value={m?.active || 'open'} disabled={m?.role !== 'dps'} onChange={e => set(ch, { active: e.target.value as 'open' | 'closed' })}><option value="open">door open</option><option value="closed">door closed</option></Select>
-                <span className="text-hv-text-3 truncate">{i?.inferred ? `${ROLE_LABEL[i.inferred.role] || i.inferred.role}${i.inferred.score != null ? ` (${Math.round(i.inferred.score * 100)} %)` : ''}` : ''}</span>
+                {m?.src && /^door:/.test(ch)
+                  ? <Input value={m.note || ''} placeholder="description (shared with the door)" onChange={e => set(ch, { note: e.target.value || undefined })} />
+                  : <span className="text-hv-text-3 truncate" title={m?.role === 'ignore' && m.src ? m.label : undefined}>{m?.role === 'ignore' && m.src ? (m.label || '') : i?.inferred ? `${ROLE_LABEL[i.inferred.role] || i.inferred.role}${i.inferred.score != null ? ` (${Math.round(i.inferred.score * 100)} %)` : ''}` : ''}</span>}
                 <button className="text-hv-text-3 hover:text-hv-error-fg disabled:opacity-30" disabled={!m} aria-label="Unmap" onClick={() => set(ch, null)}><Trash2 size={14} /></button>
               </React.Fragment>
             );
