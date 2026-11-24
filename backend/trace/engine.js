@@ -23,11 +23,15 @@ const { scrub, scrubString, hasSecrets, Vault } = require('./redact');
 const { decodePublishes } = require('./mqtt5');
 const { parseCommand, commandEvent, buildRequest, reverseOf } = require('./commands');
 const { doorsFrom, doorChannels, channelOfActivity, readerChannels } = require('./doors');
+const { cleanSequence, template, TEMPLATES, stepText, grade } = require('./tests');      // TRACE-4
+const { integrity } = require('./integrity');
+const { compare } = require('./compare');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
 const RUNS = path.join(BASE, 'runs');
 const SETTINGS = path.join(BASE, 'settings.json');
 const REVERTS = path.join(BASE, 'pending-reverts.json');
+const SEQUENCES = path.join(BASE, 'sequences.json');      // TRACE-4 test sequences
 const DOORS_CONFIG = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');   // Doors page (routes-doors.js)   // commands to turn back, kept across restarts
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
 const ANALYTICS_SETTINGS = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');   // wiring map shared with Product Test
@@ -47,6 +51,7 @@ const DEFAULTS = {
   wire: { controllerIps: [] },
   thresholds: { decisionWarn: 1000, decisionFail: 2000, pushWarn: 3000, pushFail: 10000, matchWindowMs: 30000, inputWindowMs: 10000, outputWindowMs: 10000, commandWarn: 5000, commandFail: 15000, heldToleranceMs: 1500 },
   commands: { enabled: false },
+  alerts: { enabled: true, level: 'fail', automation: true },   // TRACE-4: live alerts (toast + Automation trigger)
   expectations: [],     // [{ fc, cn, expect: 'grant'|'deny', note }]
   allowRaw: true,
 };
@@ -83,6 +88,7 @@ function cleanSettings(s = {}) {
     expectations: (Array.isArray(s.expectations) ? s.expectations : []).slice(0, 200).map(x => ({ fc: x.fc === '' || x.fc == null ? '' : String(int(x.fc, 0, 2 ** 31 - 1, 0)), cn: String(x.cn ?? '').replace(/\D/g, '').slice(0, 20), expect: x.expect === 'deny' ? 'deny' : 'grant', note: String(x.note || '').slice(0, 80) })).filter(x => x.cn),
     allowRaw: s.allowRaw !== false,
     commands: { enabled: !!(s.commands && s.commands.enabled) },
+    alerts: { enabled: !(s.alerts && s.alerts.enabled === false), level: s.alerts && s.alerts.level === 'warn' ? 'warn' : 'fail', automation: !(s.alerts && s.alerts.automation === false) },
   };
 }
 
@@ -134,6 +140,10 @@ class TraceEngine extends EventEmitter {
     this.wireSeen = new Map();
     this.liveLog = { reveal: (id, who) => new Vault(path.join(BASE, 'live')).reveal(id, who) };
     this._cache = null;
+    this.test = null;          // TRACE-4: the test sequence running now (or the last one)
+    this.alerts = [];          // TRACE-4: live alerts (newest last)
+    this.alertSeq = 0;
+    this._alerted = new Set();
   }
 
   // ── wiring into the backend ────────────────────────────────────────────
@@ -154,6 +164,8 @@ class TraceEngine extends EventEmitter {
     for (const r of this.listRuns()) if (!r.end) this._patchMeta(r.id, { end: r.lastAt || r.start, endReason: 'backend restarted' });
     for (const p of this._reverts()) this._armRevert(p);
     this._importIfNewer();   // Doors page saved while Event Trace was not looking: its doors win   // turn-backs that were waiting when the backend stopped
+    this._alertTimer = setInterval(() => this._alertTick(), 2000);   // TRACE-4 live alerts
+    if (this._alertTimer.unref) this._alertTimer.unref();
   }
 
   _hookTraffic() {
@@ -264,7 +276,7 @@ class TraceEngine extends EventEmitter {
 
   // ── settings ───────────────────────────────────────────────────────────
   saveSettings(s) {
-    const merged = cleanSettings({ ...this.settings, ...s, commands: { ...this.settings.commands, ...(s.commands || {}) }, thresholds: { ...this.settings.thresholds, ...(s.thresholds || {}) }, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
+    const merged = cleanSettings({ ...this.settings, ...s, commands: { ...this.settings.commands, ...(s.commands || {}) }, alerts: { ...this.settings.alerts, ...(s.alerts || {}) }, thresholds: { ...this.settings.thresholds, ...(s.thresholds || {}) }, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
     this.settings = merged;
     this._settingsRev = (this._settingsRev || 0) + 1;
     writeAtomic(SETTINGS, JSON.stringify(merged, null, 1));
@@ -763,7 +775,8 @@ class TraceEngine extends EventEmitter {
     const events = id ? this.readEvents(id) : this.live;
     const syncs = id ? (meta.syncs || []) : (this.liveSyncs || []);
     const res = correlate(events, syncs, { ...this.settings, doorConfig: this.settings.cloud.doorConfig }, { wiring: this.wiring() });
-    const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id) } : null, ...res };
+    res.integrity = integrity(events, { pollMs: this.settings.cloud.pollMs, apiEnabled: this.settings.cloud.poll, now: meta && meta.end ? meta.end + 60000 : Date.now() });
+    const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id), test: meta.test ? { sequence: meta.test.sequence, startedAt: meta.test.startedAt, endedAt: meta.test.endedAt || null } : (this.run && this.run.id === id && this.run.test ? { sequence: this.run.test.sequence, startedAt: this.run.test.startedAt, endedAt: null } : null) } : null, ...res };
     this._cache = { key, at: Date.now(), value };
     return value;
   }
@@ -892,6 +905,260 @@ class TraceEngine extends EventEmitter {
     return this._importInto(id, ev2, raw2, `HAR (${ev2.length} cloud events, browser clock)`);
   }
 
+  // ── TRACE-4: test sequences ─────────────────────────────────────────────
+  sequences() { try { return (JSON.parse(fs.readFileSync(SEQUENCES, 'utf8')) || []).map(cleanSequence); } catch { return []; } }
+  saveSequence(q) {
+    const list = this.sequences();
+    const s = cleanSequence({ ...q, updatedAt: Date.now() });
+    const i = list.findIndex(x => x.id === s.id);
+    if (i >= 0) list[i] = s; else { if (list.length >= 100) throw err('100 sequences is the limit; delete one first'); list.push(s); }
+    writeAtomic(SEQUENCES, JSON.stringify(list, null, 1));
+    return s;
+  }
+  deleteSequence(id) {
+    if (this.test && this.test.state === 'running' && this.test.seqId === id) throw err('That sequence is running', 409);
+    writeAtomic(SEQUENCES, JSON.stringify(this.sequences().filter(x => x.id !== id), null, 1));
+  }
+  templateSteps(kind, door, card, opt) { return template(kind, door, card, opt); }
+  templates() { return TEMPLATES; }
+
+  /** The Doors page doors with what a test needs: reader, OnCAFE door, traced channels, raw wires. */
+  _doorMap() {
+    let cfg = null;
+    try { cfg = this._readDoorConfig(); } catch (e) { throw err('The Doors page config is damaged: ' + e.message, 500); }
+    const doors = cfg ? doorsFrom(cfg) : [];
+    const w = this.wiring();
+    const m = new Map();
+    for (const d of doors) {
+      const id = Number(d.id);
+      const chs = {}, raw = {};
+      for (const { key, entry } of doorChannels(d)) {
+        if (entry.via) { const r = entry.via.split(':')[2]; raw[r] = key; continue; }
+        const r = key.split(':')[2];
+        if (r === 'dps' || r === 'rex' || r === 'lock') chs[r] = key;
+      }
+      const oncafe = (d.trace && d.trace.oncafeDoorId) || (w[`door:${id}:dps`] || w[`door:${id}:lock`] || {}).door || null;
+      m.set(id, { d, id, name: String(d.name || `Door ${id}`), oncafe, chs, raw, enabled: d.enabled !== false });
+    }
+    return m;
+  }
+
+  async _sendCardOn(d, fc, cn, format) {
+    const r = String(d.reader || '');
+    if (!r) throw err(`${d.name} has no reader (Doors page › Settings › Reader)`);
+    const f = format || this.settings.sync.format;
+    const m = /^ctrl-emu-(\d+)-(\d+)$/.exec(r);
+    if (m) {
+      const em = this.deps.emulator;
+      if (!em || typeof em.queueCardRead !== 'function') throw err('The board emulator is not loaded');
+      const x = em.queueCardRead(Number(m[1]), Number(m[2]), f || 'w26', Number(fc) || 0, Number(cn));
+      if (x && x.success === false) throw err(x.error || 'The emulated board refused the card');
+      return x;
+    }
+    const wm = this.deps.getWiegand && this.deps.getWiegand();
+    if (wm && wm.getReaders && wm.getReaders().some(x => String(x.id) === r)) return wm.sendCard(r, Number(fc) || 0, Number(cn), f || null);
+    const om = this.deps.getOsdp && this.deps.getOsdp();
+    if (om && om.getReaders && [].concat(om.getReaders() || []).some(x => String(x.id ?? x.readerId) === r)) return om.sendCardRead(r, { facility: Number(fc) || 0, card: String(cn) }, f || 'wiegand26');
+    throw err(`Reader ${r} of ${d.name} is not running on this Pi`);
+  }
+
+  /** Drive a door's DPS / REX the way the Doors page does (logical on/off, reverse sense applied). */
+  async _driveDoor(d, key, on) {
+    const io = d[key];
+    const word = key === 'dps' ? 'DPS' : 'REX';
+    if (!io || !Number.isInteger(Number(io.channel)) || Number(io.channel) < 0) throw err(`${d.name} has no ${word} assigned (Doors page › Settings)`);
+    const ch = Number(io.channel);
+    const level = io.reverseSense ? !on : !!on;
+    if (d.ioSource === 'emulated') {
+      const em = this.deps.emulator;
+      if (!em || typeof em.setInput !== 'function') throw err('The board emulator is not loaded');
+      if (em.setInput(Number(d.emuBoard), ch, level) === false) throw err(`Emulated board ${d.emuBoard} has no input ${ch}`);
+      return;
+    }
+    const q = this.deps.gpioQueue;
+    if (!q) throw err('The relay board is not available on this Pi');
+    const t = io.hardwareType;
+    if (t === 'opto-in' || t === 'analog-in') throw err(`${d.name} ${word} is an input Aether watches, not one it drives`);
+    if (Number(io.stackLevel)) throw err(`${d.name} ${word} is on a stacked board; tests drive stack 0 only`);
+    if (t === 'dac') { const v = Number(io.activeVolts) > 0 ? Math.min(10, Number(io.activeVolts)) : 10; return q.enqueue('setDAC', ch, level ? v : 0); }
+    if (t === 'od') return q.enqueue('setOD', ch, level ? 100 : 0);
+    return q.enqueue('setRelay', ch, level);
+  }
+
+  async _testSleep(T, ms) { const until = Date.now() + ms; while (!T.abort && Date.now() < until) await sleep(Math.min(250, until - Date.now())); }
+
+  async _doStep(s, info, L, T, who) {
+    const st = this.settings;
+    if (s.kind === 'wait') return this._testSleep(T, s.ms);
+    if (!info) throw err(`Step ${L.idx + 1}: pick a door`);
+    const d = info.d;
+    if (s.kind === 'card') {
+      if (!s.cn) throw err(`Step ${L.idx + 1}: no card number`);
+      L.cred = { fc: s.fc === '' ? null : s.fc, cn: s.cn };
+      L.at = Date.now();
+      return this._sendCardOn(d, s.fc, s.cn, s.format);
+    }
+    if (s.kind === 'rex') {
+      L.at = Date.now();
+      T.touched.set(`${info.id}:rexIn`, info);
+      await this._driveDoor(d, 'rexIn', true);
+      await sleep(s.holdMs);   // never cut short: the REX always gets released
+      await this._driveDoor(d, 'rexIn', false);
+      T.touched.delete(`${info.id}:rexIn`);
+      return;
+    }
+    if (s.kind === 'dps') {
+      L.at = Date.now();
+      await this._driveDoor(d, 'dps', s.state === 'open');
+      if (s.state === 'open') T.touched.set(`${info.id}:dps`, info); else T.touched.delete(`${info.id}:dps`);
+      return;
+    }
+    if (s.kind === 'command') {
+      if (!st.commands.enabled) throw err('Commands are turned off (Setup › Commands)');
+      if (!info.oncafe) throw err(`${info.name} is not paired with an OnCAFE door`);
+      let target = info.oncafe;
+      if (s.cmd === 'lockdown') {
+        const inv = this.cloud.inv && Date.now() - this.cloud.inv.at < 10 * 60000 ? this.cloud.inv : await this.cloud.inventory(st.cloud.url, st.cloud.org);
+        const od = (inv.doors || []).find(x => x.id === info.oncafe);
+        target = od && od.areaIds && od.areaIds[0];
+        if (!target) throw err(`${info.name}'s OnCAFE door has no area for a lockdown`);
+      }
+      L.at = Date.now();
+      const r = await this.command({ kind: s.cmd, target, value: s.value, seconds: s.seconds }, who);
+      if (!r.ok) throw err(`OnCAFE refused the command: ${r.error || 'HTTP ' + r.status}`);
+      return;
+    }
+  }
+
+  async runTest(seqId, opt = {}, who = '?') {
+    if (this.test && this.test.state !== 'done') throw err('A test is already running', 409);
+    const q = this.sequences().find(x => x.id === seqId);
+    if (!q) throw err('That sequence no longer exists', 404);
+    const seq = cleanSequence({ ...q, ...(opt.repeat ? { repeat: opt.repeat } : {}), ...(opt.minutes != null ? { minutes: opt.minutes } : {}), ...(opt.gapMs != null ? { gapMs: opt.gapMs } : {}) });
+    if (!seq.steps.length) throw err('This sequence has no steps');
+    if (seq.steps.some(s => s.kind === 'command') && !this.settings.commands.enabled) throw err('This sequence sends OnCAFE commands: turn Commands on in Setup first', 403);
+    const doors = this._doorMap();
+    seq.steps.forEach((s, i) => {
+      if (s.kind === 'wait' && s.door == null) return;
+      const info = doors.get(s.door);
+      if (!info) throw err(`Step ${i + 1}: door ${s.door == null ? '(none)' : s.door} is not on the Doors page`);
+      if (!info.enabled) throw err(`Step ${i + 1}: ${info.name} is turned off on the Doors page`);
+      if (s.kind === 'card' && !s.cn) throw err(`Step ${i + 1}: enter the card number`);
+      if (s.kind === 'command' && !info.oncafe) throw err(`Step ${i + 1}: pair ${info.name} with an OnCAFE door first`);
+      if (s.kind === 'command' && s.cmd !== 'lockdown' && !this.settings.cloud.doors.includes(info.oncafe)) throw err(`Step ${i + 1}: ${info.name}'s OnCAFE door is not one of the doors under test (Setup › OnCAFE)`);
+    });
+    const T = { state: 'running', seqId: seq.id, name: seq.name, startedAt: Date.now(), iter: 0, idx: 0, steps: seq.steps.length, repeat: seq.repeat, until: seq.minutes ? Date.now() + seq.minutes * 60000 : null,
+      abort: false, who: String(who).slice(0, 60), log: [], runId: null, ownRun: !this.run, touched: new Map(), health: [], error: null, report: null };
+    this.test = T;
+    try {
+      if (T.ownRun) await this.startRun(`Test: ${seq.name}`, { sync: seq.sync, note: `Test sequence ${seq.name}` });
+    } catch (e) { T.state = 'done'; T.error = e.message; throw e; }
+    T.runId = this.run.id;
+    const testMeta = { sequence: { id: seq.id, name: seq.name }, steps: seq.steps, startedAt: T.startedAt, who: T.who, repeat: seq.repeat, minutes: seq.minutes, gapMs: seq.gapMs };
+    this.run.test = testMeta;
+    this._patchMeta(T.runId, { test: testMeta });
+    (async () => {
+      const healthT = setInterval(() => { try { const c = this.cloud.status(); T.health.push({ at: Date.now(), push: c.push.state, received: c.push.received, api: c.api.state }); if (T.health.length > 2000) T.health.shift(); } catch { /* */ } }, 10000);
+      try {
+        if (T.ownRun && seq.sync && this.settings.sync.atStart) { await sleep(300); while (this.syncBusy && !T.abort) await sleep(200); await this._testSleep(T, 1500); }
+        for (let it = 1; ; it++) {
+          if (T.abort || (!T.until && it > seq.repeat) || (T.until && Date.now() >= T.until)) break;
+          T.iter = it;
+          for (const [idx, s] of seq.steps.entries()) {
+            const info = s.door != null ? doors.get(s.door) : null;
+            const L = { iter: it, idx, kind: s.kind, at: Date.now(), door: s.door, doorName: info ? info.name : null, oncafe: info ? info.oncafe : null,
+              chs: info ? info.chs : null, raw: info && (s.kind === 'dps' || s.kind === 'rex') ? info.raw[s.kind] || null : null, lockRaw: info ? info.raw.lock || null : null,
+              text: stepText(s, info && info.name) };
+            if (T.abort) { L.skipped = true; T.log.push(L); continue; }
+            T.idx = idx;
+            this.add({ id: newId(), src: 'test', lane: 'aether', at: L.at, t: L.at, clock: 'pi', type: 'step', label: `Test step ${idx + 1}${seq.repeat > 1 || T.until ? ` (#${it})` : ''}: ${L.text}`, door: null, controllerId: null, cred: null, clientType: null, eventId: null, topic: null, info: { test: seq.id, iter: it, idx } });
+            try { await this._doStep(s, info, L, T, T.who); } catch (e) { L.error = e.message; }
+            L.end = Date.now();
+            T.log.push(L);
+            await this._testSleep(T, s.afterMs);
+          }
+          if (seq.gapMs && !T.abort) await this._testSleep(T, seq.gapMs);
+        }
+      } catch (e) { T.error = e.message; }
+      finally {
+        clearInterval(healthT);
+        for (const [k, info] of T.touched) {   // put every DPS / REX the test moved back to rest
+          const key = k.endsWith(':dps') ? 'dps' : 'rexIn';
+          for (let n = 0; n < 3; n++) { try { await this._driveDoor(info.d, key, false); break; } catch (e) { if (n === 2) T.error = `Could not put ${info.name} ${key === 'dps' ? 'DPS' : 'REX'} back: ${e.message}`; else await sleep(300); } }
+        }
+        T.state = 'grading';
+        try {
+          if (T.ownRun && this.run && this.run.id === T.runId) await this.stopRun(T.abort ? 'test stopped' : 'test finished', { sync: seq.sync });
+          else await sleep(Math.min(10000, this.settings.thresholds.matchWindowMs));
+        } catch (e) { T.error = T.error || e.message; }
+        T.endedAt = Date.now();
+        this._patchMeta(T.runId, { test: { ...testMeta, log: T.log, endedAt: T.endedAt, aborted: T.abort, error: T.error, health: T.health } });
+        try { T.report = this.testReport(T.runId); } catch (e) { T.error = T.error || e.message; }
+        T.state = 'done';
+        this.emit('test-done', { runId: T.runId, name: T.name, verdict: T.report && T.report.report.totals.verdict });
+      }
+    })();
+    return this.testStatus();
+  }
+
+  stopTest() { if (this.test && this.test.state === 'running') this.test.abort = true; return this.testStatus(); }
+  testStatus() {
+    const T = this.test;
+    if (!T) return null;
+    return { state: T.state, seqId: T.seqId, name: T.name, runId: T.runId, startedAt: T.startedAt, endedAt: T.endedAt || null, iter: T.iter, repeat: T.repeat, until: T.until, idx: T.idx, steps: T.steps,
+      done: T.log.length, errors: T.log.filter(l => l.error).length, abort: T.abort, error: T.error, verdict: T.report ? T.report.report.totals.verdict : null,
+      last: T.log.slice(-6).map(l => ({ iter: l.iter, idx: l.idx, text: l.text, at: l.at, error: l.error || null })) };
+  }
+
+  /** The graded result of a test run (also while it is still running). */
+  testReport(runId) {
+    const meta = this.run && this.run.id === runId ? { ...JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8')) } : JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8'));
+    const t = meta.test;
+    if (!t) throw err('That run is not a test run', 404);
+    const log = (this.test && this.test.runId === runId && this.test.state !== 'done') ? this.test.log : (t.log || []);
+    const a = this.analyze(runId);
+    const report = grade(a, this.readEvents(runId), log, t.steps || [], this.settings.thresholds);
+    const health = t.health || (this.test && this.test.runId === runId ? this.test.health : []) || [];
+    let drops = 0;
+    for (let i = 1; i < health.length; i++) if (health[i - 1].push === 'connected' && health[i].push !== 'connected') drops++;
+    return { runId, sequence: t.sequence, startedAt: t.startedAt, endedAt: t.endedAt || null, aborted: !!t.aborted, error: t.error || null, who: t.who, repeat: t.repeat, minutes: t.minutes, iterations: Math.max(0, ...log.map(l => l.iter)), report: { ...report, health: { samples: health.length, pushDrops: drops } } };
+  }
+  testRuns() { return this.listRuns().filter(r => r.test).map(r => ({ id: r.id, name: r.name, start: r.start, end: r.end, sequence: r.test.sequence, aborted: !!r.test.aborted })); }
+
+  // ── TRACE-4: compare two runs ─────────────────────────────────────────
+  compareRuns(a, b) {
+    const A = this.analyze(a), B = this.analyze(b);
+    const tA = (() => { try { return this.testReport(a); } catch { return null; } })(), tB = (() => { try { return this.testReport(b); } catch { return null; } })();
+    return compare(A, B, this.readEvents(a), this.readEvents(b), tA, tB);
+  }
+
+  // ── TRACE-4: live alerts ───────────────────────────────────────────────
+  _alertTick() {
+    const al = this.settings.alerts;
+    if (!al.enabled || this._alertBusy) return;
+    const watching = this.run || (this.cloud.status().push.state === 'connected');
+    if (!watching) return;
+    this._alertBusy = true;
+    try {
+      const a = this.analyze(this.run ? this.run.id : null);
+      const cut = Date.now() - 10 * 60000;
+      for (const t of a.traces) {
+        if (t.sync || t.at < cut || this._alerted.has(t.id)) continue;
+        if (!(t.status === 'fail' || (al.level === 'warn' && t.status === 'warn'))) continue;
+        // a trace still inside its match window may still find its answer: wait for it
+        if (Date.now() - t.at < this.settings.thresholds.matchWindowMs && !t.decision && t.kind !== 'command') continue;
+        this._alerted.add(t.id);
+        const x = { seq: ++this.alertSeq, at: Date.now(), traceAt: t.at, traceId: t.id, runId: this.run ? this.run.id : null, status: t.status, kind: t.kind, label: t.action.label,
+          why: t.notes[0] || (t.status === 'fail' ? 'failed' : 'slow'), door: (t.decision && t.decision.door && (t.decision.door.name || t.decision.door.id)) || null };
+        this.alerts.push(x);
+        if (this.alerts.length > 200) this.alerts.shift();
+        this.emit('alert', x);
+      }
+      if (this._alerted.size > 5000) this._alerted = new Set([...this._alerted].slice(-2000));
+    } catch { /* an analysis error never stops the Pi */ } finally { this._alertBusy = false; }
+  }
+  alertsSince(seq = 0) { return { seq: this.alertSeq, alerts: this.alerts.filter(a => a.seq > seq) }; }
+
   status() {
     return {
       run: this.run ? { id: this.run.id, name: this.run.name, start: this.run.start, count: this.run.count, syncs: this.run.syncs } : null,
@@ -906,6 +1173,9 @@ class TraceEngine extends EventEmitter {
       wiring: this.wiring(),
       pendingReverts: this.pendingReverts(),
       doorSync: this.doorSync || null,
+      test: this.testStatus(),
+      alertSeq: this.alertSeq,
+      alerts: this.alerts.slice(-5),
       inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,
     };
   }

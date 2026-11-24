@@ -657,6 +657,124 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     ok('door activity (incl. analog EOL strike) → input/output traces; per-door summary for the Doors page');
   }
 
+  console.log('TRACE-4: test sequences, integrity, compare, alerts');
+  {
+    const { cleanSequence, template, grade } = require('../trace/tests');
+    const { integrity } = require('../trace/integrity');
+    const { compare } = require('../trace/compare');
+    // sequences are cleaned, templates expand to steps
+    const sq = cleanSequence({ name: 'x', steps: [{ kind: 'card', door: '1', fc: '55', cn: '10a01', expect: { result: 'grant', strike: 'on' } }, { kind: 'bogus' }, { kind: 'rex', door: 1, holdMs: 5 }], repeat: 0 });
+    assert.strictEqual(sq.steps[0].cn, '1001'); assert.strictEqual(sq.steps[0].door, 1); assert.strictEqual(sq.steps[1].kind, 'wait'); assert.strictEqual(sq.steps[2].holdMs, 100); assert.strictEqual(sq.repeat, 1);
+    for (const k of ['valid', 'invalid', 'rex', 'forced', 'held', 'apb', 'lockdown', 'override', 'firstcard', 'schedule', 'elevator']) assert(template(k, 1, { fc: 1, cn: 2 }).length, k);
+    assert.strictEqual(template('held', 1, { fc: 1, cn: 2 }, { heldMs: 10000 })[2].expect.withinMs, 25000);
+    ok('sequences cleaned (bad steps, limits); 11 door behaviour templates');
+
+    // integrity: lost push, duplicates, out of order, only in the controller log
+    const E = (src, type, t, at, id, extra = {}) => ({ id: 'e' + Math.random(), src, lane: src === 'controller' ? 'controller' : 'cloud', type, t, at, eventId: id, door: { id: 'D', name: 'Door' }, controllerId: 'C', ...extra });
+    const now = Date.now();
+    const ie = [E('cloud-mqtt', 'accessgranted', now - 60000, now - 59000, 'a'), E('cloud-api', 'accessgranted', now - 60000, now - 58000, 'a'),
+      E('cloud-api', 'accessdenied', now - 50000, now - 48000, 'b'),                       // never pushed
+      E('cloud-mqtt', 'open', now - 40000, now - 39000, 'c'), E('cloud-mqtt', 'open', now - 40000, now - 38000, 'c'), E('cloud-api', 'open', now - 40000, now - 37000, 'c'),   // pushed twice
+      E('cloud-mqtt', 'closed', now - 45000, now - 36000, 'd'), E('cloud-api', 'closed', now - 45000, now - 35000, 'd'),      // stamped before 'open' but pushed after it
+      E('controller', 'rexactivated', now - 30000, null, null)];                             // only in the controller log
+    const ig = integrity(ie, { pollMs: 1000, apiEnabled: true, now });
+    assert.strictEqual(ig.lostInPush.length, 1); assert.strictEqual(ig.lostInPush[0].type, 'accessdenied');
+    assert.strictEqual(ig.duplicates.length, 1); assert.strictEqual(ig.duplicates[0].copies, 2);
+    assert.strictEqual(ig.outOfOrder.length, 1); assert.strictEqual(ig.outOfOrder[0].type, 'closed');
+    assert.strictEqual(ig.onlyInLog.length, 1); assert.strictEqual(ig.verdict, 'fail');
+    assert.strictEqual(integrity([E('cloud-mqtt', 'open', now, now - 100, 'z')], { pollMs: 2000, apiEnabled: true, now }).notInLog.length, 0, 'a fresh push is not yet missing from the event log');
+    ok('integrity: lost in push, duplicate pushes, out of order, only in the controller log; a fresh push is given time');
+
+    // compare: the noise rule and new / fixed failures
+    const st = (p50, p95) => ({ n: 10, p50, p95, max: p95 });
+    const K = (d, p) => ({ actions: 10, pass: 9, warn: 0, fail: 1, decision: st(d, d * 2), push: st(p, p * 2), api: { n: 0 }, decisionToPush: { n: 0 }, output: { n: 0 }, hardware: { n: 0 }, ack: { n: 0 }, verdict: 'fail' });
+    const an = (d, p, fails) => ({ meta: { id: 'r', name: 'r', start: 1 }, clock: { offset: 0, drift: null }, stats: { ...K(d, p), byKind: { card: K(d, p), input: K(0, 0), output: K(0, 0), command: K(0, 0) } },
+      traces: fails.map((l, i) => ({ id: 't' + i, kind: 'card', at: i, sync: false, status: 'fail', action: { label: l }, expect: 'grant', notes: ['x'], decision: null })), integrity: null });
+    const cmp = compare(an(300, 900, ['card 1-1']), an(330, 2200, ['card 1-2']), [], [], null, null);
+    const dec = cmp.hops.find(h => h.kind === 'card' && h.hop === 'decision'), push = cmp.hops.find(h => h.kind === 'card' && h.hop === 'push');
+    assert.strictEqual(dec.p50, 'same', '+30 ms is noise'); assert.strictEqual(push.p50, 'worse'); assert.strictEqual(push.p95, 'worse');
+    assert.strictEqual(cmp.newFail.length, 1); assert.strictEqual(cmp.fixed.length, 1);
+    ok('compare: changes count only past 25 % and 100 ms; new and fixed failures');
+
+    // run a sequence end to end on a Doors page door (relays + Wiegand), with a fake controller and cloud
+    const { TraceEngine } = require('../trace/engine');
+    const dc = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');
+    const ap = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');
+    const keepDc = fs.existsSync(dc) ? fs.readFileSync(dc, 'utf8') : null, keepAp = fs.existsSync(ap) ? fs.readFileSync(ap, 'utf8') : null;
+    const OD = '77777777-7777-7777-7777-777777777777';
+    fs.mkdirSync(path.dirname(dc), { recursive: true });
+    fs.writeFileSync(dc, JSON.stringify({ savedAt: new Date().toISOString(), doors: [{ id: 1, name: 'Lab door', enabled: true, ioSource: 'physical', reader: 'wg-1',
+      dps: { hardwareType: 'relay', channel: 0 }, rexIn: { hardwareType: 'relay', channel: 1 }, lock: { hardwareType: 'opto-in', channel: 3 }, trace: { oncafeDoorId: OD } }] }));
+    fs.writeFileSync(ap, JSON.stringify({ wiring: {} }));
+    const eng = new TraceEngine();
+    eng.importDoors();
+    const cloudEv = (type, extra = {}, lag = 150) => setTimeout(() => eng.add(fromCloud({ eventTimestamp: Date.now() - lag + 20, doorId: OD, ...extra, eventMeta: { eventId: Math.random().toString(16).slice(2), events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at: Date.now() })[0]), lag);
+    let granted = false;
+    const wm = { getReaders: () => [{ id: 'wg-1' }], async sendCard(id, fc, cn) {
+      eng.add(fromJournal({ t: Date.now(), k: 'card', ch: `wiegand:${id}`, v: 1, src: 'wiegand', m: { fc, cn } }));
+      if (cn === 1001) { granted = true; cloudEv('accessgranted', { cardNumber: '1001', facilityCode: String(fc) });
+        setTimeout(() => eng.add(fromJournal({ t: Date.now(), k: 'opto', ch: 'opto:3', v: 1, src: 'physical' })), 220);
+        setTimeout(() => { eng.add(fromJournal({ t: Date.now(), k: 'opto', ch: 'opto:3', v: 0, src: 'physical' })); granted = false; }, 1500); cloudEv('unlocked', {}, 200); cloudEv('locked', {}, 1480); }
+      else cloudEv('accessdenied', { cardNumber: String(cn), facilityCode: String(fc) });
+      return { success: true }; } };
+    const writes = [];
+    const gq = { async enqueue(op, ch, v) { writes.push([op, ch, v]); eng.add(fromJournal({ t: Date.now(), k: 'relay', ch: `relay:${ch}`, v: v ? 1 : 0, src: 'physical' }));
+      if (ch === 0) cloudEv(v ? (granted ? 'open' : 'doorforcedopen') : 'closed'); if (ch === 1) cloudEv(v ? 'rexactivated' : 'rexdeactivated'); return { success: true }; } };
+    eng.deps = { getWiegand: () => wm, gpioQueue: gq };
+    eng.saveSettings({ sync: { atStart: false, atEnd: false } });
+    const seqDef = eng.saveSequence({ name: 'Lab door basics', sync: false, steps: [
+      ...template('valid', 1, { fc: 55, cn: 1001 }).map(x => ({ ...x, afterMs: 2200, expect: { ...x.expect, withinMs: 3000 } })),
+      ...template('invalid', 1, { fc: 55 }, { badCn: 9 }).map(x => ({ ...x, afterMs: 800 })),
+      ...template('rex', 1).map(x => ({ ...x, afterMs: 600 })),
+      { kind: 'dps', door: 1, state: 'open', label: 'Forced', expect: { events: ['doorforcedopen'] }, afterMs: 400 },
+      { kind: 'dps', door: 1, state: 'close', afterMs: 400 },
+      { kind: 'card', door: 1, fc: 55, cn: 9, label: 'Should be granted (it is not)', expect: { result: 'grant' }, afterMs: 800 },
+    ] });
+    const st0 = await eng.runTest(seqDef.id, { repeat: 2, gapMs: 200 }, 'tester').catch(e => { throw e; });
+    if (st0.state !== 'running' && eng.test.state !== 'done') throw new Error('test did not start');
+    for (let i = 0; i < 200 && eng.test.state !== 'done'; i++) await sleep(100);
+    assert.strictEqual(eng.test.state, 'done', 'test finished');
+    const rep = eng.testReport(eng.test.runId);
+    const by = Object.fromEntries(rep.report.byStep.map(x => [x.idx, x]));
+    assert.strictEqual(rep.iterations, 2);
+    assert.strictEqual(by[0].pass + by[0].warn, 2, 'valid card graded: ' + JSON.stringify(rep.report.steps.filter(x => x.idx === 0).map(x => x.why)));
+    assert.strictEqual(by[1].pass + by[1].warn, 2, 'denied card: ' + JSON.stringify(rep.report.steps.filter(x => x.idx === 1).map(x => x.why)));
+    assert.strictEqual(by[2].pass + by[2].warn, 2, 'REX: ' + JSON.stringify(rep.report.steps.filter(x => x.idx === 2).map(x => x.why)));
+    assert.strictEqual(by[3].pass + by[3].warn, 2, 'forced: ' + JSON.stringify(rep.report.steps.filter(x => x.idx === 3).map(x => x.why)));
+    assert.strictEqual(by[5].fail, 2, 'a wrong expectation fails');
+    assert(rep.report.steps.find(x => x.idx === 0).latency.output != null, 'strike latency measured');
+    assert.strictEqual(rep.report.totals.verdict, 'fail');
+    assert(writes.some(w => w[1] === 1 && w[2] === false), 'REX released'); assert.deepStrictEqual(writes.filter(w => w[1] === 0).slice(-1)[0].slice(1), [0, false], 'DPS left closed');
+    assert(rep.report.series.length >= 4);
+    ok('test run: valid / denied card, REX, forced open graded pass over 2 repeats; a wrong expectation fails; strike latency; DPS / REX put back');
+
+    // stopping mid-test releases what it moved; a test cannot start while one runs; commands need Commands on
+    const long = eng.saveSequence({ name: 'Hold', sync: false, steps: [{ kind: 'dps', door: 1, state: 'open', afterMs: 100 }, { kind: 'wait', ms: 60000 }] });
+    await eng.runTest(long.id, {}, 't');
+    await assert.rejects(eng.runTest(long.id, {}, 't'), /already running/);
+    await sleep(500); eng.stopTest();
+    for (let i = 0; i < 100 && eng.test.state !== 'done'; i++) await sleep(100);
+    assert.strictEqual(eng.test.state, 'done'); assert.deepStrictEqual(writes.slice(-1)[0].slice(1), [0, false], 'DPS closed again after stop');
+    eng.saveSettings({ commands: { enabled: false } });
+    const cmdSeq = eng.saveSequence({ name: 'Cmd', steps: template('lockdown', 1, { fc: 1, cn: 2 }) });
+    await assert.rejects(eng.runTest(cmdSeq.id, {}, 't'), /Commands on/);
+    ok('stop: the test halts and puts the DPS back; one test at a time; command steps need Setup › Commands');
+
+    // live alerts: a failed trace raises one alert once
+    const seen = [];
+    eng.on('alert', x => seen.push(x));
+    eng.run = null; eng.live = [];
+    eng.cloud.status = () => ({ push: { state: 'connected' }, api: {} });
+    const T0 = Date.now() - 40000;
+    eng.add(fromJournal({ t: T0, k: 'card', ch: 'wiegand:wg-1', v: 1, src: 'wiegand', m: { fc: 3, cn: 3 } }));
+    eng.settings.expectations = [];
+    eng._cache = null; eng._alertTick(); eng._cache = null; eng._alertTick();
+    assert.strictEqual(seen.length, 1); assert.strictEqual(seen[0].status, 'fail'); assert(eng.alertsSince(0).alerts.length >= 1);
+    ok('live alerts: a failed trace raises one alert (once), kept for the page');
+    if (keepDc != null) fs.writeFileSync(dc, keepDc); else fs.unlinkSync(dc);
+    if (keepAp != null) fs.writeFileSync(ap, keepAp);
+  }
+
   console.log(`\n${passed} checks passed`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

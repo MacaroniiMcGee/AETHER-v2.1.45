@@ -25,6 +25,16 @@
 //   GET    /reports                   Log Analytics reports to pick from
 //   GET    /reveal?run=&event=        the original (plain text) payload of one event — logged
 //   GET    /runs/:id/reveals          who looked at plain text, when
+//   TRACE-4
+//   GET    /tests                     sequences, door templates, the test running now, test runs
+//   POST   /tests  PUT /tests/:id     save a sequence;  DELETE /tests/:id
+//   POST   /tests/template            {kind, door, fc, cn, ...} → ready-made steps for one door
+//   POST   /tests/:id/run             {repeat, minutes, gapMs} — run it (records a trace run, grades every step)
+//   POST   /tests/stop                stop after the current step (DPS / REX put back)
+//   GET    /tests/status              progress of the running test
+//   GET    /runs/:id/test             graded report of a test run;  GET /runs/:id/test.csv
+//   GET    /compare?a=&b=             run A (baseline) vs run B
+//   GET    /alerts?since=SEQ          live alerts (failed / slow traces)
 'use strict';
 
 const express = require('express');
@@ -148,6 +158,46 @@ module.exports = function traceRoutes() {
     try { res.json(eng.importReport(String(req.params.id), String((req.body || {}).reportId || ''))); } catch (e) { fail(res, e); }
   });
   router.get('/reports', (_req, res) => res.json({ reports: eng.listReports() }));
+
+  // ── TRACE-4: test sequences, compare, alerts ──────────────────────────
+  const ownOrigin = req => { const o = req.headers.origin; if (!o) return true; try { return require('../lib/authManager').isOwnOrigin(o, req); } catch { return false; } };
+  router.get('/tests', (_req, res) => { try { res.json({ sequences: eng.sequences(), templates: eng.templates(), current: eng.testStatus(), runs: eng.testRuns() }); } catch (e) { fail(res, e); } });
+  router.get('/tests/status', (_req, res) => res.json({ current: eng.testStatus() }));
+  router.post('/tests/template', express.json(), (req, res) => {
+    const b = req.body || {};
+    try { res.json({ steps: eng.templateSteps(String(b.kind || ''), b.door == null ? null : Number(b.door), { fc: b.fc ?? '', cn: b.cn ?? '' }, { badCn: b.badCn, grantMs: b.grantMs, heldMs: b.heldMs, output: b.output }) }); } catch (e) { fail(res, e); }
+  });
+  router.post('/tests/stop', express.json(), (_req, res) => res.json({ current: eng.stopTest() }));
+  const saveSeq = (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change test sequences' });
+    try { res.json(eng.saveSequence({ ...(req.body || {}), ...(req.params.id ? { id: req.params.id } : { id: undefined }) })); } catch (e) { fail(res, e); }
+  };
+  router.post('/tests', express.json({ limit: '256kb' }), saveSeq);
+  router.put('/tests/:id', express.json({ limit: '256kb' }), saveSeq);
+  router.delete('/tests/:id', (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change test sequences' });
+    try { eng.deleteSequence(String(req.params.id)); res.json({ ok: true }); } catch (e) { fail(res, e); }
+  });
+  router.post('/tests/:id/run', express.json(), async (req, res) => {
+    // a test moves real hardware (and may send OnCAFE commands): admins only, and only from the Aether page itself
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can run tests' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Tests can only be started from the Aether page itself' });
+    const b = req.body || {};
+    try { res.json({ current: await eng.runTest(String(req.params.id), { repeat: b.repeat, minutes: b.minutes, gapMs: b.gapMs }, who(req)) }); } catch (e) { fail(res, e); }
+  });
+  router.get('/runs/:id/test', (req, res) => { try { res.json(eng.testReport(String(req.params.id))); } catch (e) { fail(res, e.code === 'ENOENT' ? Object.assign(new Error('That run no longer exists'), { status: 404 }) : e); } });
+  router.get('/runs/:id/test.csv', (req, res) => {
+    try {
+      const r = eng.testReport(String(req.params.id));
+      const rows = [['repeat', 'step', 'what', 'door', 'time', 'status', 'result', 'decision ms', 'cloud push ms', 'strike ms', 'held ms', 'why'].join(',')]
+        .concat(r.report.steps.map(x => [x.iter, x.idx + 1, x.text, x.door || '', new Date(x.at).toISOString(), x.status, x.result || '', x.latency.decision ?? '', x.latency.push ?? '', x.latency.output ?? '', x.held ?? '', x.why.join('; ')].map(csvCell).join(',')));
+      res.set('Content-Type', 'text/csv; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="${req.params.id}-test.csv"`);
+      res.send(rows.join('\n') + '\n');
+    } catch (e) { fail(res, e); }
+  });
+  router.get('/compare', (req, res) => { try { res.json(eng.compareRuns(String(req.query.a || ''), String(req.query.b || ''))); } catch (e) { fail(res, e); } });
+  router.get('/alerts', (req, res) => res.json(eng.alertsSince(Number(req.query.since) || 0)));
 
   router.get('/reveal', (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can see plain text' });
