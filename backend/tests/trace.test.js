@@ -940,7 +940,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       const writes = [];
       const cloud = (type, door, extra = {}) => setTimeout(() => e.add(fromCloud({ eventTimestamp: Date.now(), doorId: door, doorName: door === 'D1' ? 'Lobby' : 'Dock', ...extra, eventMeta: { eventId: Math.random().toString(16).slice(2), events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at: Date.now() })[0]), 150);
       e.deps = {
-        gpioQueue: { async enqueue(op, ch, v) { writes.push([ch, v]); if (ch === 2) cloud(v ? 'closed' : 'open', 'D1'); if (ch === 3) cloud(v ? 'rexactivated' : 'rexdeactivated', 'D2'); return {}; } },
+        gpioQueue: { async enqueue(op, ch, v) { writes.push([ch, v]); if (ch === 2) cloud(v ? 'closed' : 'open', 'D1'); if (ch === 3) { cloud(v ? 'rexactivated' : 'rexdeactivated', 'D2'); if (v) cloud('open', 'D1'); } return {}; } },
         getWiegand: () => ({ getReaders: () => [{ id: 'wg-9', name: 'Wiegand 9' }], async sendCard() { cloud('accessdenied', 'D2', { cardNumber: '1234' }); } }),
       };
       e.cloud.status = () => ({ push: { state: 'connected' }, api: {} });
@@ -949,7 +949,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       const d = e.discoverStatus();
       const r2 = d.relays.find(x => x.ch === 'relay:2'), r3 = d.relays.find(x => x.ch === 'relay:3');
       assert.strictEqual(r2.role, 'dps'); assert.strictEqual(r2.door, 'D1'); assert.strictEqual(r2.active, 'closed', 'relay on → closed: a normally-closed contact');
-      assert.strictEqual(r3.role, 'rex'); assert.strictEqual(r3.door, 'D2');
+      assert.strictEqual(r3.role, 'rex', 'another door opening meanwhile does not win'); assert.strictEqual(r3.door, 'D2');
       assert.strictEqual(d.readers[0].door, 'D2');
       assert.deepStrictEqual(writes, [[2, true], [2, false], [3, true], [3, false]], 'every relay toggled away and back');
       await assert.rejects(e.discover({}, 't').then(() => e.discover({}, 't')), /already running/);
@@ -957,7 +957,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       const s2 = e.suggest();
       assert(s2.rows.some(x => x.ch === 'relay:2' && x.source === 'probe'));
     }
-    ok('Discover: relay pulses prove DPS (and NC) / REX and their doors, a card proves a reader; always toggled back; one at a time; feeds the suggestion');
+    ok('Discover: relay pulses prove DPS (and NC) / REX and their doors (other doors\' traffic meanwhile ignored), a card proves a reader; always toggled back; one at a time; feeds the suggestion');
   }
 
   console.log(`\n${passed} checks passed`);

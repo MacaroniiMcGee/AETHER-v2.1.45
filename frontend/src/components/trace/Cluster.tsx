@@ -17,6 +17,7 @@ export const ClusterRuns: React.FC<{ backend: string; onClose: () => void }> = (
   const [picked, setPicked] = useState<Record<string, string>>({});   // `${pi}|${runId}` -> pi key
   const [merged, setMerged] = useState<{ pi: PiNode; a: Analysis }[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const [onlyBad, setOnlyBad] = useState(false);
   useEffect(() => {
     (async () => {
@@ -35,8 +36,8 @@ export const ClusterRuns: React.FC<{ backend: string; onClose: () => void }> = (
     try {
       const sel = Object.entries(picked);
       const out = await Promise.all(sel.map(async ([k, piKey]) => { const pi = pis!.find(p => p.key === piKey)!; const id = k.split('|')[1]; return { pi, a: await traceClient(pi.base).run(id) }; }));
-      setMerged(out);
-    } finally { setBusy(false); }
+      setMerged(out); setErr(null);
+    } catch (e) { setErr(`Could not load a run: ${(e as Error).message}`); } finally { setBusy(false); }
   };
   const rows = useMemo(() => (merged || []).flatMap(m => m.a.traces.filter(t => !t.sync).map(t => ({ pi: m.pi, run: m.a.meta?.name || '', t }))).sort((x, y) => x.t.at - y.t.at), [merged]);
   const perPi = useMemo(() => (merged || []).map(m => {
@@ -73,6 +74,7 @@ export const ClusterRuns: React.FC<{ backend: string; onClose: () => void }> = (
           ))}
         </div>
         <div className="flex-1 min-w-0 overflow-auto p-3 space-y-3">
+          {err && <div className="text-xs text-hv-error-fg">{err}</div>}
           {!merged ? <Empty icon={<Layers size={24} />} title="Pick runs, then Combine">Runs recorded at the same time on different Pis line up on one timeline (the Pis keep NTP time).</Empty> : (
             <>
               <div className="flex flex-wrap items-center gap-2 text-xs">

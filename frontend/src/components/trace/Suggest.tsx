@@ -193,7 +193,7 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
   };
   const running = disc && disc.state === 'running';
   return (
-    <div className="rounded-hv-sm bg-hv-widget ring-1 ring-inset ring-hv-line p-4 space-y-3">
+    <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line p-4 space-y-3">
       <div className="flex items-start gap-2">
         <Wand2 size={16} className="text-hv-brand mt-0.5" />
         <div className="flex-1">
@@ -263,7 +263,7 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
           )}
         </>
       )}
-    </div>
+    </section>
   );
 };
 const doorNameOf = (r: { doorName: string | null; door: string | null }) => r.doorName || (r.door ? r.door.slice(0, 8) : '?');

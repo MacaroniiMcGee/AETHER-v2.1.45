@@ -8,7 +8,7 @@ import type { JiraIssue, TraceApi } from './api';
 const Pop: React.FC<{ open: boolean; onClose: () => void; children: React.ReactNode }> = ({ open, onClose, children }) => !open ? null : (
   <>
     <div className="fixed inset-0 z-40" onClick={onClose} />
-    <div className="absolute right-0 z-50 mt-1 w-96 rounded-hv-xs bg-hv-popup-panel shadow-hv-2 ring-1 ring-hv-line-strong p-3 space-y-2 text-[12px]">{children}</div>
+    <div className="absolute right-0 z-50 mt-1 w-96 rounded-hv-xs bg-hv-popup-panel shadow-hv-2 ring-1 ring-hv-line-strong p-3 space-y-2 text-[12px]" onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>{children}</div>
   </>
 );
 
@@ -45,7 +45,7 @@ export const JiraButtons: React.FC<{ api: TraceApi; runId: string; admin: boolea
           {issue && issue.hars.map(h => (
             <button key={h.id} className="w-full text-left rounded-hv-xs px-2 py-1 hover:bg-hv-box flex items-center gap-2" disabled={!!busy} onClick={() => take(h.id, h.filename)}>
               {busy === h.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} className="text-hv-text-3" />}
-              <span className="text-hv-text truncate flex-1">{h.filename}</span><span className="text-hv-text-3">{fmtBytes(h.size)} · {new Date(h.created).toLocaleDateString()}{h.author ? ` · ${h.author}` : ''}</span>
+              <span className="text-hv-text truncate flex-1">{h.filename}</span><span className="text-hv-text-3">{fmtBytes(h.size)}{h.created && !isNaN(Date.parse(h.created)) ? ` · ${new Date(h.created).toLocaleDateString()}` : ''}{h.author ? ` · ${h.author}` : ''}</span>
             </button>
           ))}
           {err && <div className="text-hv-error-fg">{err}</div>}

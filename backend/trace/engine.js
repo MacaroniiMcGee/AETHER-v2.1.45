@@ -1021,12 +1021,21 @@ class TraceEngine extends EventEmitter {
           const away = await wA;
           await this.deps.gpioQueue.enqueue('setRelay', ch, !!rest);
           const back = await seenAfter(Date.now(), watchMs, () => true);
-          const role = rolesOf(away) || rolesOf(back);
+          // other doors keep talking while a relay is toggled: only a (role, door) that answered while the relay was away counts,
+          // and the one with the most answers (away and back) wins
           const ev = away.concat(back);
-          const door = (ev.find(e => e.door && e.door.id) || {}).door || null;
+          const pair = e => { const r = rolesOf([e]); return r ? `${r}|${(e.door && e.door.id) || ''}` : null; };
+          const score = new Map();
+          for (const e of away) { const k = pair(e); if (k) score.set(k, 0); }
+          if (!score.size) for (const e of back) { const k = pair(e); if (k) score.set(k, 0); }
+          for (const e of ev) { const k = pair(e); if (k && score.has(k)) score.set(k, score.get(k) + 1); }
+          const best = [...score].sort((a, b) => b[1] - a[1])[0];
+          const [role, doorId] = best ? best[0].split('|') : [null, ''];
+          const mine = e => pair(e) === (best && best[0]);
+          const door = doorId ? (ev.find(e => mine(e) && e.door) || {}).door || null : null;
           let active;
-          if (role === 'dps') { const first = away.find(e => /open|closed/.test(e.type)); active = first ? (/open/.test(first.type) === !rest ? 'open' : 'closed') : undefined; }
-          D.relays.push({ ch: `relay:${ch}`, role, door: door ? door.id : null, doorName: door ? door.name : null, active, rest, events: ev.slice(0, 6).map(e => ({ type: e.type, door: e.door ? e.door.name || e.door.id : null })) });
+          if (role === 'dps') { const first = away.find(e => mine(e) && /open|closed/.test(e.type)); active = first ? (/open/.test(first.type) === !rest ? 'open' : 'closed') : undefined; }
+          D.relays.push({ ch: `relay:${ch}`, role: role || null, door: door ? door.id : null, doorName: door ? door.name : null, active, rest, events: ev.slice(0, 6).map(e => ({ type: e.type, door: e.door ? e.door.name || e.door.id : null })) });
           D.done++;
         }
         for (const r of readers) {
