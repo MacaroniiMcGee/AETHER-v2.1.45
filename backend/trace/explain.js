@@ -3,7 +3,7 @@
 // note from correlate a plain version, the likely cause and what to check. Kept apart from correlate so wording can change freely.
 'use strict';
 
-const sec = ms => ms == null ? null : ms < 0 ? `${(ms / 1000).toFixed(1)} s early` : ms < 950 ? `${(ms / 1000).toFixed(1)} s` : `${(ms / 1000).toFixed(ms < 9500 ? 1 : 0)} s`;
+const sec = ms => ms == null ? null : ms > -500 && ms < 100 ? 'under 0.1 s' : ms < 0 ? `${(ms / 1000).toFixed(1)} s early` : ms < 950 ? `${(ms / 1000).toFixed(1)} s` : `${(ms / 1000).toFixed(ms < 9500 ? 1 : 0)} s`;
 const credText = c => c ? `${c.fc != null && c.fc !== '' ? c.fc + '-' : ''}${c.cn ?? '?'}` : '';
 const doorOf = t => (t.decision && t.decision.door && (t.decision.door.name || t.decision.door.id)) || null;
 const roleSay = (role, v, type) => role === 'dps' ? (v ? 'Door opened' : 'Door closed') : role === 'rex' ? (v ? 'REX pressed' : 'REX released') : role === 'lock' ? (v ? 'Strike unlocked' : 'Strike locked') : `${role || 'Input'} ${v ? 'on' : 'off'}`;
@@ -49,7 +49,8 @@ function sentence(t) {
   if (t.kind === 'output') {
     const what = roleSay(t.role, t.action && t.action.v);
     const cause = t.cause && (t.cause.label || t.cause.kind);
-    return `${what}${at}${cause ? `, because of ${cause}` : ', and nothing Aether saw asked for it'}${t.held != null ? ` (held ${sec(t.held)})` : ''}.`;
+    const on = !!(t.action && t.action.v);
+    return `${what}${at}${cause ? `, because of ${cause}` : on ? ', and nothing Aether saw asked for it' : ''}${t.held != null ? ` (held ${sec(t.held)})` : ''}.`;   // relocking needs no cause
   }
   return (t.action && t.action.label) || 'Something happened.';
 }
@@ -100,6 +101,14 @@ const RULES = [
     ['Controller\'s internet link', 'Log Analytics: SDK/cloud delays on the controller']],
   [/did not see the strike output change/, 'Aether did not see the lock move.', 'Aether\'s lock monitor is not wired to this door\'s strike output, or not mapped.',
     ['Suggested wiring: lock monitor (OPTO) on the controller\'s door output', 'Setup › Wiring: a lock channel for this door']],
+  // a step Aether could not carry out (door check / tests)
+  [/^Could not put .* back/, 'Aether could not put this input back: check the door now.', 'The relay or emulated input did not answer when Aether released it.',
+    ['Look at the door: DPS / REX may still be active', 'Is the Controller Emulator (or the relay board) running?']],
+  [/is not running on this Pi|has no reader/, 'Aether could not present the card.', 'This door\'s reader is not running on this Pi.',
+    ['Doors page › Settings › Reader for this door', 'Is that Wiegand / OSDP reader (or emulated board) started?']],
+  [/board emulator is not loaded|emulated board refused/i, 'Aether could not move this door\'s input.', 'The door uses an emulated Azure board, and the Controller Emulator is not running.',
+    ['Start the Controller Emulator', 'Setup › Controller links: is the Azure controller polling the board?']],
+  [/is turned off|not on the Doors page/, 'This door cannot be used right now.', 'The door is turned off or was removed on the Doors page.', ['Doors page: turn the door on']],
   // door-check / test grader messages
   [/^The controller never reported a decision/, 'The controller never answered this card.',
     'The card never reached the controller, or its decision did not reach OnCAFE.',
@@ -154,7 +163,7 @@ function doorVerdict(doorName, report, traces = [], notChecked = []) {
   });
   const bad = lines.filter(l => !l.ok), slow = lines.filter(l => l.ok && l.warn && l.problems.length);
   const headline = !lines.length ? `${doorName}: nothing could be checked.`
-    : bad.length ? `${doorName}: ${bad.length} problem${bad.length === 1 ? '' : 's'} — ${bad.map(b => b.label.toLowerCase()).join(', ')}.`
+    : bad.length ? `${doorName}: ${bad.length} problem${bad.length === 1 ? '' : 's'} — ${bad.map(b => (/^[A-Z][a-z]/.test(b.label) ? b.label[0].toLowerCase() + b.label.slice(1) : b.label)).join(', ')}.`
     : slow.length ? `${doorName}: works, with ${slow.length} thing${slow.length === 1 ? '' : 's'} to look at.`
     : `${doorName}: works.`;
   return { ok: !bad.length && lines.length > 0, headline, lines, notChecked };

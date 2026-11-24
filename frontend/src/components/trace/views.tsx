@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, EyeOff, X, CheckCircle2, AlertTriangle, XCircle, Clock, Fingerprint, Lock, DoorOpen, Zap, Cloud } from 'lucide-react';
 import { Badge, Button, Empty, cx, type Tone } from '../sunapi/ui';
-import { clock, credText, fmtMs, LANES, SRC_LABEL, ROLE_LABEL, type Analysis, type Kind, type KindStats, type TEvent, type Trace, type TraceApi, type Stat } from './api';
+import { clock, credText, fmtMs, LANES, SRC_LABEL, ROLE_LABEL, type Analysis, type Kind, type KindStats, type TEvent, type Trace, type TraceApi, type Stat, type Problem } from './api';
 
 export const statusTone = (s: string): Tone => (s === 'pass' ? 'success' : s === 'warn' ? 'warning' : s === 'fail' ? 'error' : 'neutral');
 const StatusIcon: React.FC<{ s: string }> = ({ s }) => s === 'pass' ? <CheckCircle2 size={14} className="text-hv-success-fg" /> : s === 'warn' ? <AlertTriangle size={14} className="text-hv-warning-fg" /> : <XCircle size={14} className="text-hv-error-fg" />;
@@ -205,7 +205,8 @@ export const TraceTable: React.FC<{ traces: Trace[]; selected: string | null; on
                 {t.held != null && <Badge tone="neutral">held {(t.held / 1000).toFixed(1)} s</Badge>}
               </div>
               <div className="text-[11px] text-hv-text-3 truncate">
-                {t.kind === 'output' ? (t.cause ? `asked by ${t.cause.label}` : t.action.v ? 'nothing asked for it' : '') : t.action.ch || ''}{t.notes[0] ? ` · ${t.notes[0]}` : ''}
+                {t.explain ? <span title={t.explain.say}>{t.explain.say}{t.explain.problems.find(p => !p.info) ? <span className={t.status === 'fail' ? 'text-hv-error-fg' : 'text-hv-warning-fg'}> {t.explain.problems.find(p => !p.info)!.plain}</span> : null}</span>
+                  : <>{t.kind === 'output' ? (t.cause ? `asked by ${t.cause.label}` : t.action.v ? 'nothing asked for it' : '') : t.action.ch || ''}{t.notes[0] ? ` · ${t.notes[0]}` : ''}</>}
               </div>
             </td>
             <td className="px-2 py-1.5 overflow-hidden">
@@ -236,11 +237,16 @@ export const TraceDetail: React.FC<{ t: Trace; events: TEvent[]; api: TraceApi; 
         <button onClick={onClose} className="text-hv-text-3 hover:text-hv-text" aria-label="Close"><X size={16} /></button>
       </div>
       <div className="flex-1 min-h-0 overflow-auto p-3 space-y-3 text-xs">
-        {t.notes.length > 0 && (
+        {t.explain && <div className="text-[13px] leading-snug text-hv-text">{t.explain.say}</div>}
+        {t.explain ? t.explain.problems.length > 0 && <ProblemList problems={t.explain.problems} fail={t.status === 'fail'} />
+          : t.notes.length > 0 && (
           <div className={cx('rounded-hv-xs px-3 py-2 ring-1 ring-inset', t.status === 'fail' ? 'bg-hv-error-tint text-hv-error-fg ring-hv-error/40' : 'bg-hv-warning-tint text-hv-warning-fg ring-hv-warning/40')}>
             {t.notes.map((n, i) => <div key={i}>{n}</div>)}
           </div>
         )}
+        <details className="group" open={!t.explain}>
+          <summary className="cursor-pointer select-none text-[11px] font-semibold text-hv-text-3 hover:text-hv-text">Details: each step with its time, what the controller sent</summary>
+          <div className="space-y-3 pt-2">
         <div>
           <div className="text-[11px] font-semibold text-hv-text-3 mb-1">Hops</div>
           <div className="space-y-1">
@@ -285,10 +291,26 @@ export const TraceDetail: React.FC<{ t: Trace; events: TEvent[]; api: TraceApi; 
             <div className="space-y-2">{behind.map(e => <EventBox key={e.id} e={e} api={api} runId={runId} allowRaw={allowRaw} />)}</div>
           </div>
         )}
+          </div>
+        </details>
       </div>
     </div>
   );
 };
+
+/** TRACE-9: what went wrong in plain words, the likely cause and what to check. */
+export const ProblemList: React.FC<{ problems: Problem[]; fail: boolean }> = ({ problems, fail }) => (
+  <div className="space-y-1.5">
+    {problems.map((p, i) => (
+      <div key={i} className={cx('rounded-hv-xs px-3 py-2 ring-1 ring-inset', p.info ? 'bg-hv-widget text-hv-text-2 ring-hv-line' : fail ? 'bg-hv-error-tint ring-hv-error/40' : 'bg-hv-warning-tint ring-hv-warning/40')}>
+        <div className={cx('font-semibold', p.info ? 'text-hv-text-2' : fail ? 'text-hv-error-fg' : 'text-hv-warning-fg')}>{p.plain}</div>
+        {p.likely && <div className="text-hv-text-2 mt-0.5"><span className="text-hv-text-3">Likely: </span>{p.likely}</div>}
+        {p.check.length > 0 && <ul className="mt-1 list-disc pl-4 text-hv-text-2 space-y-0.5">{p.check.map((c, k) => <li key={k}>{c}</li>)}</ul>}
+        {p.plain !== p.note && <div className="mt-1 text-[10px] text-hv-text-3" title="What the analysis recorded">{p.note}</div>}
+      </div>
+    ))}
+  </div>
+);
 
 /** One event's payload: scrubbed by default, plain text on request for 60 s (logged on the Pi). */
 export const EventBox: React.FC<{ e: TEvent; api: TraceApi; runId: string | null; allowRaw: boolean }> = ({ e, api, runId, allowRaw }) => {

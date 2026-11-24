@@ -235,7 +235,7 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
   useEffect(() => { setSimple(false); }, [rev]);
   const running = disc && disc.state === 'running';
   return (
-    <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line p-4 space-y-3">
+    <section id="trace-setup-suggest" className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line p-4 space-y-3 scroll-mt-4">
       <div className="flex items-start gap-2">
         <Wand2 size={16} className="text-hv-brand mt-0.5" />
         <div className="flex-1">

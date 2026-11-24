@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2, Play, Square, ArrowUp, ArrowDown, X, Save, FlaskConical, Download, GitCompare, Loader2, AlertTriangle, CheckCircle2, XCircle, ListChecks } from 'lucide-react';
 import { Badge, Button, Empty, Input, Select, Toggle, cx } from '../sunapi/ui';
 import { fmtMs, clock, type TraceApi, type Status, type Sequence, type Step, type StepKind, type TemplateInfo, type TestReport, type TestRunMeta, type DoorRow, type Comparison, type Moved, type StepResult } from './api';
+import { DoorCheckBox } from './Ready';   // TRACE-9
 
 const KIND_WORD: Record<StepKind, string> = { card: 'Present card', rex: 'Press REX', dps: 'Door contact', command: 'OnCAFE command', wait: 'Wait' };
 const blank = (): Sequence => ({ name: 'New test', note: '', steps: [], repeat: 1, minutes: 0, gapMs: 2000, sync: true });
@@ -324,6 +325,9 @@ export const TestsPage: React.FC<{ api: TraceApi; status: Status; onOpenTrace?: 
   const needsCommands = !!draft?.steps.some(s => s.kind === 'command') && !status.settings.commands.enabled;
 
   return (
+    <div className="flex-1 min-h-0 flex flex-col">
+    {/* TRACE-9: the quick way — one door, the standard checks, an answer in words */}
+    <div className="px-3 py-2 border-b border-hv-line shrink-0"><DoorCheckBox api={api} status={status} onOpenRun={runId => setReportId(runId)} /></div>
     <div className="flex-1 min-h-0 flex">
       <div className="w-[260px] shrink-0 border-r border-hv-line overflow-auto flex flex-col">
         <div className="p-2 border-b border-hv-line"><Button size="sm" className="w-full" icon={<Plus size={13} />} disabled={!admin} onClick={() => { if (dirty && !window.confirm('Discard the changes to this test?')) return; setSelId(null); setDraft(blank()); setDirty(true); setReportId(null); }}>New test</Button></div>
@@ -415,6 +419,7 @@ export const TestsPage: React.FC<{ api: TraceApi; status: Status; onOpenTrace?: 
           </>
         )}
       </div>
+    </div>
     </div>
   );
 };

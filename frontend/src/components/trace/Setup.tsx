@@ -5,8 +5,8 @@ import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
 import { SuggestCard } from './Suggest';
 import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, type JiraStatus, type LinkCheck, clock, wiringVersion } from './api';
 
-const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ icon, title, sub, right, children }) => (
-  <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line">
+const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode; anchor?: string }> = ({ icon, title, sub, right, children, anchor }) => (
+  <section id={anchor} className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line scroll-mt-4">
     <header className="flex items-center gap-2 px-4 py-2.5 border-b border-hv-line">
       <span className="text-hv-text-3">{icon}</span>
       <div className="min-w-0">
@@ -78,7 +78,7 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
   return (
     <div className="space-y-4 pb-20 max-w-[1100px]">
       {/* OnCAFE */}
-      <Card icon={<Cloud size={16} />} title="OnCAFE (cloud)" sub="The same live feed the OnCAFE web app uses, plus the event log. Uses this Pi's OnCAFE sign-in."
+      <Card anchor="trace-setup-cloud" icon={<Cloud size={16} />} title="OnCAFE (cloud)" sub="The same live feed the OnCAFE web app uses, plus the event log. Uses this Pi's OnCAFE sign-in."
         right={<div className="flex items-center gap-2">
           <Badge tone={pushTone}>push {cloud.push.state}</Badge>
           {cloud.api.enabled && <Badge tone={cloud.api.state === 'running' ? 'success' : cloud.api.state === 'error' ? 'error' : 'neutral'}>event log {cloud.api.state}</Badge>}
@@ -169,7 +169,7 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
       </Card>
 
       {/* Sync cards */}
-      <Card icon={<Fingerprint size={16} />} title="Sync markers" sub="Two known cards with a fixed gap — or one DPS / REX pulse — mark the start (and end) of a run, so controller timestamps line up with the Pi's clock."
+      <Card anchor="trace-setup-sync" icon={<Fingerprint size={16} />} title="Sync markers" sub="Two known cards with a fixed gap — or one DPS / REX pulse — mark the start (and end) of a run, so controller timestamps line up with the Pi's clock."
         right={<Button size="sm" icon={<Send size={13} />} busy={busy === 'sync' || status.syncBusy} onClick={sendSync}>Send now</Button>}>
         {pulse ? (
           <div className="rounded-hv-xs bg-hv-info-tint text-hv-info-fg ring-1 ring-inset ring-hv-info/40 px-3 py-2 text-xs">
@@ -348,7 +348,7 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
   };
   const save = async () => { setBusy(true); setMsg(null); try { const r = await api.saveWiring(w, base); setW(r.wiring); setBase(wiringVersion(r.wiring)); setDirty(false); setMsg(Object.values(r.wiring).some(e => e.src) ? 'Saved — door pairings go back to the Doors page; Product Test uses the same map.' : 'Saved — Log Analytics › Product Test uses the same map.'); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); } };
   return (
-    <Card icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Doors from the Doors page fill this in (and get your changes back — the last save wins). Shared with Log Analytics › Product Test."
+    <Card anchor="trace-setup-wiring" icon={<Cable size={16} />} title="Wiring" sub="What each Aether channel is wired to. Doors from the Doors page fill this in (and get your changes back — the last save wins). Shared with Log Analytics › Product Test."
       right={<div className="flex items-center gap-2">{msg && <span className="text-[11px] text-hv-text-3">{msg}</span>}<Button size="sm" icon={<RefreshCw size={13} />} onClick={load}>Refresh</Button><Button size="sm" tone="primary" icon={<Save size={13} />} disabled={!dirty} busy={busy} onClick={save}>Save wiring</Button></div>}>
       {!rows.length ? <div className="text-xs text-hv-text-3">No relays, inputs or outputs used in the last 24 h. Add a channel by name (relay:6, opto:2, emu:2:in:3, emu:2:out:0).</div> : (
         <div className="grid grid-cols-[minmax(130px,1.1fr)_100px_170px_minmax(0,1fr)_130px_minmax(0,1fr)_28px] gap-2 items-center text-xs">

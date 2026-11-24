@@ -12,6 +12,7 @@ import { TestsPage, CompareView } from './Tests';
 import { JiraButtons } from './Jira';
 import { ClusterRuns } from './Cluster';
 import { SetupPanel } from './Setup';
+import { ReadyPanel } from './Ready';   // TRACE-9
 
 type Page = 'live' | 'runs' | 'tests' | 'setup';
 const KindFilter: React.FC<{ a: Analysis | null; value: Kind | 'all'; onChange: (k: Kind | 'all') => void }> = ({ a, value, onChange }) => (
@@ -31,6 +32,14 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
   const [status, setStatus] = useState<Status | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [page, setPage] = useState<Page>(() => lsGet('aether.trace.page', 'live'));
+  // TRACE-9: a Fix button on the checklist opens Setup at the right card
+  const [anchor, setAnchor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!anchor || page !== 'setup') return;
+    const t = setTimeout(() => { const el = document.getElementById(anchor); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.classList.add('ring-2', 'ring-hv-brand'); setTimeout(() => el.classList.remove('ring-2', 'ring-hv-brand'), 2500); } setAnchor(null); }, 150);
+    return () => clearTimeout(t);
+  }, [anchor, page]);
+  const goSetup = (a: string) => { setAnchor(a); setPage('setup'); };
   const [events, setEvents] = useState<TEvent[]>([]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -166,11 +175,13 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
         <TestsPage api={api} status={status} onOpenTrace={(runId, traceId) => { setOpenRun({ runId, traceId }); setPage('runs'); }} />
       ) : (
         <div className="flex-1 min-h-0 flex flex-col">
-          <div className="px-3 pt-3 space-y-2 shrink-0">
+          {/* the cards above the trace list scroll on their own, so the list always keeps room (TRACE-9) */}
+          <div className="px-3 pt-3 pb-1 space-y-2 shrink min-h-0 max-h-[55%] overflow-auto">
             {(status.pendingReverts || []).map(p => (
               <div key={p.id} className="text-xs rounded-hv-xs px-2 py-1 bg-hv-warning-tint text-hv-warning-fg">Turning back {p.kind} on {String(p.target)} at {new Date(p.due).toLocaleTimeString()} (automatic)</div>
             ))}
             {note && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-success-tint text-hv-success-fg flex items-center gap-2"><span className="flex-1">{note}</span><button className="opacity-70 hover:opacity-100" onClick={() => setNote(null)}>×</button></div>}
+            <ReadyPanel api={api} status={status} onGo={goSetup} onChanged={loadStatus} onOpenRun={runId => { setOpenRun({ runId }); setPage('runs'); }} />
             {analysis && <Summary a={analysis} kind={kind} />}
             {analysis && <ClockCard a={analysis} live={status.clockCheck} onCheck={() => api.clocks().then(() => loadStatus()).catch(e => setActionErr(e.message))} />}
             {analysis && <IntegrityCard a={analysis} />}

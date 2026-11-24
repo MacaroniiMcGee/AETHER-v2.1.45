@@ -13,7 +13,19 @@ export interface TEvent {
 export type Kind = 'card' | 'input' | 'output' | 'command';
 export interface Cmd { kind: string; target: string | string[]; value: unknown; area?: string; targetName?: string | null }
 export interface Hop { id: string; label: string; at: number; ms: number; clock: string; corrected?: boolean; raw?: number; resolution?: number }
+// TRACE-9: Ready to trace? and Test this door
+export type ReadyAction = 'setup:cloud' | 'setup:wiring' | 'setup:suggest' | 'setup:sync' | 'connect' | 'adopt' | 'sync' | 'cards' | 'links' | 'open:doors';
+export interface ReadyItem { id: string; state: 'ok' | 'warn' | 'todo'; title: string; detail: string; fix?: { action: ReadyAction; label: string } }
+export interface Readiness { ready: boolean; todo: number; warn: number; items: ReadyItem[]; at: number }
+export interface DoorCheckLine { label: string; ok: boolean; warn: boolean; say: string | null; problems: Problem[] }
+export interface DoorCheckResult { runId: string; door: number; name: string; running: boolean; startedAt: number; endedAt: number | null; aborted: boolean; error: string | null; ok: boolean; headline: string; lines: DoorCheckLine[]; notChecked: string[] }
+export interface DoorCheckPlan { door: number; name: string; steps: string[]; skipped: string[] }
+export type TestCard = { fc: string; cn: string } | null;
+// TRACE-9: plain words for a trace (backend explain.js)
+export interface Problem { note: string; plain: string; likely: string | null; check: string[]; info?: boolean }
+export interface Explain { say: string; problems: Problem[] }
 export interface Trace {
+  explain?: Explain;
   id: string; kind: Kind; at: number; sync: boolean; role?: string; held?: number | null;
   cause?: { kind: string; label: string; at: number; traceId?: string } | null;
   action: { label: string; ch?: string | null; cred: Cred | null; type: string; v?: number; cmd?: Cmd };
@@ -94,6 +106,7 @@ export interface Settings {
   clock?: { check: boolean; warnMs: number };
   expectations: { fc: string; cn: string; expect: 'grant' | 'deny'; note: string }[];
   allowRaw: boolean;
+  quick?: { valid: TestCard; invalid: TestCard; held: boolean; heldMs: number };   // TRACE-9 door check cards
 }
 export interface CloudStatus {
   configured: boolean; url: string | null; org: string | null; controllers: string[]; doors: string[];
@@ -109,7 +122,7 @@ export interface Status {
   me?: { admin: boolean };
   pendingReverts?: { id: string; due: number; kind: string; value: unknown; target: string | string[] }[];
   inventory: { org: string; at: number; doors: InvDoor[]; areas: InvArea[]; zones: InvZone[]; controllers: Inventory['controllers'] } | null;
-  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[]; clockCheck?: ClockCheck | null; links?: LinkCheck | null; linkLog?: LinkChange[];
+  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[]; clockCheck?: ClockCheck | null; links?: LinkCheck | null; linkLog?: LinkChange[]; doorCheck?: { door: number; name: string; skipped: string[]; runId: string | null; state: string } | null;
 }
 export interface RunMeta { id: string; name: string; start: number; end: number | null; endReason?: string; count?: number; imports?: { at: number; what: string; count: number }[] }
 export interface OnCafeSession { signedIn: boolean; host?: string; user?: string; name?: string; orgs?: { id: string; name: string }[]; org?: string; expiresAt?: string | null; error?: string }
@@ -183,6 +196,14 @@ export function traceClient(backend: string) {
     // TRACE-5
     clocks: () => call<ClockCheck>('/clocks'),
     links: (fresh = false) => call<LinkCheck>(`/links${fresh ? '?fresh=1' : ''}`),
+    // TRACE-9
+    ready: () => call<Readiness>('/ready'),
+    adopt: () => call<{ added: number; ready: Readiness }>('/ready/adopt', { method: 'POST', body: {} }),
+    readyWiring: () => call<{ applied: string[]; why: string | null }>('/ready/wiring', { method: 'POST', body: {} }),
+    doorCheckPlan: (door: number, held?: boolean) => call<DoorCheckPlan>(`/doors/${door}/check/plan${held == null ? '' : `?held=${held ? 1 : 0}`}`),
+    doorCheck: (door: number, held: boolean) => call<{ current: TestStatus }>(`/doors/${door}/check`, { method: 'POST', body: { held } }),
+    doorChecks: () => call<Record<string, { runId: string; at: number; end: number | null }>>('/doorchecks'),
+    doorCheckResult: (runId: string) => call<DoorCheckResult>(`/runs/${encodeURIComponent(runId)}/doorcheck`),
     jira: () => call<JiraStatus>('/jira'),
     saveJira: (b: { site?: string; email?: string; token?: string; test?: boolean }) => call<JiraStatus>('/jira', { method: 'PUT', body: b }),
     jiraIssue: (key: string) => call<JiraIssue>(`/jira/issue/${encodeURIComponent(key)}`),

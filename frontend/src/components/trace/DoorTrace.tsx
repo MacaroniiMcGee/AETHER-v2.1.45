@@ -4,7 +4,7 @@
 //   DoorTraceStrip    on each door card: the OnCAFE pairing, the description and the latest traced card / DPS /
 //                     strike / command for this door, from /api/trace/doors (one shared poll for all cards).
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { Activity, CheckCircle2, AlertTriangle, XCircle, Link2, Link2Off } from 'lucide-react';
+import { Activity, CheckCircle2, AlertTriangle, XCircle, Link2, Link2Off, Play, Loader2 } from 'lucide-react';
 import { defaultBackend, fmtMs, type Status } from './api';
 
 interface Brief { at: number; status: 'pass' | 'warn' | 'fail'; label: string; result: string | null; notes: string[]; push: number | null; decision: number | null; output: number | null; hardware: number | null; held: number | null; cause: string | null }
@@ -47,6 +47,40 @@ const store = (() => {
 const Icon: React.FC<{ s?: string }> = ({ s }) => s === 'pass' ? <CheckCircle2 size={12} className="text-hv-success-fg shrink-0" /> : s === 'warn' ? <AlertTriangle size={12} className="text-hv-warning-fg shrink-0" /> : s === 'fail' ? <XCircle size={12} className="text-hv-error-fg shrink-0" /> : null;
 const ago = (t: number) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`; };
 
+// TRACE-9: "Test this door" right on the door card: the standard checks, answered in one line (details in Event Trace › Tests)
+type Verdict = { runId: string; running: boolean; ok: boolean; headline: string; startedAt: number };
+const DoorCheckMini: React.FC<{ doorId: number }> = ({ doorId }) => {
+  const [v, setV] = useState<Verdict | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const base = `${defaultBackend()}/api/trace`;
+  const get = async (p: string, o?: RequestInit) => { const r = await fetch(base + p, { credentials: 'include', ...o }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; };
+  const follow = (runId: string) => {
+    let n = 0;
+    const tick = async () => { try { const r = await get(`/runs/${runId}/doorcheck`); setV(r); if (r.running && n++ < 600) setTimeout(tick, 2000); } catch { /* run gone */ } };
+    tick();
+  };
+  useEffect(() => { get('/doorchecks').then(m => { const x = m[String(doorId)]; if (x) follow(x.runId); }).catch(() => {}); }, [doorId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const start = async () => {
+    setBusy(true); setErr(null);
+    try { const r = await get(`/doors/${doorId}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); if (r.current && r.current.runId) follow(r.current.runId); }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  const running = !!(v && v.running);
+  return (
+    <div className="mt-1 flex items-center gap-1.5 text-[11px] min-w-0">
+      <button onClick={start} disabled={busy || running} title="Run the standard checks on this door: card without access, forced open, valid card, REX (moves its real inputs; admins only)"
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-hv-xs ring-1 ring-inset ring-hv-line text-hv-text-2 hover:text-hv-text hover:bg-hv-widget disabled:opacity-50 shrink-0">
+        {busy || running ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}Test this door
+      </button>
+      {err ? <span className="text-hv-error-fg truncate" title={err}>{err}</span>
+        : running ? <span className="text-hv-text-3">testing…</span>
+        : v ? <><Icon s={v.ok ? 'pass' : 'fail'} /><span className="text-hv-text truncate" title={`${v.headline} (Event Trace › Tests for the details)`}>{v.headline.replace(/^[^:]*: /, '')}</span><span className="ml-auto text-hv-text-3 shrink-0">{ago(v.startedAt)}</span></>
+        : null}
+    </div>
+  );
+};
+
 export const DoorTraceStrip: React.FC<{ doorId: number }> = ({ doorId }) => {
   const sum = useSyncExternalStore(store.subscribe, store.get, store.get);
   if (!sum) return null;
@@ -84,6 +118,7 @@ export const DoorTraceStrip: React.FC<{ doorId: number }> = ({ doorId }) => {
           ))}
         </div>
       ) : <div className="text-[11px] text-hv-text-3">No traces yet — start a run in Tools › Event Trace.</div>}
+      <DoorCheckMini doorId={doorId} />
       {d.by && /event trace/.test(d.by) && d.updatedAt && Date.parse(d.updatedAt) > PAGE_LOADED && (
         <div className="text-[10px] text-hv-info-fg mt-0.5">Pairing changed in Event Trace at {new Date(d.updatedAt).toLocaleTimeString()}. Saving doors keeps it; reload to see it in Settings.</div>
       )}
