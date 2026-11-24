@@ -2,7 +2,7 @@
 //   ReadyPanel     "Ready to trace?": what is set up and what is not, each with one Fix button. Folds to a line once ready.
 //   DoorCheckBox   "Test this door": pick a door, press Test; runs the standard checks and answers in words.
 //   DoorCheckView  the answer: a headline, one line per check (✓ / ✕) with what happened and, for problems, the likely cause.
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, XCircle, ChevronDown, ChevronRight, Loader2, Play, Square, DoorOpen, Wrench } from 'lucide-react';
 import { Badge, Button, Input, Toggle, cx } from '../sunapi/ui';
 import { type DoorCheckPlan, type DoorCheckResult, type Readiness, type ReadyAction, type Status, type TestCard, type TraceApi } from './api';
@@ -43,7 +43,7 @@ export const ReadyPanel: React.FC<{ api: TraceApi; status: Status; onGo: (anchor
   const [err, setErr] = useState<string | null>(null);
   const [editCards, setEditCards] = useState(false);
   const load = useCallback(() => api.ready().then(setR).catch(e => setErr((e as Error).message)), [api]);
-  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
   const fix = async (a: ReadyAction) => {
     setErr(null);
     if (a.startsWith('setup:')) return onGo(`trace-${a.replace(':', '-')}`);
@@ -101,23 +101,22 @@ export const DoorCheckBox: React.FC<{ api: TraceApi; status: Status; onOpenRun: 
   const [res, setRes] = useState<DoorCheckResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const watching = useRef<string | null>(null);
+  const dc = status.doorCheck;
+  const running = !!(door != null && dc && dc.door === door && dc.state !== 'done');
   useEffect(() => { api.doors().then(r => { const list = (r.doors || []).filter(d => d.enabled !== false).map(d => ({ id: d.id, name: d.name })); setDoors(list); setDoor(x => x ?? (list[0] ? list[0].id : null)); }).catch(() => {}); }, [api]);
   useEffect(() => { if (door == null) return; setPlan(null); api.doorCheckPlan(door, held).then(setPlan).catch(e => setPlan({ door, name: '', steps: [], skipped: [(e as Error).message] })); }, [api, door, held]);
-  // show the newest check of this door, and follow a running one
-  const dc = status.doorCheck;
+  // the newest check of this door; while one runs, follow it, and read it once more when it ends (late answers, final grading)
+  const runId = door != null && dc && dc.door === door ? dc.runId : null;
   useEffect(() => {
+    setRes(null);
     if (door == null) return;
-    if (dc && dc.door === door && dc.runId) { watching.current = dc.runId; api.doorCheckResult(dc.runId).then(setRes).catch(() => {}); return; }
-    api.doorChecks().then(m => { const x = m[String(door)]; if (x) { watching.current = x.runId; api.doorCheckResult(x.runId).then(setRes).catch(() => {}); } else { watching.current = null; setRes(null); } }).catch(() => {});
-  }, [api, door, dc && dc.runId]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const running = !!(dc && dc.door === door && dc.state !== 'done');
-  useEffect(() => {
-    if (!watching.current || !running) return;
-    const id = watching.current;
-    const t = setInterval(() => api.doorCheckResult(id).then(setRes).catch(() => {}), 2000);
-    return () => clearInterval(t);
-  }, [api, running, dc && dc.runId, status.test && status.test.done]);   // eslint-disable-line react-hooks/exhaustive-deps
+    let gone = false;
+    const show = (id: string) => api.doorCheckResult(id).then(r => { if (!gone && r.door === door) setRes(r); }).catch(() => {});
+    let t: ReturnType<typeof setInterval> | null = null;
+    if (runId) { show(runId); if (running) t = setInterval(() => show(runId), 2000); }
+    else api.doorChecks().then(m => { const x = m[String(door)]; if (x && !gone) show(x.runId); }).catch(() => {});
+    return () => { gone = true; if (t) clearInterval(t); };
+  }, [api, door, runId, running]);
   const otherTest = !!(status.test && status.test.state !== 'done' && !running);
   const start = async () => {
     if (door == null) return;
@@ -168,9 +167,8 @@ export const DoorCheckView: React.FC<{ r: DoorCheckResult; onOpenRun?: (runId: s
         {compact && <button className="text-[11px] text-hv-brand hover:underline" onClick={() => setMore(x => !x)}>{more ? 'less' : 'details'}</button>}
         {onOpenRun && <button className="text-[11px] text-hv-brand hover:underline" onClick={() => onOpenRun(r.runId)}>full report</button>}
       </div>
+      {r.error && !r.headline.includes(r.error) && <div className="text-hv-error-fg">{r.error}</div>}
       {more && <>
-      {r.error && <div className="text-hv-error-fg">{r.error}</div>}
-      {r.aborted && <div className="text-hv-warning-fg">Stopped before the end.</div>}
       <div className="space-y-0.5">
         {r.lines.map((l, i) => (
           <div key={i}>

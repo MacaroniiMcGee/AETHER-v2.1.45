@@ -55,12 +55,17 @@ const DoorCheckMini: React.FC<{ doorId: number }> = ({ doorId }) => {
   const [err, setErr] = useState<string | null>(null);
   const base = `${defaultBackend()}/api/trace`;
   const get = async (p: string, o?: RequestInit) => { const r = await fetch(base + p, { credentials: 'include', ...o }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j; };
+  // one follower at a time, stopped when the card goes away
+  const gen = React.useRef(0);
+  useEffect(() => () => { gen.current++; }, []);
   const follow = (runId: string) => {
+    const my = ++gen.current;
     let n = 0;
-    const tick = async () => { try { const r = await get(`/runs/${runId}/doorcheck`); setV(r); if (r.running && n++ < 600) setTimeout(tick, 2000); } catch { /* run gone */ } };
+    const tick = async () => { if (my !== gen.current) return; try { const r = await get(`/runs/${runId}/doorcheck`); if (my !== gen.current) return; setV(r); if (r.running && n++ < 600) setTimeout(tick, 2000); } catch { /* run gone */ } };
     tick();
   };
-  useEffect(() => { get('/doorchecks').then(m => { const x = m[String(doorId)]; if (x) follow(x.runId); }).catch(() => {}); }, [doorId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // the list already carries each finished check's verdict: no per-door analysis when the page opens
+  useEffect(() => { get('/doorchecks').then(m => { const x = m[String(doorId)]; if (!x) return; if (x.headline != null && x.end) setV({ runId: x.runId, running: false, ok: !!x.ok, headline: x.headline, startedAt: x.at }); else follow(x.runId); }).catch(() => {}); }, [doorId]);   // eslint-disable-line react-hooks/exhaustive-deps
   const start = async () => {
     setBusy(true); setErr(null);
     try { const r = await get(`/doors/${doorId}/check`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); if (r.current && r.current.runId) follow(r.current.runId); }
@@ -69,7 +74,7 @@ const DoorCheckMini: React.FC<{ doorId: number }> = ({ doorId }) => {
   const running = !!(v && v.running);
   return (
     <div className="mt-1 flex items-center gap-1.5 text-[11px] min-w-0">
-      <button onClick={start} disabled={busy || running} title="Run the standard checks on this door: card without access, forced open, valid card, REX (moves its real inputs; admins only)"
+      <button onClick={start} disabled={busy || running} title="Run the standard checks on this door: card without access, forced open, valid card, REX, and held open if it is turned on in Event Trace (moves its real inputs; admins only)"
         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-hv-xs ring-1 ring-inset ring-hv-line text-hv-text-2 hover:text-hv-text hover:bg-hv-widget disabled:opacity-50 shrink-0">
         {busy || running ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}Test this door
       </button>

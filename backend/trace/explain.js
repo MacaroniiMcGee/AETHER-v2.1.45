@@ -34,7 +34,9 @@ function sentence(t) {
     return parts.join('; ') + '.';
   }
   if (t.kind === 'input') {
-    const what = roleSay(t.role, t.action && t.action.v);
+    // the expectation already accounts for normally-closed contacts ("door open" when an NC relay drops)
+    const e = String(t.expect || '');
+    const what = t.role === 'dps' && e ? (/open/.test(e) ? 'Door opened' : 'Door closed') : t.role === 'rex' && e ? (/released/i.test(e) ? 'REX released' : 'REX pressed') : roleSay(t.role, t.action && t.action.v);
     if (!t.decision) return `${what} (Aether moved it), but the controller never reported it.`;
     return `${what} (Aether moved it); the controller reported ${evSay(t.result)}${at}${L.decision != null ? ` after ${sec(L.decision)}` : ''}; ${cloudTail(t)}.`;
   }
@@ -151,9 +153,10 @@ function explainTrace(t) {
 
 /** Door check verdict from a graded test report (report.steps from tests.grade) and the run's traces:
  *  { ok, headline, lines: [{ label, ok, warn, say, problems }], notChecked: [] } */
-function doorVerdict(doorName, report, traces = [], notChecked = []) {
+function doorVerdict(doorName, report, traces = [], notChecked = [], run = {}) {
   const byId = new Map((traces || []).map(t => [t.id, t]));
-  const rows = ((report && report.steps) || []).filter(r => r && r.kind !== 'wait' && r.status !== 'skipped');
+  // a wait with expectations (held open) is a real check; plain waits are not
+  const rows = ((report && report.steps) || []).filter(r => r && r.status !== 'skipped' && (r.kind !== 'wait' || (r.checks && r.checks.length) || r.status !== 'pass'));
   const lines = rows.map(r => {
     const ok = r.status === 'pass' || r.status === 'warn';
     const tr = r.traceId ? byId.get(r.traceId) : null;
@@ -162,6 +165,9 @@ function doorVerdict(doorName, report, traces = [], notChecked = []) {
     return { label: String(r.text || r.kind).replace(/ · .*$/, ''), ok, warn: r.status === 'warn', say: tr ? sentence(tr) : null, problems };
   });
   const bad = lines.filter(l => !l.ok), slow = lines.filter(l => l.ok && l.warn && l.problems.length);
+  // a check that was stopped, or that could not put something back, is never "works"
+  if (run.error) return { ok: false, headline: `${doorName}: ${/put .* back/i.test(run.error) ? 'check the door now — ' : ''}${run.error}`, lines, notChecked, error: run.error };
+  if (run.aborted) return { ok: false, headline: `${doorName}: stopped before the end (${lines.length - bad.length} of ${lines.length} as expected so far).`, lines, notChecked, aborted: true };
   const headline = !lines.length ? `${doorName}: nothing could be checked.`
     : bad.length ? `${doorName}: ${bad.length} problem${bad.length === 1 ? '' : 's'} — ${bad.map(b => (/^[A-Z][a-z]/.test(b.label) ? b.label[0].toLowerCase() + b.label.slice(1) : b.label)).join(', ')}.`
     : slow.length ? `${doorName}: works, with ${slow.length} thing${slow.length === 1 ? '' : 's'} to look at.`

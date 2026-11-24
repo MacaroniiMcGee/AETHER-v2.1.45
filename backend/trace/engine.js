@@ -101,7 +101,7 @@ function cleanSettings(s = {}) {
     commands: { enabled: !!(s.commands && s.commands.enabled) },
     clock: { check: !(s.clock && s.clock.check === false), warnMs: int(s.clock && s.clock.warnMs, 200, 600000, 2000) },
     quick: (() => { const q = s.quick || {}; const card = c => c && c.cn !== '' && c.cn != null && Number.isFinite(Number(c.cn)) ? { fc: c.fc === '' || c.fc == null ? '' : String(int(c.fc, 0, 2 ** 31 - 1, 0)), cn: String(int(c.cn, 0, 2 ** 53 - 1, 0)) } : null;
-      return { valid: card(q.valid), invalid: card(q.invalid), held: !!q.held, heldMs: int(q.heldMs, 5000, 600000, 30000) }; })(),
+      return { valid: card(q.valid), invalid: card(q.invalid), held: !!q.held, heldMs: int(q.heldMs, 5000, 600000, 30000), adoptedAt: Number(q.adoptedAt) || null }; })(),
     alerts: { enabled: !(s.alerts && s.alerts.enabled === false), level: s.alerts && s.alerts.level === 'warn' ? 'warn' : 'fail', automation: !(s.alerts && s.alerts.automation === false) },
   };
 }
@@ -1407,12 +1407,12 @@ class TraceEngine extends EventEmitter {
   }
 
   /** The graded result of a test run (also while it is still running). */
-  testReport(runId) {
+  testReport(runId, slot = 'ui') {
     const meta = this.run && this.run.id === runId ? { ...JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8')) } : JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8'));
     const t = meta.test;
     if (!t) throw err('That run is not a test run', 404);
     const log = this._readTestLog(runId, meta);
-    const a = this.analyze(runId);
+    const a = this.analyze(runId, slot);
     const report = grade(a, this.readEvents(runId), log, t.steps || [], this.settings.thresholds);
     const health = t.health || (this.test && this.test.runId === runId ? this.test.health : []) || [];
     let drops = 0;
@@ -1474,8 +1474,16 @@ class TraceEngine extends EventEmitter {
     const r = this.applySuggestion(pick, `${who}, automatic`);
     return { applied: r.done || pick, why: null };
   }
+  /** First connect only: if no doors are watched yet, watch the paired ones (called before the feed starts, so no restart). */
+  maybeAutoAdopt() {
+    const c = this.settings.cloud, q = this.settings.quick || {};
+    if (c.doors.length || q.adoptedAt) return { added: 0 };
+    const r = this.adoptPairing({ restart: false });
+    this.saveSettings({ quick: { ...this.settings.quick, adoptedAt: Date.now() } });   // once: clearing the list later is respected
+    return r;
+  }
   /** Doors under test and their controllers from the Doors page pairing (OnCAFE door on each door). Adds, never removes. */
-  adoptPairing() {
+  adoptPairing(opt = {}) {
     let doors = [];
     try { doors = [...this._doorMap().values()].filter(x => x.enabled && x.oncafe); } catch { return { added: 0 }; }
     const inv = this.cloud.inv;
@@ -1486,7 +1494,7 @@ class TraceEngine extends EventEmitter {
     if (!addD.length && !addC.length) return { added: 0 };
     this.saveSettings({ ...this.settings, cloud: { ...c, doors: c.doors.concat(addD).slice(0, 50), controllers: c.controllers.concat(addC).slice(0, 64) } });
     // a connected feed subscribes per controller and polls per door: start it again with the new list
-    if (this.cloud.status().push.state === 'connected') this.cloud.start(this.settings.cloud).catch(e => console.warn('[Trace] reconnect after adding doors:', e.message));
+    if (opt.restart !== false && this.cloud.status().push.state === 'connected' && !(this.test && this.test.state !== 'done')) this.cloud.start(this.settings.cloud).catch(e => console.warn('[Trace] reconnect after adding doors:', e.message));
     return { added: addD.length + addC.length, doors: addD.length, controllers: addC.length };
   }
 
@@ -1494,21 +1502,42 @@ class TraceEngine extends EventEmitter {
   _testCards() {
     const q = this.settings.quick || {}, ex = this.settings.expectations || [];
     const g = ex.find(e => e.expect === 'grant'), d = ex.find(e => e.expect === 'deny');
-    const valid = q.valid || (g ? { fc: String(g.fc ?? ''), cn: String(g.cn) } : this.settings.sync.cards[0] ? { fc: String(this.settings.sync.cards[0].fc ?? ''), cn: String(this.settings.sync.cards[0].cn) } : null);
+    // a sync card only counts as "has access" when it is presented as a card and the last synced run proved it was granted
+    const sc = this.settings.sync.cards[0];
+    const syncOk = sc && ['wiegand', 'osdp', 'emu'].includes(this.settings.sync.channel.kind) && this._syncProven().ok;
+    const valid = q.valid || (g ? { fc: String(g.fc ?? ''), cn: String(g.cn) } : syncOk ? { fc: String(sc.fc ?? ''), cn: String(sc.cn) } : null);
     const invalid = q.invalid || (d ? { fc: String(d.fc ?? ''), cn: String(d.cn) } : null);
-    return { valid, invalid, validFrom: q.valid ? 'set' : g ? 'expectations' : 'sync card', invalidFrom: q.invalid ? 'set' : d ? 'expectations' : null };
+    return { valid, invalid, validFrom: q.valid ? 'set by you' : g ? 'from Expected results' : syncOk ? 'the first sync card' : null, invalidFrom: q.invalid ? 'set by you' : d ? 'from Expected results' : null };
+  }
+  /** Did the last run that sent sync markers line the clocks up? Cached per run (a finished run never changes). */
+  _syncProven() {
+    if (this._syncProvenAt && Date.now() - this._syncProvenAt.t < 30000) return this._syncProvenAt.v;
+    this._syncOkByRun = this._syncOkByRun || new Map();
+    let v = { ok: false, tried: false, run: null };
+    for (const r of this.listRuns()) {
+      if (!r.end || !(r.syncs || []).length) continue;
+      let ok = this._syncOkByRun.get(r.id);
+      if (ok === undefined) { try { ok = this.analyze(r.id, 'ready').clock.offset != null; } catch { ok = false; } this._syncOkByRun.set(r.id, ok); }
+      v = { ok, tried: true, run: r.id }; break;
+    }
+    this._syncProvenAt = { t: Date.now(), v };
+    return v;
   }
 
   /** ── TRACE-9: Ready to trace? Each item: { id, state: ok|warn|todo, title, detail, fix?: { action, label } } ── */
   readiness() {
+    if (this._ready && Date.now() - this._ready.t < 5000 && this._ready.rev === this._settingsRev) return this._ready.v;
+    const v = this._readiness();
+    this._ready = { t: Date.now(), rev: this._settingsRev, v };
+    return v;
+  }
+  _readiness() {
     const items = [];
     const add = (id, state, title, detail, fix) => items.push({ id, state, title, detail, ...(fix ? { fix } : {}) });
     const c = this.settings.cloud, cs = this.cloud.status();
     if (!c.url || !c.org) add('cloud', 'todo', 'Connect to OnCAFE', 'Sign in and pick the organisation, so Aether can see what the controller reports.', { action: 'setup:cloud', label: 'Sign in' });
     else if (cs.push.state !== 'connected') add('cloud', 'todo', 'OnCAFE feed not connected', cs.push.error ? `Last error: ${cs.push.error}` : 'Aether is not listening to OnCAFE right now.', { action: 'connect', label: 'Connect' });
     else add('cloud', 'ok', 'OnCAFE connected', `${cs.push.host || 'cloud'}: live events are coming in.`);
-    // first time only: watch the doors the Doors page already pairs with OnCAFE (and their controllers)
-    if (!c.doors.length && c.url && c.org) { try { this.adoptPairing(); } catch { /* shown below */ } }
     let doors = [];
     try { doors = [...this._doorMap().values()].filter(x => x.enabled); } catch (e) { add('doors', 'todo', 'Doors page config is damaged', e.message); }
     const paired = doors.filter(x => x.oncafe);
@@ -1529,14 +1558,13 @@ class TraceEngine extends EventEmitter {
     const s = this.settings.sync;
     if (!s.cards.length) add('sync', 'todo', 'No sync cards', 'Two enrolled cards line up the controller’s clock with Aether’s.', { action: 'setup:sync', label: 'Set sync cards' });
     else {
-      const last = this.listRuns().find(r => r.end);
-      let off = null; try { off = last ? this.analyze(last.id, 'ready').clock.offset : null; } catch { /* */ }
-      if (off != null) add('sync', 'ok', 'Clocks lined up', `The last run’s sync cards worked (${s.cards.map(x => `${x.fc}-${x.cn}`).join(', ')}).`);
-      else add('sync', last ? 'todo' : 'warn', last ? 'Sync cards did not work last time' : 'Sync cards not tried yet', `Cards ${s.cards.map(x => `${x.fc}-${x.cn}`).join(', ')} must be enrolled with access to a watched door.`, { action: 'sync', label: 'Try them now' });
+      const sp = this._syncProven();
+      if (sp.ok) add('sync', 'ok', 'Clocks lined up', `The last run’s sync cards worked (${s.cards.map(x => `${x.fc}-${x.cn}`).join(', ')}).`);
+      else add('sync', sp.tried ? 'todo' : 'warn', sp.tried ? 'Sync cards did not work last time' : 'Sync cards not tried yet', `Cards ${s.cards.map(x => `${x.fc}-${x.cn}`).join(', ')} must be enrolled with access to a watched door.`, { action: 'sync', label: 'Try them now' });
     }
     const tc = this._testCards();
-    if (!tc.valid || !tc.invalid) add('cards', 'todo', 'Test cards for door checks', `${tc.valid ? `Valid card ${tc.valid.fc}-${tc.valid.cn} (${tc.validFrom}).` : 'No card with access.'} ${tc.invalid ? '' : 'Pick a card number nobody has, for the "refused" check.'}`, { action: 'cards', label: 'Set test cards' });
-    else add('cards', 'ok', 'Test cards set', `Valid ${tc.valid.fc}-${tc.valid.cn} · without access ${tc.invalid.fc}-${tc.invalid.cn}`, { action: 'cards', label: 'Change' });
+    if (!tc.valid || !tc.invalid) add('cards', 'todo', 'Test cards for door checks', `${tc.valid ? `Card with access ${tc.valid.fc}-${tc.valid.cn} (${tc.validFrom}).` : 'Pick a card that has access to the doors.'} ${tc.invalid ? '' : 'Pick a card number nobody has, for the "refused" check.'}`, { action: 'cards', label: 'Set test cards' });
+    else add('cards', 'ok', 'Test cards set', `With access ${tc.valid.fc}-${tc.valid.cn} (${tc.validFrom}) · without access ${tc.invalid.fc}-${tc.invalid.cn} (${tc.invalidFrom})`, { action: 'cards', label: 'Change' });
     const L = this.links;
     if (L) {
       const down = L.controllers.filter(x => x.link === 'down');
@@ -1560,6 +1588,8 @@ class TraceEngine extends EventEmitter {
     const hasReader = !!info.d.reader, hasDps = !!(info.chs.dps || info.raw.dps), hasRex = !!(info.chs.rex || info.raw.rex);
     const steps = [], skipped = [];
     const after = (list, ms) => { if (list.length) list[list.length - 1].afterMs = ms; return list; };
+    // the start sync cards may have just unlocked this door: let it relock before forcing it open
+    if (this.settings.sync.atStart) steps.push({ kind: 'wait', ms: settle, label: '' });
     if (hasReader && tc.invalid) steps.push(...after(template('invalid', info.id, {}, { badFc: tc.invalid.fc, badCn: tc.invalid.cn }), 3000));
     else skipped.push(hasReader ? 'Card without access: no test card set (Ready to trace › Test cards)' : 'Cards: this door has no reader on the Doors page');
     if (hasDps) steps.push(...after(template('forced', info.id), 3000)); else skipped.push('Forced open: no DPS on the Doors page');
@@ -1571,6 +1601,7 @@ class TraceEngine extends EventEmitter {
     return { info, steps, skipped, seqId: `seq-door${info.id}`, name: `Door check: ${info.name}` };
   }
   async doorCheck(doorId, opt = {}, who = '?') {
+    if (this.run) throw err(`A run is recording ("${this.run.name}"): stop it first, so the door check gets a run of its own`, 409);
     const p = this.doorCheckPlan(doorId, opt);
     if (!p.steps.length) throw err(`Nothing to check on ${p.info.name}: ${p.skipped.join('; ')}`);
     this.saveSequence({ id: p.seqId, name: p.name, note: 'Made by "Test this door" (TRACE-9); runs again each time with the current cards and wiring.', steps: p.steps, repeat: 1, sync: true });
@@ -1584,17 +1615,22 @@ class TraceEngine extends EventEmitter {
   doorCheckResult(runId) {
     const meta = JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8'));
     if (!meta.doorCheck) throw err('That run is not a door check', 404);
-    const r = this.testReport(runId);
-    const a = this.analyze(runId);
-    return { runId, door: meta.doorCheck.door, name: meta.doorCheck.name, running: !!(this.test && this.test.runId === runId && this.test.state !== 'done'),
-      startedAt: r.startedAt, endedAt: r.endedAt, aborted: r.aborted, error: r.error, ...doorVerdict(meta.doorCheck.name, r.report, a.traces, meta.doorCheck.skipped || []) };
+    const running = !!(this.test && this.test.runId === runId && this.test.state !== 'done');
+    if (!running && meta.doorCheckResult) return meta.doorCheckResult;   // finished: worked out once, kept with the run
+    const r = this.testReport(runId, 'doorcheck');
+    const a = this.analyze(runId, 'doorcheck');
+    const out = { runId, door: meta.doorCheck.door, name: meta.doorCheck.name, running,
+      startedAt: r.startedAt, endedAt: r.endedAt, aborted: r.aborted, error: r.error, ...doorVerdict(meta.doorCheck.name, r.report, a.traces, meta.doorCheck.skipped || [], { aborted: r.aborted, error: r.error }) };
+    if (!running && meta.end) try { this._patchMeta(runId, { doorCheckResult: out }); } catch { /* */ }
+    return out;
   }
   /** The newest door check per door (Doors page strip, Tests tab). */
   doorChecks() {
     const out = {};
     for (const r of this.listRuns()) {
       if (!r.doorCheck || out[r.doorCheck.door]) continue;
-      out[r.doorCheck.door] = { runId: r.id, at: r.start, end: r.end };
+      const v = r.doorCheckResult;
+      out[r.doorCheck.door] = { runId: r.id, at: r.start, end: r.end, ...(v ? { ok: v.ok, headline: v.headline } : {}) };
     }
     return out;
   }

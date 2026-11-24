@@ -109,7 +109,8 @@ module.exports = function traceRoutes() {
     } catch (e) { fail(res, e); }
   });
   router.post('/cloud/connect', express.json(), async (_req, res) => {
-    try { const st = await eng.cloud.start(eng.settings.cloud); eng.refreshDoorConfig().catch(() => {}); res.json(st); } catch (e) { fail(res, e); }
+    try { try { eng.maybeAutoAdopt(); } catch { /* the doors can still be picked by hand */ }   // TRACE-9: first connect watches the paired doors
+      const st = await eng.cloud.start(eng.settings.cloud); eng.refreshDoorConfig().catch(() => {}); res.json(st); } catch (e) { fail(res, e); }
   });
   router.post('/cloud/disconnect', express.json(), async (_req, res) => { await eng.cloud.stop(); res.json(eng.cloud.status()); });
 
@@ -223,6 +224,7 @@ module.exports = function traceRoutes() {
   // ── TRACE-9: Ready to trace? / Test this door ──
   router.get('/ready', (_req, res) => { try { res.json(eng.readiness()); } catch (e) { fail(res, e); } });
   router.post('/ready/adopt', express.json(), (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the doors under test' });
     if (!ownOrigin(req)) return res.status(403).json({ error: 'Only the Aether page itself can change the doors under test' });
     try { res.json({ ...eng.adoptPairing(), ready: eng.readiness() }); } catch (e) { fail(res, e); }
   });
@@ -233,7 +235,7 @@ module.exports = function traceRoutes() {
   });
   router.get('/doors/:id/check/plan', (req, res) => {
     try { const p = eng.doorCheckPlan(Number(req.params.id), { held: req.query.held === undefined ? undefined : req.query.held === '1' });
-      res.json({ door: p.info.id, name: p.name, steps: p.steps.filter(s => s.kind !== 'wait').map(s => s.label), skipped: p.skipped }); } catch (e) { fail(res, e); }
+      res.json({ door: p.info.id, name: p.name, steps: p.steps.filter(s => s.kind !== 'wait' || s.label).map(s => s.label), skipped: p.skipped }); } catch (e) { fail(res, e); }
   });
   router.post('/doors/:id/check', express.json(), async (req, res) => {
     // moves real hardware like any test: admins only, and only from the Aether page itself

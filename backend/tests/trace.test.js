@@ -1029,7 +1029,14 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     assert.strictEqual(v.headline, 'Lab door: 1 problem — card without access.'); assert(!v.ok);
     assert.strictEqual(v.lines[0].say, 'Card 55-1001 was granted in 0.3 s; Aether did not see the lock open; OnCAFE never reported it.');
     assert.strictEqual(v.lines[1].problems.length, 2); assert(/should be refused opened/.test(v.lines[1].problems[0].plain));
-    ok('plain language: one sentence per trace, likely cause and what to check per note, door verdicts');
+    // review fixes: a failed held-open wait, a stopped check, a relay that could not be put back, a normally-closed DPS
+    const held = doorVerdict('D', { steps: [{ kind: 'card', text: 'Valid card', status: 'pass', why: [] }, { kind: 'wait', text: 'Hold past the held-open time', status: 'fail', checks: [{ what: 'events' }], why: ['No held* from the controller within 45 s'] }, { kind: 'wait', text: '', status: 'pass', checks: [], why: [] }] });
+    assert(!held.ok && /1 problem — hold past/.test(held.headline), held.headline);
+    assert(!doorVerdict('D', { steps: [{ kind: 'card', text: 'Valid card', status: 'pass', why: [] }] }, [], [], { aborted: true }).ok, 'stopped: not "works"');
+    const pb = doorVerdict('D', { steps: [{ kind: 'card', text: 'Valid card', status: 'pass', why: [] }] }, [], [], { error: 'Could not put Door 1 DPS back. Check it now.' });
+    assert(!pb.ok && /^D: check the door now/.test(pb.headline), pb.headline);
+    assert(/^Door opened/.test(explainTrace({ kind: 'input', role: 'dps', expect: 'door open', action: { v: 0 }, decision: null, notes: [] }).say), 'NC contact: v 0 is "opened"');
+    ok('plain language: one sentence per trace, likely cause and what to check per note, door verdicts (held open, stopped, not put back, NC contacts)');
 
     // a Doors page door, a fake controller / cloud, and the whole "Test this door" flow
     const { TraceEngine } = require('../trace/engine');
@@ -1091,6 +1098,16 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       assert(eng.sequences().some(q => q.id === 'seq-door1' && q.name === 'Door check: Lab door'));
       // every analysed trace carries its sentence
       assert(eng.analyze(res.runId).traces.every(t => t.explain && typeof t.explain.say === 'string'));
+      // a door check never borrows someone else's run; first connect adopts the paired doors once only
+      await eng.startRun('mine', { sync: false });
+      await assert.rejects(eng.doorCheck(1, {}, 't'), /stop it first/);
+      await eng.stopRun('done', { skipSync: true });
+      eng.saveSettings({ cloud: { ...eng.settings.cloud, doors: [], controllers: [] }, quick: { ...eng.settings.quick, adoptedAt: null } });
+      assert.strictEqual(eng.maybeAutoAdopt().doors, 1); assert(eng.settings.quick.adoptedAt);
+      eng.saveSettings({ cloud: { ...eng.settings.cloud, doors: [] } });
+      assert.strictEqual(eng.maybeAutoAdopt().added, 0, 'cleared on purpose: left cleared');
+      assert(eng.doorCheckResult(res.runId) === eng.doorCheckResult(res.runId) || eng.doorCheckResult(res.runId).headline === res.headline, 'finished verdict kept with the run');
+      assert.strictEqual(eng.doorChecks()[1].headline, res.headline);
       ok('Ready to trace (cloud, pairing, cards), watching paired doors is one action, Test this door runs only what the door has and answers in words');
     } finally {
       if (keepDc != null) fs.writeFileSync(dc, keepDc); else try { fs.unlinkSync(dc); } catch { /* */ }
