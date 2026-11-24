@@ -273,6 +273,16 @@ module.exports = function traceRoutes() {
   });
 
   router.get('/suggest', (_req, res) => { try { res.json(eng.suggest()); } catch (e) { fail(res, e); } });
+  // Hydra (Board Blueprint Studio, same origin) reads this to build the wiring sheet: the controller board by model,
+  // Aether's board, and per controller door which Aether terminal goes where
+  router.get('/hydra', (_req, res) => {
+    try {
+      const sg = eng.suggest();
+      const tplOf = m => { const x = String(m || '').toUpperCase(); return /P400/.test(x) ? 'p400' : /P200/.test(x) ? 'p200' : /P100/.test(x) ? 'p100' : /IC2/.test(x) ? 'ic2' : null; };
+      res.json({ kind: 'aether-wiring', version: 1, at: sg.at, source: 'Aether Event Trace', wiegand: eng.channels().wiegand.map(w => w.id),
+        controllers: sg.controllers.map(c => ({ ...c, tpl: tplOf(c.model) })) });
+    } catch (e) { fail(res, e); }
+  });
   router.post('/suggest/apply', express.json(), (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the wiring map' });
     if (!ownOrigin(req)) return res.status(403).json({ error: 'Only the Aether page itself can change the wiring map' });

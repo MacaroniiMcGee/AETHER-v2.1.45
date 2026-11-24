@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone, Bell, Clock, Ticket } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
+import { SuggestCard } from './Suggest';
 import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, type JiraStatus, wiringVersion } from './api';
 
 const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ icon, title, sub, right, children }) => (
@@ -238,6 +239,8 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
       </Card>
 
       <WiringCard api={api} status={status} doors={doorsKnown} />
+
+      <SuggestCard api={api} status={status} onApplied={onSaved} />
 
       {/* Commands */}
       <Card icon={<Megaphone size={16} />} title="Commands" sub="Let Aether send door, area and zone commands to OnCAFE (temporary unlock, lockdown, maintenance, shunt, zones) and trace them to the door.">
