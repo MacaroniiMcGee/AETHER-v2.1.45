@@ -6,7 +6,7 @@
 // the same test sequence — every step's pass rate and latency.
 'use strict';
 
-const HOPS = [['decision', 'Aether → controller decision'], ['push', 'Aether → cloud push'], ['api', 'Aether → event log'], ['decisionToPush', 'Controller → cloud push'], ['output', 'Controller → Aether saw the output'], ['hardware', 'Controller event → output edge'], ['ack', 'OnCAFE answered a command']];
+const HOPS = [['decision', 'Aether → controller decision'], ['push', 'Aether → cloud push'], ['api', 'Aether → event log'], ['decisionToPush', 'Controller → cloud push'], ['output', 'Controller → Aether saw the output'], ['hardware', 'Controller event → output edge'], ['ack', 'OnCAFE answered a command'], ['reader', 'Aether → reader showed the result']];
 const KINDS = ['card', 'input', 'output', 'command'];
 const MIN_PCT = 0.25, MIN_MS = 100;
 

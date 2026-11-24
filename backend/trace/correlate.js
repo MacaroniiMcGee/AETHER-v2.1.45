@@ -251,6 +251,8 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
 
   // ── 1. cards ───────────────────────────────────────────────────────────
   const cards = journalEv.filter(e => e.type === 'card' || e.type === 'keypad');
+  const readerEv = ev.filter(e => e.src === 'reader' && e.at != null).sort((x, y) => x.at - y.at);   // TRACE-5 reader LED / buzzer
+  const usedLed = new Set();
   const expectCard = a => {
     if (a.info && a.info.expect) return a.info.expect;
     const x = (s.expectations || []).find(r => credEq({ fc: r.fc, cn: r.cn }, a.cred));
@@ -279,6 +281,12 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
     const hops = [{ id: 'sent', label: 'Aether sent', at: t0, ms: 0, clock: 'pi' }];
     let ch = null;
     if (g) { ch = cloudHops(g, t0, { decidedLabel: 'Controller decided' }); hops.push(...ch.hops); }
+    // TRACE-5: what the controller told this reader to show (OSDP LED / buzzer), the last hop a person at the door sees
+    const rch = a.info && a.info.ch;
+    const led = rch ? readerEv.find(o => o.type === 'reader-led' && o.info && o.info.ch === rch && o.at >= t0 && o.at <= t0 + 8000 && !usedLed.has(o)) : null;
+    if (led) { usedLed.add(led); hops.push({ id: 'reader', label: `Reader showed ${led.info.colour}${led.info.flash ? ' (flashing)' : ''}`, at: led.at, ms: led.at - t0, clock: 'pi' }); }
+    const buz = rch ? readerEv.find(o => o.type === 'reader-buzzer' && o.info && o.info.ch === rch && o.info.tone !== 'silent' && o.at >= t0 && o.at <= t0 + 8000) : null;
+    if (buz) hops.push({ id: 'beep', label: `Reader ${buz.info.tone}${buz.info.count > 1 ? ' ×' + buz.info.count : ''}`, at: buz.at, ms: buz.at - t0, clock: 'pi' });
     const lock = journalEv.find(o => OBSERVE.has(o.type) && o.at >= t0 && o.at <= t0 + 8000 && o.journal && o.journal.v === 1);
     if (lock) hops.push({ id: 'lock', label: `Aether saw ${lock.journal.ch} change`, at: lock.at, ms: lock.at - t0, clock: 'pi' });
     hops.sort((x, y) => x.at - y.at);
@@ -307,11 +315,14 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
       if (d > th.pushFail) bad(`Cloud push after ${d} ms (limit ${th.pushFail})`);
       else if (d > th.pushWarn) warn(`Cloud push after ${d} ms (warn at ${th.pushWarn})`);
     }
+    const wantColour = result === 'grant' ? 'green' : result === 'deny' ? 'red' : null;
+    if (led && wantColour && led.info.colour !== wantColour && !isSync) warn(`Reader showed ${led.info.colour} for a ${result === 'grant' ? 'grant' : 'denial'} (expected ${wantColour})`);
     traces.push({
       id: a.id, kind: 'card', at: t0, sync: isSync, action: { label: a.label, ch: a.info && a.info.ch, cred: a.cred, type: a.type },
       decision: g ? { type: g.type, t: g.t, cred: g.cred, door: g.door, sources: [...new Set(g.copies.map(c => c.src))], matchedBy, clientType: g.clientType, eventIds: g.copies.map(c => c.id) } : null,
       hops, expect, result, credCheck, status, notes,
-      latency: { decision: off != null ? decisionMs : null, push: ch && ch.push != null ? ch.push - t0 : null, api: ch && ch.api != null ? ch.api - t0 : null },
+      latency: { decision: off != null ? decisionMs : null, push: ch && ch.push != null ? ch.push - t0 : null, api: ch && ch.api != null ? ch.api - t0 : null, reader: led ? led.at - t0 : null },
+      reader: led ? { colour: led.info.colour, flash: !!led.info.flash, beep: buz ? buz.info.tone : null } : null,
     });
   }
 
@@ -504,6 +515,7 @@ function correlate(events, syncs = [], s = {}, ctx = {}) {
       output: statsOf(real.map(t => t.latency.output).filter(x => x != null)),
       hardware: statsOf(real.map(t => t.latency.hardware).filter(x => x != null)),
       ack: statsOf(real.map(t => t.latency.ack).filter(x => x != null)),
+      reader: statsOf(real.map(t => t.latency.reader).filter(x => x != null)),
       credMismatch: real.filter(t => t.credCheck === 'mismatch').length,
     };
     st.verdict = !real.length ? 'no-data' : st.fail ? 'fail' : st.warn ? 'warn' : 'pass';

@@ -2955,6 +2955,7 @@ try {
 osdpSniffer.on('raw', ({ bytes, ts }) => { try { osdpTrace.ingestRaw('rx', osdpSniffer.portPath || 'sniffer', bytes, ts || Date.now(), 'sniffer'); } catch (e) {} });
 // Relay to the browser.
 osdpTrace.on('frame', f => io.emit('osdp-trace-frame', f));
+try { require('./routes/trace').getEngine().attachOsdpTrace(osdpTrace); } catch (_) { /* no Event Trace */ }   // AETHER_TRACE (TRACE-5): reader LED / buzzer
 osdpTrace.on('events', evs => io.emit('osdp-trace-events', evs));
 osdpTrace.on('rules', fired => io.emit('osdp-trace-rules', fired));
 osdpTrace.on('cleared', () => io.emit('osdp-trace-cleared', {}));

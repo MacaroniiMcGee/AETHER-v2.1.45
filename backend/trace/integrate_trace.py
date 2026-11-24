@@ -346,6 +346,14 @@ def main():
         return s
     P.edit(au, 'Event Trace alert trigger (Automation page)', auto_ui, required=False)
 
+    # ── TRACE-5: reader LED / buzzer from OSDP Trace into Event Trace (optional) ──
+    def server_osdp_feedback(s):
+        if 'attachOsdpTrace(' in s:
+            return None
+        return insert_after_line(s, r"^osdpTrace\.on\('frame', f => io\.emit\('osdp-trace-frame', f\)\);",
+            "try { require('./routes/trace').getEngine().attachOsdpTrace(osdpTrace); } catch (_) { /* no Event Trace */ }   // AETHER_TRACE (TRACE-5): reader LED / buzzer")
+    P.edit('backend/server.js', 'reader LED / buzzer into Event Trace', server_osdp_feedback, required=False)
+
     for x in P.done:
         print(('would change ' if check else 'changed ') + x)
     for x in P.skipped:

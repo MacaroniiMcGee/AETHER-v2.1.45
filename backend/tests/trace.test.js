@@ -843,6 +843,123 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     if (keepAp != null) fs.writeFileSync(ap, keepAp);
   }
 
+  console.log('TRACE-5: reader feedback, controller clocks, Jira, wiring suggestion');
+  {
+    const { frameToEvent } = require('../trace/readerfeedback');
+    const { readDate, parseUtc } = require('../trace/clockcheck');
+    const { suggestWiring } = require('../trace/suggest');
+    // reader LED after a grant: a hop on the card trace; red after a grant is a warning
+    const T0 = Date.now() - 300000;
+    const led = c => Buffer.from([0, 0, 2, 5, 5, c, c, 20, 0, 1, 0, 0, 1, 1]).toString('hex');
+    const evs = [
+      fromJournal({ t: T0, k: 'card', ch: 'osdp:rd1', v: 1, src: 'osdp', m: { fc: 5, cn: 77 } }),
+      ...fromCloud({ eventTimestamp: T0 + 120, doorId: 'D1', cardNumber: '77', facilityCode: '5', eventMeta: { eventId: 'a1', events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: T0 + 900 }),
+      frameToEvent({ name: 'osdp_LED', isReply: false, address: 1, port: 'p', dataHex: led(2), ts: T0 + 180 }, [{ id: 'rd1', address: 1 }]),
+      frameToEvent({ name: 'osdp_BUZ', isReply: false, address: 1, port: 'p', dataHex: '0002010101', ts: T0 + 185 }, [{ id: 'rd1', address: 1 }]),
+      fromJournal({ t: T0 + 10000, k: 'card', ch: 'osdp:rd1', v: 1, src: 'osdp', m: { fc: 5, cn: 77 } }),
+      ...fromCloud({ eventTimestamp: T0 + 10100, doorId: 'D1', cardNumber: '77', facilityCode: '5', eventMeta: { eventId: 'a2', events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: T0 + 10800 }),
+      frameToEvent({ name: 'osdp_LED', isReply: false, address: 1, port: 'p', dataHex: led(1), ts: T0 + 10200 }, [{ id: 'rd1', address: 1 }]),
+    ];
+    const r = correlate(evs, [], { thresholds: {}, expectations: [] }, { wiring: {} });
+    const c1 = r.traces.find(t => t.at === T0), c2 = r.traces.find(t => t.at === T0 + 10000);
+    assert.strictEqual(c1.latency.reader, 180); assert.strictEqual(c1.reader.colour, 'green'); assert.strictEqual(c1.reader.beep, 'beep');
+    assert(c1.hops.some(h => h.id === 'reader')); assert(c2.notes.some(n => /showed red for a grant/.test(n)));
+    assert.strictEqual(r.stats.reader.n, 2);
+    ok('reader LED / buzzer: last hop of a card trace (time, colour, beep); wrong colour warns');
+
+    // controller clock from a SUNAPI date view
+    assert.strictEqual(parseUtc('2026-11-23 20:01:02'), Date.UTC(2026, 10, 23, 20, 1, 2));
+    assert.strictEqual(parseUtc('2026-11-23T20:01:02-05:00'), Date.UTC(2026, 10, 24, 1, 1, 2));
+    const dv = readDate(JSON.stringify({ Date: { UTCTime: '2026-11-23T20:01:02Z', LocalTime: '2026-11-23T15:01:02', TimeZone: 'EST5EDT', SyncType: 'NTP', NTPServer: 'pool.ntp.org' } }));
+    assert.strictEqual(dv.utc, Date.UTC(2026, 10, 23, 20, 1, 2)); assert.strictEqual(dv.sync, 'NTP'); assert.strictEqual(dv.ntp, 'pool.ntp.org');
+    assert.strictEqual(readDate('UTCTime=2026-11-23 20:01:02\nSyncType=Manual').sync, 'Manual');
+    ok('controller clock: SUNAPI date view (JSON or key=value, UTC / offset forms, NTP)');
+
+    // Jira: list HARs, download through a redirect (login not forwarded), attach, comment — against a mock
+    {
+      const jira = require('../trace/jira');
+      const seenReq = [];
+      const harText = JSON.stringify({ log: { entries: [] } });
+      const srv = http.createServer((q, s2) => {
+        let body = []; q.on('data', d => body.push(d)); q.on('end', () => {
+          seenReq.push({ m: q.method, u: q.url, auth: q.headers.authorization || null, ct: q.headers['content-type'] || '', tok: q.headers['x-atlassian-token'] || null, body: Buffer.concat(body).toString('utf8') });
+          if (q.url.startsWith('/rest/api/3/issue/OCF-7412?')) return s2.end(JSON.stringify({ fields: { summary: 'Door event late', status: { name: 'Open' }, attachment: [{ id: '101', filename: 'lobby.har', size: 10 }, { id: '102', filename: 'notes.txt', size: 3 }] } }));
+          if (q.url === '/rest/api/3/attachment/content/101') { s2.writeHead(302, { Location: `http://127.0.0.1:${srv.address().port}/media/101` }); return s2.end(); }
+          if (q.url === '/media/101') return s2.end(harText);
+          if (q.url.endsWith('/attachments')) return s2.end(JSON.stringify([{ id: '900', filename: 'x.csv', size: 5 }]));
+          if (q.url.endsWith('/comment')) return s2.end('{}');
+          if (q.url === '/rest/api/3/myself') return s2.end(JSON.stringify({ displayName: 'QA Tester' }));
+          s2.statusCode = 404; s2.end('{}');
+        });
+      });
+      await new Promise(res => srv.listen(0, '127.0.0.1', res));
+      process.env.AETHER_TRACE_JIRA_TEST = `http://127.0.0.1:${srv.address().port}`;
+      jira.configure({ site: 'hanwhavision.atlassian.net', email: 'qa@x.com', token: 'tok-123' });
+      assert.deepStrictEqual(jira.status(), { site: 'hanwhavision.atlassian.net', email: 'qa@x.com', hasToken: true, configured: true });
+      assert.strictEqual((fs.statSync(path.join(__dirname, '..', 'data', 'trace', 'jira.json')).mode & 0o777), 0o600);
+      assert.throws(() => jira.configure({ site: 'evil.example.com' }), /atlassian\.net/);
+      const iss = await jira.issue('ocf-7412');
+      assert.strictEqual(iss.key, 'OCF-7412'); assert.deepStrictEqual(iss.hars.map(h => h.id), ['101']);
+      const buf = await jira.download('101');
+      assert.strictEqual(buf.toString('utf8'), harText);
+      const media = seenReq.find(x => x.u === '/media/101');
+      assert.strictEqual(media.auth, null, 'the login is not sent to the media host');
+      assert(seenReq.find(x => x.u === '/rest/api/3/attachment/content/101').auth.startsWith('Basic '));
+      const att = await jira.attach('OCF-7412', [{ name: 'a.csv', data: 'x,y\n', type: 'text/csv' }]);
+      assert.strictEqual(att[0].id, '900');
+      const up = seenReq.find(x => x.u.endsWith('/attachments'));
+      assert(/multipart\/form-data; boundary=/.test(up.ct)); assert.strictEqual(up.tok, 'no-check'); assert(/filename="a.csv"/.test(up.body));
+      await jira.comment('OCF-7412', 'line 1\nline 2');
+      assert.strictEqual(JSON.parse(seenReq.find(x => x.u.endsWith('/comment')).body).body.content.length, 2);
+      await assert.rejects(jira.issue('not a key'), /not a Jira issue key/);
+      srv.close(); delete process.env.AETHER_TRACE_JIRA_TEST;
+    }
+    ok('Jira: HARs of a ticket, download through the media redirect without the login, attachments (multipart), comment; token file mode 600; site must be *.atlassian.net');
+
+    // suggestion: probe beats the Doors page beats what was seen; differences from the wiring map flagged
+    const sg = suggestWiring({
+      doors: [{ id: 1, name: 'Main', oncafe: 'D1', raw: { dps: 'relay:0', rex: 'relay:1', lock: 'opto:2' }, reader: 'wg-1', readerChannels: ['wiegand:wg-1'], dpsNc: false }],
+      wiring: { 'relay:0': { role: 'dps', door: 'D1', active: 'open' } },
+      seen: [{ ch: 'relay:5', count: 12, inferred: { role: 'rex', door: 'D2', score: 0.8 } }, { ch: 'relay:1', count: 4, inferred: { role: 'input', door: 'D1', score: 0.6 } }],
+      probe: { at: 1, relays: [{ ch: 'relay:0', role: 'dps', door: 'D1', active: 'closed', events: [{ type: 'closed' }] }], readers: [{ ch: 'wiegand:wg-1', door: 'D1', type: 'accessgranted' }], locks: [{ door: 'D1', ch: 'opto:2', ms: 140 }] },
+      inventory: { doors: [{ id: 'D1', name: 'Lobby', controllerId: 'C' }, { id: 'D2', name: 'Dock', controllerId: 'C' }], controllers: [{ id: 'C', name: 'Lab NHP', model: 'NHP-P200' }] },
+    });
+    const row = ch => sg.rows.find(x => x.ch === ch);
+    assert.strictEqual(row('relay:0').source, 'probe'); assert.strictEqual(row('relay:0').active, 'closed'); assert.strictEqual(row('relay:0').differs, true, 'NC proven, map says NO');
+    assert.strictEqual(row('relay:1').source, 'doors page'); assert.strictEqual(row('relay:1').role, 'rex');
+    assert.strictEqual(row('relay:5').source, 'seen');
+    assert.strictEqual(row('opto:2').source, 'probe');
+    const lobby = sg.controllers[0].doors.find(d => d.door === 'D1');
+    assert.strictEqual(sg.controllers[0].model, 'NHP-P200'); assert.strictEqual(lobby.reader.ch, 'wiegand:wg-1'); assert.strictEqual(lobby.dps.terminal.label, 'REL1'); assert.strictEqual(lobby.lock.terminal.label, 'OPTO3');
+    ok('wiring suggestion: probe > Doors page > seen; per controller door (reader, DPS, REX, lock) for the drawing; differences flagged');
+
+    // Discover: a relay pulse proves a DPS (NC from the reply), a card proves a reader, then the result feeds the suggestion
+    {
+      const { TraceEngine } = require('../trace/engine');
+      const e = new TraceEngine();
+      const writes = [];
+      const cloud = (type, door, extra = {}) => setTimeout(() => e.add(fromCloud({ eventTimestamp: Date.now(), doorId: door, doorName: door === 'D1' ? 'Lobby' : 'Dock', ...extra, eventMeta: { eventId: Math.random().toString(16).slice(2), events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at: Date.now() })[0]), 150);
+      e.deps = {
+        gpioQueue: { async enqueue(op, ch, v) { writes.push([ch, v]); if (ch === 2) cloud(v ? 'closed' : 'open', 'D1'); if (ch === 3) cloud(v ? 'rexactivated' : 'rexdeactivated', 'D2'); return {}; } },
+        getWiegand: () => ({ getReaders: () => [{ id: 'wg-9', name: 'Wiegand 9' }], async sendCard() { cloud('accessdenied', 'D2', { cardNumber: '1234' }); } }),
+      };
+      e.cloud.status = () => ({ push: { state: 'connected' }, api: {} });
+      await e.discover({ relays: [2, 3], holdMs: 500, watchMs: 2000, locks: false }, 'tester');
+      for (let i = 0; i < 100 && e.discovering.state !== 'done'; i++) await sleep(100);
+      const d = e.discoverStatus();
+      const r2 = d.relays.find(x => x.ch === 'relay:2'), r3 = d.relays.find(x => x.ch === 'relay:3');
+      assert.strictEqual(r2.role, 'dps'); assert.strictEqual(r2.door, 'D1'); assert.strictEqual(r2.active, 'closed', 'relay on → closed: a normally-closed contact');
+      assert.strictEqual(r3.role, 'rex'); assert.strictEqual(r3.door, 'D2');
+      assert.strictEqual(d.readers[0].door, 'D2');
+      assert.deepStrictEqual(writes, [[2, true], [2, false], [3, true], [3, false]], 'every relay toggled away and back');
+      await assert.rejects(e.discover({}, 't').then(() => e.discover({}, 't')), /already running/);
+      e.stopDiscover(); for (let i = 0; i < 100 && e.discovering.state !== 'done'; i++) await sleep(100);
+      const s2 = e.suggest();
+      assert(s2.rows.some(x => x.ch === 'relay:2' && x.source === 'probe'));
+    }
+    ok('Discover: relay pulses prove DPS (and NC) / REX and their doors, a card proves a reader; always toggled back; one at a time; feeds the suggestion');
+  }
+
   console.log(`\n${passed} checks passed`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -26,6 +26,9 @@ const { doorsFrom, doorChannels, channelOfActivity, readerChannels } = require('
 const { cleanSequence, template, TEMPLATES, stepText, grade } = require('./tests');      // TRACE-4
 const { integrity } = require('./integrity');
 const { compare } = require('./compare');
+const { frameToEvent } = require('./readerfeedback');   // TRACE-5
+const { checkControllers } = require('./clockcheck');
+const { suggestWiring } = require('./suggest');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
 const RUNS = path.join(BASE, 'runs');
@@ -33,7 +36,8 @@ const SETTINGS = path.join(BASE, 'settings.json');
 const REVERTS = path.join(BASE, 'pending-reverts.json');
 const SEQUENCES = path.join(BASE, 'sequences.json');      // TRACE-4 test sequences
 const TOUCHED = path.join(BASE, 'test-touched.json');     // DPS / REX / commands a running test has engaged (released after a restart)
-const TEST_LOG = 'test-log.jsonl';                         // per run: one line per test step
+const TEST_LOG = 'test-log.jsonl';
+const DISCOVER = path.join(BASE, 'discover.json');          // TRACE-5: what the last Discover probe proved                         // per run: one line per test step
 const DOORS_CONFIG = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');   // Doors page (routes-doors.js)   // commands to turn back, kept across restarts
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
 const ANALYTICS_SETTINGS = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');   // wiring map shared with Product Test
@@ -54,6 +58,7 @@ const DEFAULTS = {
   thresholds: { decisionWarn: 1000, decisionFail: 2000, pushWarn: 3000, pushFail: 10000, matchWindowMs: 30000, inputWindowMs: 10000, outputWindowMs: 10000, commandWarn: 5000, commandFail: 15000, heldToleranceMs: 1500 },
   commands: { enabled: false },
   alerts: { enabled: true, level: 'fail', automation: true },   // TRACE-4: live alerts (toast + Automation trigger)
+  clock: { check: true, warnMs: 2000 },                            // TRACE-5: controller clocks over SUNAPI at run start
   expectations: [],     // [{ fc, cn, expect: 'grant'|'deny', note }]
   allowRaw: true,
 };
@@ -90,6 +95,7 @@ function cleanSettings(s = {}) {
     expectations: (Array.isArray(s.expectations) ? s.expectations : []).slice(0, 200).map(x => ({ fc: x.fc === '' || x.fc == null ? '' : String(int(x.fc, 0, 2 ** 31 - 1, 0)), cn: String(x.cn ?? '').replace(/\D/g, '').slice(0, 20), expect: x.expect === 'deny' ? 'deny' : 'grant', note: String(x.note || '').slice(0, 80) })).filter(x => x.cn),
     allowRaw: s.allowRaw !== false,
     commands: { enabled: !!(s.commands && s.commands.enabled) },
+    clock: { check: !(s.clock && s.clock.check === false), warnMs: int(s.clock && s.clock.warnMs, 200, 600000, 2000) },
     alerts: { enabled: !(s.alerts && s.alerts.enabled === false), level: s.alerts && s.alerts.level === 'warn' ? 'warn' : 'fail', automation: !(s.alerts && s.alerts.automation === false) },
   };
 }
@@ -282,7 +288,7 @@ class TraceEngine extends EventEmitter {
 
   // ── settings ───────────────────────────────────────────────────────────
   saveSettings(s) {
-    const merged = cleanSettings({ ...this.settings, ...s, commands: { ...this.settings.commands, ...(s.commands || {}) }, alerts: { ...this.settings.alerts, ...(s.alerts || {}) }, thresholds: { ...this.settings.thresholds, ...(s.thresholds || {}) }, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
+    const merged = cleanSettings({ ...this.settings, ...s, commands: { ...this.settings.commands, ...(s.commands || {}) }, alerts: { ...this.settings.alerts, ...(s.alerts || {}) }, clock: { ...this.settings.clock, ...(s.clock || {}) }, thresholds: { ...this.settings.thresholds, ...(s.thresholds || {}) }, cloud: { ...this.settings.cloud, ...(s.cloud || {}) }, sync: { ...this.settings.sync, ...(s.sync || {}), channel: { ...this.settings.sync.channel, ...((s.sync || {}).channel || {}) } } });
     this.settings = merged;
     this._settingsRev = (this._settingsRev || 0) + 1;
     writeAtomic(SETTINGS, JSON.stringify(merged, null, 1));
@@ -739,6 +745,7 @@ class TraceEngine extends EventEmitter {
     // old runs
     const all = this.listRuns();
     for (const r of all.slice(KEEP_RUNS)) { try { fs.rmSync(runDir(r.id), { recursive: true, force: true }); } catch { /* */ } }
+    if (this.settings.clock.check) this.checkClocks().then(c => { if (c && c.available) this._patchMeta(id, { controllerClocks: c }); }).catch(() => {});   // TRACE-5
     const doSync = opt.sync !== false && this.settings.sync.atStart;
     if (doSync) this.sendSync('start').catch(e => this._patchMeta(id, { syncError: e.message }));
     clearInterval(this._syncTimer);
@@ -785,7 +792,7 @@ class TraceEngine extends EventEmitter {
     const syncs = id ? (meta.syncs || []) : (this.liveSyncs || []);
     const res = correlate(events, syncs, { ...this.settings, doorConfig: this.settings.cloud.doorConfig }, { wiring: this.wiring() });
     res.integrity = integrity(events, { pollMs: this.settings.cloud.pollMs, apiEnabled: this.settings.cloud.poll, now: meta && meta.end ? meta.end + 60000 : Date.now() });
-    const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id), test: meta.test ? { sequence: meta.test.sequence, startedAt: meta.test.startedAt, endedAt: meta.test.endedAt || null } : (this.run && this.run.id === id && this.run.test ? { sequence: this.run.test.sequence, startedAt: this.run.test.startedAt, endedAt: null } : null) } : null, ...res };
+    const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, controllerClocks: meta.controllerClocks || null, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id), test: meta.test ? { sequence: meta.test.sequence, startedAt: meta.test.startedAt, endedAt: meta.test.endedAt || null } : (this.run && this.run.id === id && this.run.test ? { sequence: this.run.test.sequence, startedAt: this.run.test.startedAt, endedAt: null } : null) } : null, ...res };
     this._cache = this._caches[slot] = { key, at: Date.now(), value };
     return value;
   }
@@ -913,6 +920,161 @@ class TraceEngine extends EventEmitter {
     const seen = new Set(), ev2 = [], raw2 = [];
     events.forEach((e, i) => { const k = e.type === 'command' ? `cmd|${e.id}` : `${e.harVia}|${e.eventId || ''}|${e.type}|${e.t}|${e.door && e.door.id}`; if (seen.has(k)) return; seen.add(k); ev2.push(e); raw2.push(raws[i]); });
     return this._importInto(id, ev2, raw2, `HAR (${ev2.length} cloud events, browser clock)`);
+  }
+
+
+  // ── TRACE-5: reader feedback (OSDP LED / buzzer from OSDP Trace) ────────
+  attachOsdpTrace(hub) {
+    if (!hub || typeof hub.on !== 'function' || this._osdpHub === hub) return;
+    this._osdpHub = hub;
+    hub.on('frame', f => {
+      if (!f || f.isReply || (f.name !== 'osdp_LED' && f.name !== 'osdp_BUZ')) return;   // cheap filter first: polls never get here
+      try {
+        const om = this.deps.getOsdp && this.deps.getOsdp();
+        const readers = om && om.getReaders ? [].concat(om.getReaders() || []).map(r => ({ id: String(r.id ?? r.readerId), name: r.name, address: r.address, port: r.port || r.portPath || null })) : [];
+        const e = frameToEvent(f, readers);
+        if (e) this.add(e);
+      } catch { /* never break OSDP Trace */ }
+    });
+  }
+
+  // ── TRACE-5: controller clocks (SUNAPI) ────────────────────────────────
+  async checkClocks(opt = {}) {
+    const r = await checkControllers(opt);
+    if (r && r.available) r.warnMs = this.settings.clock.warnMs;
+    this.clockCheck = r;
+    return r;
+  }
+
+  // ── TRACE-5: wiring suggestion + Discover probe ────────────────────────
+  _probe() { try { return JSON.parse(fs.readFileSync(DISCOVER, 'utf8')); } catch { return null; } }
+  suggest() {
+    const chn = this.channels();
+    const known = new Set([...chn.wiegand.map(r => `wiegand:${r.id}`), ...chn.osdp.map(r => `osdp:${r.id}`)]);
+    let doors = [];
+    try { doors = [...this._doorMap().values()].filter(x => x.enabled).map(x => ({ id: x.id, name: x.name, oncafe: x.oncafe, raw: x.raw, chs: x.chs, reader: x.d.reader || null, readerChannels: readerChannels(x.d.reader).filter(c => !/^(wiegand|osdp):/.test(c) || known.has(c)), dpsNc: !!(x.d.dps && x.d.dps.reverseSense) })); } catch { /* damaged door config: no doors page source */ }
+    const inv = this.cloud.inv ? { doors: this.cloud.inv.doors || [], controllers: this.cloud.inv.controllers || [] } : null;
+    return suggestWiring({ doors, wiring: this.wiring(), seen: this.channelsSeen(), probe: this._probe(), inventory: inv });
+  }
+  /** Take suggested rows into the wiring map (only channels a door does not own: those are set on the Doors page). */
+  applySuggestion(chs, who) {
+    const sug = this.suggest();
+    const w = JSON.parse(JSON.stringify(this.wiring()));
+    const done = [], skipped = [];
+    for (const ch of [].concat(chs || [])) {
+      const r = sug.rows.find(x => x.ch === ch);
+      if (!r) continue;
+      const cur = w[ch];
+      if (cur && (cur.src || cur.via)) { skipped.push({ ch, why: 'owned by a door: change it on the Doors page' }); continue; }
+      w[ch] = { ...(cur || {}), role: r.role === 'card' ? 'card' : r.role, ...(r.door ? { door: r.door } : {}), ...(r.role === 'dps' && r.active ? { active: r.active } : {}), note: (cur && cur.note) || `suggested (${r.source})` };
+      done.push(ch);
+    }
+    if (done.length) this.saveWiring(w, `event trace suggestion (${who})`, wiringVersion(this.wiring()));
+    return { applied: done, skipped };
+  }
+
+  /**
+   * Discover: prove the wiring by moving it, one thing at a time, and watching what the controller reports.
+   *   relays   toggle each relay away from its present state for holdMs and back; the controller's door / input event names the role
+   *   readers  present the first sync card on each Wiegand / OSDP reader; the decision names the door
+   *   locks    (Commands on) a short OnCAFE temporary unlock of each door under test; the Aether input that turns on watches its strike
+   * Needs the cloud feed connected. Results: backend/data/trace/discover.json.
+   */
+  async discover(opt = {}, who = '?') {
+    if (this.discovering && this.discovering.state === 'running') throw err('Discover is already running', 409);
+    if (this.test && this.test.state !== 'done') throw err('A test is running', 409);
+    if (this.cloud.status().push.state !== 'connected') throw err('Connect the cloud feed first (Setup › OnCAFE): Discover watches what the controller reports');
+    const relays = (Array.isArray(opt.relays) ? opt.relays : [0, 1, 2, 3, 4, 5, 6, 7]).map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < 8);
+    if (relays.length && !this.deps.gpioQueue) throw err('The relay board is not available on this Pi');
+    const holdMs = int(opt.holdMs, 500, 10000, 2000), watchMs = int(opt.watchMs, 2000, 30000, 6000);
+    const D = this.discovering = { state: 'running', at: Date.now(), who: String(who).slice(0, 60), step: '', done: 0, total: 0, relays: [], readers: [], locks: [], error: null, abort: false };
+    const seenAfter = (t0, ms, f) => new Promise(resolve => {
+      const got = [];
+      const on = e => { if (e.lane === 'cloud' && e.type && e.src !== 'command' && f(e)) got.push(e); };
+      this.on('event', on);
+      setTimeout(() => { this.off('event', on); resolve(got); }, ms);
+    });
+    // what each relay is now (the journal's last write), so a toggle always comes back to it
+    const lastRelay = ch => { for (let i = this.live.length - 1; i >= 0; i--) { const e = this.live[i]; if (e.src === 'journal' && e.info && e.info.ch === `relay:${ch}`) return e.info.v ? 1 : 0; } return 0; };
+    const rolesOf = list => {
+      const t = list.map(e => e.type);
+      if (t.some(x => /^(open|closed|dooropen|doorclosed|doorforcedopen)$/.test(x))) return 'dps';
+      if (t.some(x => /^rex/.test(x))) return 'rex';
+      if (t.some(x => /^io-|input/.test(x))) return 'input';
+      return null;
+    };
+    (async () => {
+      try {
+        const readers = [];
+        if (opt.readers !== false) {
+          try { const wm = this.deps.getWiegand && this.deps.getWiegand(); if (wm && wm.getReaders) for (const r of wm.getReaders()) readers.push({ kind: 'wiegand', id: String(r.id), name: r.name || String(r.id) }); } catch { /* */ }
+          try { const om = this.deps.getOsdp && this.deps.getOsdp(); if (om && om.getReaders) for (const r of [].concat(om.getReaders() || [])) readers.push({ kind: 'osdp', id: String(r.id ?? r.readerId), name: r.name || `OSDP ${r.address}` }); } catch { /* */ }
+        }
+        const doorsUnderTest = opt.locks !== false && this.settings.commands.enabled ? this.settings.cloud.doors.slice(0, 16) : [];
+        D.total = relays.length + readers.length + doorsUnderTest.length;
+        for (const ch of relays) {
+          if (D.abort) break;
+          D.step = `REL${ch + 1}`;
+          const rest = lastRelay(ch), t0 = Date.now();
+          const wA = seenAfter(t0, Math.min(holdMs, watchMs) + 200, () => true);
+          await this.deps.gpioQueue.enqueue('setRelay', ch, !rest);
+          const away = await wA;
+          await this.deps.gpioQueue.enqueue('setRelay', ch, !!rest);
+          const back = await seenAfter(Date.now(), watchMs, () => true);
+          const role = rolesOf(away) || rolesOf(back);
+          const ev = away.concat(back);
+          const door = (ev.find(e => e.door && e.door.id) || {}).door || null;
+          let active;
+          if (role === 'dps') { const first = away.find(e => /open|closed/.test(e.type)); active = first ? (/open/.test(first.type) === !rest ? 'open' : 'closed') : undefined; }
+          D.relays.push({ ch: `relay:${ch}`, role, door: door ? door.id : null, doorName: door ? door.name : null, active, rest, events: ev.slice(0, 6).map(e => ({ type: e.type, door: e.door ? e.door.name || e.door.id : null })) });
+          D.done++;
+        }
+        for (const r of readers) {
+          if (D.abort) break;
+          D.step = `reader ${r.name}`;
+          const c = this.settings.sync.cards[0] || { fc: 123, cn: '1234' };
+          const t0 = Date.now();
+          const w = seenAfter(t0, watchMs, e => !!e.access);
+          if (r.kind === 'wiegand') await this.deps.getWiegand().sendCard(r.id, Number(c.fc), Number(c.cn), this.settings.sync.format || null);
+          else await this.deps.getOsdp().sendCardRead(r.id, { facility: Number(c.fc), card: String(c.cn) }, this.settings.sync.format || 'wiegand26');
+          const got = await w;
+          const g = got.find(e => e.door && e.door.id);
+          D.readers.push({ ch: `${r.kind}:${r.id}`, name: r.name, door: g ? g.door.id : null, doorName: g ? g.door.name : null, type: g ? g.type : null });
+          D.done++;
+        }
+        for (const door of doorsUnderTest) {
+          if (D.abort) break;
+          const name = (((this.cloud.inv || {}).doors || []).find(x => x.id === door) || {}).name || door.slice(0, 8);
+          D.step = `unlock ${name}`;
+          const t0 = Date.now();
+          const ons = [];
+          const on = e => { if (e.src === 'journal' && e.info && e.info.v === 1 && /^(opto|emu-out|door-out)$/.test(e.type)) ons.push(e); };
+          this.on('event', on);
+          let r = null;
+          try { r = await this.command({ kind: 'override', target: door, value: 'unlock', seconds: 8 }, `${who} (Discover)`); } catch (e) { r = { ok: false, error: e.message }; }
+          await sleep(watchMs);
+          this.off('event', on);
+          const first = ons[0];
+          D.locks.push({ door, doorName: name, ok: !!(r && r.ok), error: r && !r.ok ? r.error : null, ch: first ? first.info.ch : null, ms: first ? first.at - t0 : null });
+          D.done++;
+        }
+      } catch (e) { D.error = e.message; }
+      finally {
+        D.state = 'done'; D.end = Date.now(); D.step = '';
+        // a probe that only covered some channels (stopped early, or relays picked) keeps the earlier proof for the rest
+        const prev = this._probe() || {};
+        const merge = (now, old, k) => now.concat((old || []).filter(o => !now.some(n => n[k] === o[k])));
+        const keep = { at: D.at, end: D.end, who: D.who, relays: merge(D.relays, prev.relays, 'ch'), readers: merge(D.readers, prev.readers, 'ch'), locks: merge(D.locks, prev.locks, 'door'), error: D.error, aborted: D.abort };
+        try { writeAtomic(DISCOVER, JSON.stringify(keep, null, 1)); } catch { /* */ }
+      }
+    })();
+    return this.discoverStatus();
+  }
+  stopDiscover() { if (this.discovering && this.discovering.state === 'running') this.discovering.abort = true; return this.discoverStatus(); }
+  discoverStatus() {
+    const D = this.discovering;
+    if (!D) { const p = this._probe(); return p ? { state: 'done', ...p, done: null, total: null } : null; }
+    return { state: D.state, at: D.at, end: D.end || null, who: D.who, step: D.step, done: D.done, total: D.total, relays: D.relays, readers: D.readers, locks: D.locks, error: D.error, aborted: D.abort };
   }
 
   // ── TRACE-4: test sequences ─────────────────────────────────────────────
@@ -1078,6 +1240,7 @@ class TraceEngine extends EventEmitter {
 
   async runTest(seqId, opt = {}, who = '?') {
     if (this.test && this.test.state !== 'done') throw err('A test is already running', 409);
+    if (this.discovering && this.discovering.state === 'running') throw err('Discover is running', 409);
     const q = this.sequences().find(x => x.id === seqId);
     if (!q) throw err('That sequence no longer exists', 404);
     const seq = cleanSequence({ ...q, ...(opt.repeat ? { repeat: opt.repeat } : {}), ...(opt.minutes != null ? { minutes: opt.minutes } : {}), ...(opt.gapMs != null ? { gapMs: opt.gapMs } : {}) });
@@ -1244,6 +1407,7 @@ class TraceEngine extends EventEmitter {
       pendingReverts: this.pendingReverts(),
       doorSync: this.doorSync || null,
       test: this.testStatus(),
+      clockCheck: this.clockCheck || null,
       alertSeq: this.alertSeq,
       alerts: this.alerts.slice(-5),
       inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,
