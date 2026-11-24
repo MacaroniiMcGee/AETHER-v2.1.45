@@ -38,6 +38,7 @@ function frameToEvent(f, readers = [], opt = {}) {
   if (!f || f.isReply) return null;
   const name = String(f.name || '');
   if (name !== 'osdp_LED' && name !== 'osdp_BUZ') return null;
+  if (f.encrypted || f.checkOk === false) return null;   // secure channel: the payload is ciphertext; bad checksum: not trusted
   const rd = readers.find(r => Number(r.address) === Number(f.address) && (!r.port || !f.port || r.port === f.port)) || null;
   // a reader on an emulated board (the panel polls Aether's emulated RI4S / RI2MS): emu:<board>:rdr:<reader on that board>
   const onBoard = !rd && (/controller-emulator/.test(String(f.port || '')) || (!!f.port && (opt.emuPorts || []).includes(f.port)));

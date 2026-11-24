@@ -37,6 +37,7 @@ const REVERTS = path.join(BASE, 'pending-reverts.json');
 const SEQUENCES = path.join(BASE, 'sequences.json');      // TRACE-4 test sequences
 const TOUCHED = path.join(BASE, 'test-touched.json');     // DPS / REX / commands a running test has engaged (released after a restart)
 const TEST_LOG = 'test-log.jsonl';
+const DISCOVER_TOUCH = path.join(BASE, 'discover-touched.json');   // TRACE-5: the relay Discover has switched away (put back after a restart)
 const DISCOVER = path.join(BASE, 'discover.json');          // TRACE-5: what the last Discover probe proved                         // per run: one line per test step
 const DOORS_CONFIG = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');   // Doors page (routes-doors.js)   // commands to turn back, kept across restarts
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
@@ -174,6 +175,7 @@ class TraceEngine extends EventEmitter {
       if (r.test && !r.test.endedAt) this._patchMeta(r.id, { test: { ...r.test, endedAt: r.lastAt || Date.now(), aborted: true, error: 'The backend restarted during the test' } });
     }
     setTimeout(() => this._releaseOrphans().catch(e => console.warn('[Trace] could not release what a test left engaged:', e.message)), 3000).unref();
+    setTimeout(() => this._releaseDiscoverOrphan().catch(e => console.warn('[Trace] could not put back the relay Discover left switched:', e.message)), 3000).unref();
     for (const p of this._reverts()) this._armRevert(p);
     this._importIfNewer();   // Doors page saved while Event Trace was not looking: its doors win   // turn-backs that were waiting when the backend stopped
     this._alertTimer = setInterval(() => this._alertTick(), 2000);   // TRACE-4 live alerts
@@ -355,6 +357,7 @@ class TraceEngine extends EventEmitter {
   /** Send the sync markers now (two cards, or one DPS/input pulse). set: start | end | check */
   async sendSync(set = 'check') {
     if (this.syncBusy) throw err('Sync markers are already being sent', 409);
+    if (this.discovering && this.discovering.state === 'running') throw err('Discover is running: sync markers wait until it is done', 409);
     this.syncBusy = true;
     const s = this.settings.sync;
     const sent = [];
@@ -924,6 +927,15 @@ class TraceEngine extends EventEmitter {
 
 
   // ── TRACE-5: reader feedback (OSDP LED / buzzer from OSDP Trace) ────────
+  async _releaseDiscoverOrphan() {
+    let x = null;
+    try { x = JSON.parse(fs.readFileSync(DISCOVER_TOUCH, 'utf8')); } catch { return; }
+    if (!x || !Number.isInteger(x.ch) || !this.deps.gpioQueue || (this.discovering && this.discovering.state === 'running')) return;
+    await this.deps.gpioQueue.enqueue('setRelay', x.ch, !!x.rest);
+    try { fs.unlinkSync(DISCOVER_TOUCH); } catch { /* */ }
+    console.log(`[Trace] Discover was interrupted by a restart: put REL${x.ch + 1} back ${x.rest ? 'on' : 'off'}`);
+  }
+
   attachOsdpTrace(hub) {
     if (!hub || typeof hub.on !== 'function' || this._osdpHub === hub) return;
     this._osdpHub = hub;
@@ -985,6 +997,7 @@ class TraceEngine extends EventEmitter {
   async discover(opt = {}, who = '?') {
     if (this.discovering && this.discovering.state === 'running') throw err('Discover is already running', 409);
     if (this.test && this.test.state !== 'done') throw err('A test is running', 409);
+    if (this.syncBusy) throw err('Sync markers are being sent: try again in a few seconds', 409);
     if (this.cloud.status().push.state !== 'connected') throw err('Connect the cloud feed first (Setup › OnCAFE): Discover watches what the controller reports');
     const relays = (Array.isArray(opt.relays) ? opt.relays : [0, 1, 2, 3, 4, 5, 6, 7]).map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < 8);
     if (relays.length && !this.deps.gpioQueue) throw err('The relay board is not available on this Pi');
@@ -994,7 +1007,9 @@ class TraceEngine extends EventEmitter {
       const got = [];
       const on = e => { if (e.lane === 'cloud' && e.type && e.src !== 'command' && f(e)) got.push(e); };
       this.on('event', on);
-      setTimeout(() => { this.off('event', on); resolve(got); }, ms);
+      const end = Date.now() + ms;
+      const tick = () => { if (D.abort || Date.now() >= end) { this.off('event', on); resolve(got); } else setTimeout(tick, Math.min(200, end - Date.now())); };
+      setTimeout(tick, Math.min(200, ms));
     });
     // what each relay is now (the journal's last write), so a toggle always comes back to it
     const lastRelay = ch => { for (let i = this.live.length - 1; i >= 0; i--) { const e = this.live[i]; if (e.src === 'journal' && e.info && e.info.ch === `relay:${ch}`) return e.info.v ? 1 : 0; } return 0; };
@@ -1017,11 +1032,20 @@ class TraceEngine extends EventEmitter {
         for (const ch of relays) {
           if (D.abort) break;
           D.step = `REL${ch + 1}`;
-          const rest = lastRelay(ch), t0 = Date.now();
+          // the relay's real state (not what this process last wrote: it may have restarted), so it always comes back to it
+          let rest = lastRelay(ch);
+          try { const r = await this.deps.gpioQueue.enqueue('getRelay', ch); if (r && 'state' in r) rest = r.state ? 1 : 0; } catch { /* keep the journal's */ }
+          const t0 = Date.now();
           const wA = seenAfter(t0, Math.min(holdMs, watchMs) + 200, () => true);
-          await this.deps.gpioQueue.enqueue('setRelay', ch, !rest);
-          const away = await wA;
-          await this.deps.gpioQueue.enqueue('setRelay', ch, !!rest);
+          try { writeAtomic(DISCOVER_TOUCH, JSON.stringify({ ch, rest, at: t0 })); } catch { /* */ }
+          let away;
+          try { await this.deps.gpioQueue.enqueue('setRelay', ch, !rest); away = await wA; }
+          finally {
+            let put = false, last = null;
+            for (let i = 0; i < 4 && !put; i++) { try { await this.deps.gpioQueue.enqueue('setRelay', ch, !!rest); put = true; } catch (e) { last = e; await sleep(300); } }
+            if (!put) throw err(`REL${ch + 1} could not be put back (${last && last.message}): set it by hand`);
+            try { fs.unlinkSync(DISCOVER_TOUCH); } catch { /* */ }
+          }
           const back = await seenAfter(Date.now(), watchMs, () => true);
           // other doors keep talking while a relay is toggled: only a (role, door) that answered while the relay was away counts,
           // and the one with the most answers (away and back) wins
@@ -1063,7 +1087,7 @@ class TraceEngine extends EventEmitter {
           this.on('event', on);
           let r = null;
           try { r = await this.command({ kind: 'override', target: door, value: 'unlock', seconds: 8 }, `${who} (Discover)`); } catch (e) { r = { ok: false, error: e.message }; }
-          await sleep(watchMs);
+          for (const end = Date.now() + watchMs; Date.now() < end && !D.abort;) await sleep(200);
           this.off('event', on);
           const first = ons[0];
           D.locks.push({ door, doorName: name, ok: !!(r && r.ok), error: r && !r.ok ? r.error : null, ch: first ? first.info.ch : null, ms: first ? first.at - t0 : null });

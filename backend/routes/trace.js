@@ -241,8 +241,13 @@ module.exports = function traceRoutes() {
     if (!ownOrigin(req)) return res.status(403).json({ error: 'Only the Aether page itself can set the Jira login' });
     try { const st = jira.configure(req.body || {}); let me = null; if (st.configured && (req.body || {}).test) me = await jira.whoAmI(); res.json({ ...st, me }); } catch (e) { fail(res, e); }
   });
-  router.get('/jira/issue/:key', async (req, res) => { try { res.json(await jira.issue(req.params.key)); } catch (e) { fail(res, e); } });
+  // the Jira login is the admin's: only admins use it, even to read
+  router.get('/jira/issue/:key', async (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can use the Jira login' });
+    try { res.json(await jira.issue(req.params.key)); } catch (e) { fail(res, e); } });
   router.post('/runs/:id/import/jira', express.json(), async (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can use the Jira login' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Only the Aether page itself can import from Jira' });
     try {
       const b = req.body || {};
       const iss = await jira.issue(b.key);
@@ -297,6 +302,7 @@ module.exports = function traceRoutes() {
   });
   router.post('/discover/stop', express.json(), (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can stop Discover' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Discover can only be stopped from the Aether page itself' });
     res.json({ current: eng.stopDiscover() });
   });
 

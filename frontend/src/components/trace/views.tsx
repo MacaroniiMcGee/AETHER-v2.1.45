@@ -92,7 +92,9 @@ export const IntegrityCard: React.FC<{ a: Analysis }> = ({ a }) => {
 
 export const ClockCard: React.FC<{ a: Analysis; live?: import('./api').ClockCheck | null; onCheck?: () => void }> = ({ a, live, onCheck }) => {
   const c = a.clock;
-  const cc = a.meta?.controllerClocks || live || null;
+  // a run keeps what was read when it started; a newer "Check now" wins (and says when it was read)
+  const rc = a.meta?.controllerClocks || null;
+  const cc = live && (!rc || (live.at || 0) > (rc.at || 0)) ? live : rc;
   const sets = ['start', 'check', 'end'].map(set => ({ set, rows: c.sync.filter(x => x.set === set) })).filter(x => x.rows.length);
   return (
     <div className="rounded-hv-xs bg-hv-widget ring-1 ring-inset ring-hv-line px-3 py-2 text-xs">

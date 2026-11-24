@@ -861,6 +861,8 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       frameToEvent({ name: 'osdp_LED', isReply: false, address: 1, port: 'p', dataHex: led(1), ts: T0 + 10200 }, [{ id: 'rd1', address: 1 }]),
     ];
     assert.strictEqual(frameToEvent({ name: 'osdp_LED', isReply: false, address: 3, port: '/dev/ttyUSB1', dataHex: led(1), ts: T0 }, [], { emuPorts: ['/dev/ttyUSB1'] }).info.ch, 'emu:3:rdr:0', 'controller emulator on a serial port');
+    assert.strictEqual(frameToEvent({ name: 'osdp_LED', isReply: false, address: 1, port: 'p', dataHex: led(1), ts: T0, encrypted: true }, [{ id: 'rd1', address: 1 }]), null, 'secure channel: ciphertext is not read as a colour');
+    assert.strictEqual(frameToEvent({ name: 'osdp_LED', isReply: false, address: 1, port: 'p', dataHex: led(1), ts: T0, checkOk: false }, [{ id: 'rd1', address: 1 }]), null, 'bad checksum ignored');
     const r = correlate(evs, [], { thresholds: {}, expectations: [] }, { wiring: {} });
     const c1 = r.traces.find(t => t.at === T0), c2 = r.traces.find(t => t.at === T0 + 10000);
     assert.strictEqual(c1.latency.reader, 180); assert.strictEqual(c1.reader.colour, 'green'); assert.strictEqual(c1.reader.beep, 'beep');
@@ -887,6 +889,8 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
           if (q.url.startsWith('/rest/api/3/issue/OCF-7412?')) return s2.end(JSON.stringify({ fields: { summary: 'Door event late', status: { name: 'Open' }, attachment: [{ id: '101', filename: 'lobby.har', size: 10 }, { id: '102', filename: 'notes.txt', size: 3 }] } }));
           if (q.url === '/rest/api/3/attachment/content/101') { s2.writeHead(302, { Location: `http://127.0.0.1:${srv.address().port}/media/101` }); return s2.end(); }
           if (q.url === '/media/101') return s2.end(harText);
+          if (q.url === '/loop') { s2.writeHead(302, { Location: '/loop' }); return s2.end(); }
+          if (q.url === '/rest/api/3/attachment/content/103') { s2.writeHead(302, { Location: '/loop' }); return s2.end(); }
           if (q.url.endsWith('/attachments')) return s2.end(JSON.stringify([{ id: '900', filename: 'x.csv', size: 5 }]));
           if (q.url.endsWith('/comment')) return s2.end('{}');
           if (q.url === '/rest/api/3/myself') return s2.end(JSON.stringify({ displayName: 'QA Tester' }));
@@ -913,6 +917,8 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       await jira.comment('OCF-7412', 'line 1\nline 2');
       assert.strictEqual(JSON.parse(seenReq.find(x => x.u.endsWith('/comment')).body).body.content.length, 2);
       await assert.rejects(jira.issue('not a key'), /not a Jira issue key/);
+      await assert.rejects(jira.download('103'), /too many times/);
+      assert(jira._redirectOk('api.media.atlassian.com') && jira._redirectOk('hanwhavision.atlassian.net') && !jira._redirectOk('10.0.0.1') && !jira._redirectOk('atlassian.net.evil.com'));
       srv.close(); delete process.env.AETHER_TRACE_JIRA_TEST;
     }
     ok('Jira: HARs of a ticket, download through the media redirect without the login, attachments (multipart), comment; token file mode 600; site must be *.atlassian.net');
@@ -938,10 +944,10 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     {
       const { TraceEngine } = require('../trace/engine');
       const e = new TraceEngine();
-      const writes = [];
+      const writes = []; let failedOnce = false;
       const cloud = (type, door, extra = {}) => setTimeout(() => e.add(fromCloud({ eventTimestamp: Date.now(), doorId: door, doorName: door === 'D1' ? 'Lobby' : 'Dock', ...extra, eventMeta: { eventId: Math.random().toString(16).slice(2), events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at: Date.now() })[0]), 150);
       e.deps = {
-        gpioQueue: { async enqueue(op, ch, v) { writes.push([ch, v]); if (ch === 2) cloud(v ? 'closed' : 'open', 'D1'); if (ch === 3) { cloud(v ? 'rexactivated' : 'rexdeactivated', 'D2'); if (v) cloud('open', 'D1'); } return {}; } },
+        gpioQueue: { async enqueue(op, ch, v) { if (op === 'getRelay') return { state: ch === 3 ? 1 : 0 }; writes.push([ch, v]); if (ch === 2 && v === false && !failedOnce) { failedOnce = true; throw new Error('i2c busy'); } if (ch === 2) cloud(v ? 'closed' : 'open', 'D1'); if (ch === 3) { cloud(v ? 'rexactivated' : 'rexdeactivated', 'D2'); if (v) cloud('open', 'D1'); } return {}; } },
         getWiegand: () => ({ getReaders: () => [{ id: 'wg-9', name: 'Wiegand 9' }], async sendCard() { cloud('accessdenied', 'D2', { cardNumber: '1234' }); } }),
       };
       e.cloud.status = () => ({ push: { state: 'connected' }, api: {} });
@@ -952,13 +958,23 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       assert.strictEqual(r2.role, 'dps'); assert.strictEqual(r2.door, 'D1'); assert.strictEqual(r2.active, 'closed', 'relay on → closed: a normally-closed contact');
       assert.strictEqual(r3.role, 'rex', 'another door opening meanwhile does not win'); assert.strictEqual(r3.door, 'D2');
       assert.strictEqual(d.readers[0].door, 'D2');
-      assert.deepStrictEqual(writes, [[2, true], [2, false], [3, true], [3, false]], 'every relay toggled away and back');
+      assert.deepStrictEqual(writes, [[2, true], [2, false], [2, false], [3, false], [3, true]], 'every relay toggled away from its real state and back (a failed put-back is retried)');
+      assert(!fs.existsSync(path.join(__dirname, '..', 'data', 'trace', 'discover-touched.json')), 'nothing left marked as switched');
       await assert.rejects(e.discover({}, 't').then(() => e.discover({}, 't')), /already running/);
       e.stopDiscover(); for (let i = 0; i < 100 && e.discovering.state !== 'done'; i++) await sleep(100);
       const s2 = e.suggest();
       assert(s2.rows.some(x => x.ch === 'relay:2' && x.source === 'probe'));
     }
-    ok('Discover: relay pulses prove DPS (and NC) / REX and their doors (other doors\' traffic meanwhile ignored), a card proves a reader; always toggled back; one at a time; feeds the suggestion');
+    // a restart while Discover had a relay switched: it is put back at start
+    {
+      const { TraceEngine } = require('../trace/engine');
+      fs.writeFileSync(path.join(__dirname, '..', 'data', 'trace', 'discover-touched.json'), JSON.stringify({ ch: 5, rest: 1, at: Date.now() }));
+      const e2 = new TraceEngine(); const w2 = [];
+      e2.deps = { gpioQueue: { async enqueue(op, ch, v) { w2.push([op, ch, v]); return {}; } } };
+      await e2._releaseDiscoverOrphan();
+      assert.deepStrictEqual(w2, [['setRelay', 5, true]]); assert(!fs.existsSync(path.join(__dirname, '..', 'data', 'trace', 'discover-touched.json')));
+    }
+    ok('Discover: relay pulses prove DPS (and NC) / REX and their doors (other doors\' traffic meanwhile ignored), a card proves a reader; always toggled back to the relay\'s real state (retried, and after a restart); one at a time; feeds the suggestion');
   }
 
   console.log(`\n${passed} checks passed`);

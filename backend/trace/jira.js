@@ -42,7 +42,9 @@ function configure(b = {}) {
   return status();
 }
 
-function request(method, p, { body, headers = {}, raw = false, url } = {}) {
+// where Jira may send a download: its own sites and Atlassian's media service, never anything else (no LAN addresses)
+const REDIRECT_OK = h => /^[a-z0-9-]+\.atlassian\.net$/i.test(h) || /^api\.media\.atlassian\.com$/i.test(h) || /\.media\.atlassian\.com$/i.test(h);
+function request(method, p, { body, headers = {}, raw = false, url, hops = 0 } = {}) {
   const c = load();
   if (!url && !(c.site && c.email && c.token)) throw err('Set up Jira first (Setup › Jira: site, e-mail and API token)', 400);
   const target = new URL(url || (testBase() ? testBase() + p : `https://${c.site}${p}`));
@@ -57,8 +59,11 @@ function request(method, p, { body, headers = {}, raw = false, url } = {}) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && method === 'GET') {
         res.resume();
         const next = new URL(res.headers.location, target);
-        if (next.protocol !== 'https:' && !testBase()) return reject(err('Jira redirected to a non-HTTPS address'));
-        return resolve(request('GET', null, { raw, url: next.toString() }));
+        if (hops >= 5) return reject(err('Jira redirected too many times'));
+        if (!testBase() && (next.protocol !== 'https:' || !REDIRECT_OK(next.hostname))) return reject(err(`Jira redirected to ${next.protocol}//${next.hostname}, which is not an Atlassian address`));
+        // back to the Jira site itself: the login goes along again; anywhere else (the media host) it does not
+        const home = c.site && next.hostname.toLowerCase() === c.site.toLowerCase();
+        return resolve(home ? request('GET', next.pathname + next.search, { raw, hops: hops + 1 }) : request('GET', null, { raw, url: next.toString(), hops: hops + 1 }));
       }
       const chunks = []; let n = 0;
       res.on('data', d => { n += d.length; if (n > MAX_DOWNLOAD) { rq.destroy(); reject(err('Over 60 MB', 413)); return; } chunks.push(d); });
@@ -122,4 +127,4 @@ async function comment(k, text) {
   return request('POST', `/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { body: { body: { type: 'doc', version: 1, content } } });
 }
 
-module.exports = { status, configure, whoAmI, issue, download, attach, comment, checkKey };
+module.exports = { status, configure, whoAmI, issue, download, attach, comment, checkKey, _redirectOk: REDIRECT_OK };

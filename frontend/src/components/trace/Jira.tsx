@@ -34,6 +34,7 @@ export const JiraButtons: React.FC<{ api: TraceApi; runId: string; admin: boolea
     try { const r = await api.sendJira(runId, key.trim(), comment); setMode(null); onSent(`Sent to ${r.key}: ${r.attached.map(a => a.filename).join(', ')}${r.commented ? ' and a summary comment' : ''}`); }
     catch (e) { setErr((e as Error).message); } finally { setBusy(null); }
   };
+  if (!admin) return null;   // the Jira login is the admin's: both directions use it
   return (
     <>
       <div className="relative">
