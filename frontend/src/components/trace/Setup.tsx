@@ -247,7 +247,7 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
 
       {/* TRACE-4: live alerts */}
       <Card icon={<Bell size={16} />} title="Alerts" sub="Tell me as soon as a trace fails, while I'm doing something else.">
-        <Toggle on={s.alerts?.enabled !== false} onChange={v => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), enabled: v }; return x; })} label="Pop up an alert on this page when a trace fails" />
+        <Toggle on={s.alerts?.enabled !== false} onChange={v => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), enabled: v }; return x; })} label="Pop up an alert on the Event Trace page" />
         <div className="flex items-center gap-2 text-xs">
           <span className="text-hv-text-2">Alert on</span>
           <Select className="!w-56" value={s.alerts?.level || 'fail'} onChange={e => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), level: e.target.value as 'fail' | 'warn' }; return x; })}>
@@ -255,7 +255,7 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
           </Select>
         </div>
         <Toggle on={s.alerts?.automation !== false} onChange={v => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), automation: v }; return x; })} label="Also hand alerts to Automation (trigger “Event Trace alert”)" />
-        <div className="text-xs text-hv-text-3">Alerts are checked every 2 seconds while a run is recording or the cloud feed is connected. A trace still waiting for its answer is given its match window ({fmtMs(s.thresholds.matchWindowMs)}) first. In Automation, a rule with the “Event Trace alert” trigger can pulse a relay, send a card or log a message.</div>
+        <div className="text-xs text-hv-text-3">Alerts are checked while a run is recording or the cloud feed is connected (every 2 s; less often on very long runs). A trace is judged once its answer and cloud push are in, or once its windows have passed (about {fmtMs(Math.max(s.thresholds.matchWindowMs, s.thresholds.inputWindowMs) + s.thresholds.pushFail)}). In Automation, a rule with the “Event Trace alert” trigger can pulse a relay, send a card or log a message.</div>
       </Card>
 
       {/* Expectations */}

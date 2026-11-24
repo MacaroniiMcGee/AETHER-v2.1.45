@@ -340,7 +340,7 @@ def main():
             "              <option value=\"any\">Any</option><option value=\"card\">Card</option><option value=\"input\">Input (DPS / REX)</option><option value=\"output\">Output (strike)</option><option value=\"command\">Command</option>\n"
             "            </select>\n"
             "          </Field>\n"
-            "          <p className=\"sm:col-span-2 text-[11px] text-hv-text-3\">Event Trace raises alerts while a run is recording or its cloud feed is connected (Setup › Alerts).</p>\n"
+            "          <p className=\"sm:col-span-2 text-[11px] text-hv-text-3\">Event Trace raises alerts while a run is recording or its cloud feed is connected. “Is slow” needs Setup › Alerts set to “Failures and slow traces”.</p>\n"
             "        </div>\n"
             "      )}")
         return s

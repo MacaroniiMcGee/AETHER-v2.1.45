@@ -60,7 +60,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
   const alertSeq = status?.alertSeq ?? 0;
   useEffect(() => {
     if (!status || status.settings.alerts?.enabled === false) return;
-    if (alertSeen.current == null) { alertSeen.current = alertSeq; return; }
+    if (alertSeen.current == null || alertSeq < alertSeen.current) { alertSeen.current = alertSeq; return; }   // first look, or the backend restarted (count back to 0)
     if (alertSeq <= alertSeen.current) return;
     const since = alertSeen.current;
     alertSeen.current = alertSeq;

@@ -32,6 +32,8 @@ const RUNS = path.join(BASE, 'runs');
 const SETTINGS = path.join(BASE, 'settings.json');
 const REVERTS = path.join(BASE, 'pending-reverts.json');
 const SEQUENCES = path.join(BASE, 'sequences.json');      // TRACE-4 test sequences
+const TOUCHED = path.join(BASE, 'test-touched.json');     // DPS / REX / commands a running test has engaged (released after a restart)
+const TEST_LOG = 'test-log.jsonl';                         // per run: one line per test step
 const DOORS_CONFIG = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');   // Doors page (routes-doors.js)   // commands to turn back, kept across restarts
 const REPORTS = path.join(__dirname, '..', 'data', 'analytics', 'reports');
 const ANALYTICS_SETTINGS = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');   // wiring map shared with Product Test
@@ -161,7 +163,11 @@ class TraceEngine extends EventEmitter {
       setTimeout(() => this.cloud.start(this.settings.cloud).catch(e => console.warn('[Trace] cloud auto-connect:', e.message)), 4000).unref();
     }
     // a run left open by a restart is closed, not resumed
-    for (const r of this.listRuns()) if (!r.end) this._patchMeta(r.id, { end: r.lastAt || r.start, endReason: 'backend restarted' });
+    for (const r of this.listRuns()) {
+      if (!r.end) this._patchMeta(r.id, { end: r.lastAt || r.start, endReason: 'backend restarted' });
+      if (r.test && !r.test.endedAt) this._patchMeta(r.id, { test: { ...r.test, endedAt: r.lastAt || Date.now(), aborted: true, error: 'The backend restarted during the test' } });
+    }
+    setTimeout(() => this._releaseOrphans().catch(e => console.warn('[Trace] could not release what a test left engaged:', e.message)), 3000).unref();
     for (const p of this._reverts()) this._armRevert(p);
     this._importIfNewer();   // Doors page saved while Event Trace was not looking: its doors win   // turn-backs that were waiting when the backend stopped
     this._alertTimer = setInterval(() => this._alertTick(), 2000);   // TRACE-4 live alerts
@@ -406,7 +412,7 @@ class TraceEngine extends EventEmitter {
     s.wiring = wiring;
     if (doorsAt) s.wiringDoorsAt = doorsAt;   // door config version last imported (start-up check)
     writeAtomic(ANALYTICS_SETTINGS, JSON.stringify(s, null, 1));
-    this._wiring = null; this._cache = null;
+    this._wiring = null; this._cache = null; this._caches = {};
     return s.wiring;
   }
   _readDoorConfig() {
@@ -700,6 +706,7 @@ class TraceEngine extends EventEmitter {
   }
   _armRevert(p) {
     const t = setTimeout(async () => {
+      if (!this._reverts().some(x => x.id === p.id)) return;   // already turned back (a test sent the "off" itself)
       const { r } = await this._send(p.cmd, {}, `Aether (${p.who}, automatic turn-back)`, { url: p.url, org: p.org });
       this._saveReverts(this._reverts().filter(x => x.id !== p.id));
       if (!r.ok) console.error(`[Trace] automatic turn-back failed (${p.cmd.kind} ${p.cmd.targetName || p.cmd.target}): ${r.error}`);
@@ -711,7 +718,7 @@ class TraceEngine extends EventEmitter {
   // ── runs ───────────────────────────────────────────────────────────────
   _metaPath(id) { return path.join(runDir(id), 'meta.json'); }
   _patchMeta(id, patch) {
-    try { const p = this._metaPath(id); const m = JSON.parse(fs.readFileSync(p, 'utf8')); Object.assign(m, patch); fs.writeFileSync(p, JSON.stringify(m)); return m; } catch { return null; }
+    try { const p = this._metaPath(id); const m = JSON.parse(fs.readFileSync(p, 'utf8')); Object.assign(m, patch); writeAtomic(p, JSON.stringify(m)); return m; } catch { return null; }
   }
   listRuns() {
     try {
@@ -766,8 +773,10 @@ class TraceEngine extends EventEmitter {
     return out;
   }
 
-  analyze(id) {
+  analyze(id, slot = 'ui') {
     if (id) runDir(id);
+    this._caches = this._caches || {};
+    this._cache = this._caches[slot] || null;   // one cache per caller (page, alerts, compare) so they never evict each other
     const key = `${id || 'live'}|${id && this.run && this.run.id === id ? this.run.count : id ? 'done' : this.seq}|${this._wiring ? this._wiring.mtime : ''}|${this._settingsRev || 0}`;
     if (this._cache && this._cache.key === key && Date.now() - this._cache.at < (id && !(this.run && this.run.id === id) ? 60000 : 1000)) return this._cache.value;
     const meta = id ? (this.run && this.run.id === id ? { id: this.run.id, name: this.run.name, start: this.run.start, end: null, syncs: this.run.syncs, imports: this.run.imports } : (() => { try { return JSON.parse(fs.readFileSync(this._metaPath(id), 'utf8')); } catch { return null; } })()) : null;
@@ -777,12 +786,13 @@ class TraceEngine extends EventEmitter {
     const res = correlate(events, syncs, { ...this.settings, doorConfig: this.settings.cloud.doorConfig }, { wiring: this.wiring() });
     res.integrity = integrity(events, { pollMs: this.settings.cloud.pollMs, apiEnabled: this.settings.cloud.poll, now: meta && meta.end ? meta.end + 60000 : Date.now() });
     const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id), test: meta.test ? { sequence: meta.test.sequence, startedAt: meta.test.startedAt, endedAt: meta.test.endedAt || null } : (this.run && this.run.id === id && this.run.test ? { sequence: this.run.test.sequence, startedAt: this.run.test.startedAt, endedAt: null } : null) } : null, ...res };
-    this._cache = { key, at: Date.now(), value };
+    this._cache = this._caches[slot] = { key, at: Date.now(), value };
     return value;
   }
 
   deleteRun(id) {
     if (this.run && this.run.id === id) throw err('Stop the run before deleting it', 409);
+    if (this.test && this.test.state !== 'done' && this.test.runId === id) throw err('A test is still using that run', 409);
     fs.rmSync(runDir(id), { recursive: true, force: true });
   }
 
@@ -821,7 +831,7 @@ class TraceEngine extends EventEmitter {
     const cur = this.run && this.run.id === id ? this.run : null;
     if (cur) { cur.events.push(...events); for (const l of lines) this._queueWrite(cur, l); }
     else if (lines.length) fs.appendFileSync(path.join(dir, 'events.jsonl'), lines.join('\n') + '\n');
-    this._cache = null;
+    this._cache = null; this._caches = {};
     const m = this._patchMeta(id, {});
     if (m) { m.imports = (m.imports || []).concat({ at: Date.now(), what, count: events.length }); fs.writeFileSync(this._metaPath(id), JSON.stringify(m)); }
     if (cur) { cur.count += events.length; if (m) cur.imports = m.imports; }
@@ -967,6 +977,7 @@ class TraceEngine extends EventEmitter {
     const io = d[key];
     const word = key === 'dps' ? 'DPS' : 'REX';
     if (!io || !Number.isInteger(Number(io.channel)) || Number(io.channel) < 0) throw err(`${d.name} has no ${word} assigned (Doors page › Settings)`);
+    if (io.enabled === false) throw err(`${d.name} ${word} is turned off on the Doors page`);
     const ch = Number(io.channel);
     const level = io.reverseSense ? !on : !!on;
     if (d.ioSource === 'emulated') {
@@ -987,6 +998,32 @@ class TraceEngine extends EventEmitter {
 
   async _testSleep(T, ms) { const until = Date.now() + ms; while (!T.abort && Date.now() < until) await sleep(Math.min(250, until - Date.now())); }
 
+  // what a running test has engaged, on disk too: after a restart the outputs are released and the commands turned back
+  _touch(T, key, val) {
+    if (val) T.touched.set(key, val); else T.touched.delete(key);
+    try { writeAtomic(TOUCHED, JSON.stringify([...T.touched].map(([k, v]) => ({ k, door: v.id, cmd: v.cmd || null, revertId: v.revertId || null })))); } catch { /* */ }
+  }
+  async _releaseOrphans() {
+    let list = [];
+    try { list = JSON.parse(fs.readFileSync(TOUCHED, 'utf8')) || []; } catch { return; }
+    if (!list.length || (this.test && this.test.state !== 'done')) return;
+    const doors = this._doorMap();
+    for (const x of list) {
+      try {
+        if (x.cmd) { if (!x.revertId || this._reverts().some(r => r.id === x.revertId)) { await this._send(x.cmd, {}, 'Aether (test stopped by a restart: turned back)'); if (x.revertId) this._saveReverts(this._reverts().filter(r => r.id !== x.revertId)); } }
+        else { const info = doors.get(x.door); if (info) await this._driveDoor(info.d, x.k.endsWith(':dps') ? 'dps' : 'rexIn', false); }
+      } catch (e) { console.warn(`[Trace] release after restart (${x.k}):`, e.message); }
+    }
+    try { fs.unlinkSync(TOUCHED); } catch { /* */ }
+    console.log(`[Trace] a test was interrupted by a restart: put back ${list.length} thing(s) it had engaged`);
+  }
+  async _release(info, key, T) {
+    let last = null;
+    for (let n = 0; n < 4; n++) { try { await this._driveDoor(info.d, key, false); this._touch(T, `${info.id}:${key}`, null); return true; } catch (e) { last = e; await sleep(300 * (n + 1)); } }
+    T.error = `Could not put ${info.name} ${key === 'dps' ? 'DPS' : 'REX'} back: ${last && last.message}. Check it now.`;
+    return false;
+  }
+
   async _doStep(s, info, L, T, who) {
     const st = this.settings;
     if (s.kind === 'wait') return this._testSleep(T, s.ms);
@@ -1000,17 +1037,15 @@ class TraceEngine extends EventEmitter {
     }
     if (s.kind === 'rex') {
       L.at = Date.now();
-      T.touched.set(`${info.id}:rexIn`, info);
-      await this._driveDoor(d, 'rexIn', true);
-      await sleep(s.holdMs);   // never cut short: the REX always gets released
-      await this._driveDoor(d, 'rexIn', false);
-      T.touched.delete(`${info.id}:rexIn`);
+      this._touch(T, `${info.id}:rexIn`, info);
+      try { await this._driveDoor(d, 'rexIn', true); await sleep(s.holdMs); }   // never cut short
+      finally { if (!(await this._release(info, 'rexIn', T))) throw err(T.error); }   // the REX is always let go, here and now
       return;
     }
     if (s.kind === 'dps') {
       L.at = Date.now();
-      await this._driveDoor(d, 'dps', s.state === 'open');
-      if (s.state === 'open') T.touched.set(`${info.id}:dps`, info); else T.touched.delete(`${info.id}:dps`);
+      if (s.state === 'open') { this._touch(T, `${info.id}:dps`, info); await this._driveDoor(d, 'dps', true); }
+      else { await this._driveDoor(d, 'dps', false); this._touch(T, `${info.id}:dps`, null); }
       return;
     }
     if (s.kind === 'command') {
@@ -1023,9 +1058,20 @@ class TraceEngine extends EventEmitter {
         target = od && od.areaIds && od.areaIds[0];
         if (!target) throw err(`${info.name}'s OnCAFE door has no area for a lockdown`);
       }
+      const engaging = s.cmd !== 'override' && s.value !== false;
+      const key = `cmd:${s.cmd}:${target}`;
       L.at = Date.now();
-      const r = await this.command({ kind: s.cmd, target, value: s.value, seconds: s.seconds }, who);
+      // an "on" command carries a 10-minute automatic turn-back as a backstop; the test's own "off" (or its end) cancels it
+      const r = await this.command({ kind: s.cmd, target, value: s.value, seconds: s.seconds, revertSec: engaging ? 600 : 0 }, who);
       if (!r.ok) throw err(`OnCAFE refused the command: ${r.error || 'HTTP ' + r.status}`);
+      if (engaging) {
+        const { reverseOf } = require('./commands');
+        this._touch(T, key, { id: info.id, name: info.name, cmd: reverseOf({ kind: s.cmd, target, value: s.value, targetName: info.name }), revertId: r.event });
+      } else {
+        const on = T.touched.get(key);
+        if (on && on.revertId) this._saveReverts(this._reverts().filter(x => x.id !== on.revertId));
+        this._touch(T, key, null);
+      }
       return;
     }
   }
@@ -1069,12 +1115,13 @@ class TraceEngine extends EventEmitter {
             const L = { iter: it, idx, kind: s.kind, at: Date.now(), door: s.door, doorName: info ? info.name : null, oncafe: info ? info.oncafe : null,
               chs: info ? info.chs : null, raw: info && (s.kind === 'dps' || s.kind === 'rex') ? info.raw[s.kind] || null : null, lockRaw: info ? info.raw.lock || null : null,
               text: stepText(s, info && info.name) };
-            if (T.abort) { L.skipped = true; T.log.push(L); continue; }
+            if (!T.abort && this.run && this.run.id === T.runId && this.run.count >= RUN_MAX - 200) { T.abort = true; T.error = `The run is full (${RUN_MAX} events): the test stopped. Use a shorter load run.`; }
+            if (T.abort) { L.skipped = true; this._logStep(T, L); continue; }
             T.idx = idx;
             this.add({ id: newId(), src: 'test', lane: 'aether', at: L.at, t: L.at, clock: 'pi', type: 'step', label: `Test step ${idx + 1}${seq.repeat > 1 || T.until ? ` (#${it})` : ''}: ${L.text}`, door: null, controllerId: null, cred: null, clientType: null, eventId: null, topic: null, info: { test: seq.id, iter: it, idx } });
             try { await this._doStep(s, info, L, T, T.who); } catch (e) { L.error = e.message; }
             L.end = Date.now();
-            T.log.push(L);
+            this._logStep(T, L);
             await this._testSleep(T, s.afterMs);
           }
           if (seq.gapMs && !T.abort) await this._testSleep(T, seq.gapMs);
@@ -1082,17 +1129,23 @@ class TraceEngine extends EventEmitter {
       } catch (e) { T.error = e.message; }
       finally {
         clearInterval(healthT);
-        for (const [k, info] of T.touched) {   // put every DPS / REX the test moved back to rest
-          const key = k.endsWith(':dps') ? 'dps' : 'rexIn';
-          for (let n = 0; n < 3; n++) { try { await this._driveDoor(info.d, key, false); break; } catch (e) { if (n === 2) T.error = `Could not put ${info.name} ${key === 'dps' ? 'DPS' : 'REX'} back: ${e.message}`; else await sleep(300); } }
+        for (const [k, v] of [...T.touched]) {   // put back everything the test engaged: DPS / REX, and "on" commands it did not turn off
+          if (k.startsWith('cmd:')) {
+            try { const { r } = await this._send(v.cmd, {}, `Aether (test ${T.abort ? 'stopped' : 'ended'}: turned back)`); if (r.ok) { if (v.revertId) this._saveReverts(this._reverts().filter(x => x.id !== v.revertId)); this._touch(T, k, null); } else T.error = `Could not turn back ${v.cmd.kind} on ${v.name}: ${r.error || 'HTTP ' + r.status} (it turns back by itself within 10 min)`; }
+            catch (e) { T.error = `Could not turn back ${v.cmd.kind} on ${v.name}: ${e.message} (it turns back by itself within 10 min)`; }
+          } else await this._release(v, k.endsWith(':dps') ? 'dps' : 'rexIn', T);
         }
+        if (!T.touched.size) { try { fs.unlinkSync(TOUCHED); } catch { /* */ } }
         T.state = 'grading';
         try {
-          if (T.ownRun && this.run && this.run.id === T.runId) await this.stopRun(T.abort ? 'test stopped' : 'test finished', { sync: seq.sync });
-          else await sleep(Math.min(10000, this.settings.thresholds.matchWindowMs));
+          // late answers (cloud push, strike off, controller events) still count: wait out the last steps' windows first
+          const th = this.settings.thresholds;
+          const settle = T.abort ? 5000 : Math.min(60000, Math.max(3000, ...seq.steps.map(x => ((x.expect && x.expect.withinMs) || 0) + th.pushFail)) - (seq.steps[seq.steps.length - 1].afterMs || 0));
+          await sleep(Math.max(0, settle));
+          if (T.ownRun && this.run && this.run.id === T.runId) await this.stopRun(T.abort ? 'test stopped' : 'test finished', { sync: seq.sync, byTest: true });
         } catch (e) { T.error = T.error || e.message; }
         T.endedAt = Date.now();
-        this._patchMeta(T.runId, { test: { ...testMeta, log: T.log, endedAt: T.endedAt, aborted: T.abort, error: T.error, health: T.health } });
+        this._patchMeta(T.runId, { test: { ...testMeta, endedAt: T.endedAt, aborted: T.abort, error: T.error, health: T.health, steps: testMeta.steps } });
         try { T.report = this.testReport(T.runId); } catch (e) { T.error = T.error || e.message; }
         T.state = 'done';
         this.emit('test-done', { runId: T.runId, name: T.name, verdict: T.report && T.report.report.totals.verdict });
@@ -1101,12 +1154,22 @@ class TraceEngine extends EventEmitter {
     return this.testStatus();
   }
 
+  _logStep(T, L) {
+    T.log.push(L);
+    T.done = (T.done || 0) + 1; if (L.error) T.errors = (T.errors || 0) + 1;
+    if (T.log.length > 400) T.log.shift();     // the full log is on disk (test-log.jsonl); memory keeps the latest
+    try { fs.appendFileSync(path.join(runDir(T.runId), TEST_LOG), JSON.stringify(L) + '\n'); } catch { /* */ }
+  }
+  _readTestLog(runId, meta) {
+    try { return fs.readFileSync(path.join(runDir(runId), TEST_LOG), 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); }
+    catch { return (meta && meta.test && meta.test.log) || []; }   // TRACE-4 runs saved before the log moved to its own file
+  }
   stopTest() { if (this.test && this.test.state === 'running') this.test.abort = true; return this.testStatus(); }
   testStatus() {
     const T = this.test;
     if (!T) return null;
     return { state: T.state, seqId: T.seqId, name: T.name, runId: T.runId, startedAt: T.startedAt, endedAt: T.endedAt || null, iter: T.iter, repeat: T.repeat, until: T.until, idx: T.idx, steps: T.steps,
-      done: T.log.length, errors: T.log.filter(l => l.error).length, abort: T.abort, error: T.error, verdict: T.report ? T.report.report.totals.verdict : null,
+      done: T.done || 0, errors: T.errors || 0, abort: T.abort, error: T.error, verdict: T.report ? T.report.report.totals.verdict : null,
       last: T.log.slice(-6).map(l => ({ iter: l.iter, idx: l.idx, text: l.text, at: l.at, error: l.error || null })) };
   }
 
@@ -1115,7 +1178,7 @@ class TraceEngine extends EventEmitter {
     const meta = this.run && this.run.id === runId ? { ...JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8')) } : JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8'));
     const t = meta.test;
     if (!t) throw err('That run is not a test run', 404);
-    const log = (this.test && this.test.runId === runId && this.test.state !== 'done') ? this.test.log : (t.log || []);
+    const log = this._readTestLog(runId, meta);
     const a = this.analyze(runId);
     const report = grade(a, this.readEvents(runId), log, t.steps || [], this.settings.thresholds);
     const health = t.health || (this.test && this.test.runId === runId ? this.test.health : []) || [];
@@ -1127,7 +1190,7 @@ class TraceEngine extends EventEmitter {
 
   // ── TRACE-4: compare two runs ─────────────────────────────────────────
   compareRuns(a, b) {
-    const A = this.analyze(a), B = this.analyze(b);
+    const A = this.analyze(a, 'cmpA'), B = this.analyze(b, 'cmpB');
     const tA = (() => { try { return this.testReport(a); } catch { return null; } })(), tB = (() => { try { return this.testReport(b); } catch { return null; } })();
     return compare(A, B, this.readEvents(a), this.readEvents(b), tA, tB);
   }
@@ -1135,19 +1198,24 @@ class TraceEngine extends EventEmitter {
   // ── TRACE-4: live alerts ───────────────────────────────────────────────
   _alertTick() {
     const al = this.settings.alerts;
-    if (!al.enabled || this._alertBusy) return;
+    if (!(al.enabled || al.automation) || this._alertBusy) return;   // the page toast and the Automation feed are separate switches
     const watching = this.run || (this.cloud.status().push.state === 'connected');
     if (!watching) return;
+    // a big run is expensive to analyse on a Pi: look less often as it grows (2 s → 15 s past 5,000 events)
+    const n = this.run ? this.run.count : this.live.length;
+    const every = n > 20000 ? 30000 : n > 5000 ? 15000 : 2000;
+    if (this._alertLast && Date.now() - this._alertLast < every) return;
+    this._alertLast = Date.now();
     this._alertBusy = true;
     try {
-      const a = this.analyze(this.run ? this.run.id : null);
+      const a = this.analyze(this.run ? this.run.id : null, 'alerts');
       const cut = Date.now() - 10 * 60000;
       for (const t of a.traces) {
         if (t.sync || t.at < cut || this._alerted.has(t.id)) continue;
         // a trace still inside its windows may still find its answer (a slow cloud): judge it once they have passed
         const th = this.settings.thresholds;
         const age = Date.now() - t.at;
-        if (t.decision ? age < 3000 : age < Math.max(th.matchWindowMs, th.inputWindowMs, th.outputWindowMs) + th.pushFail) continue;   // a wrong answer is final sooner than a missing one
+        if (t.decision && t.latency.push != null ? age < 3000 : age < Math.max(th.matchWindowMs, th.inputWindowMs, th.outputWindowMs) + th.pushFail) continue;   // final once its answer and its push are in, or every window has passed
         this._alerted.add(t.id);   // judged now, pass or fail: never raised again (also when the run ends and the live view takes over)
         if (!(t.status === 'fail' || (al.level === 'warn' && t.status === 'warn'))) continue;
         const x = { seq: ++this.alertSeq, at: Date.now(), traceAt: t.at, traceId: t.id, runId: this.run ? this.run.id : null, status: t.status, kind: t.kind, label: t.action.label,

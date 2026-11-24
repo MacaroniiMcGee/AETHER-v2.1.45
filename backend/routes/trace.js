@@ -111,10 +111,13 @@ module.exports = function traceRoutes() {
     try { res.json({ sent: await eng.sendSync(['start', 'end', 'check'].includes(req.body && req.body.set) ? req.body.set : 'check') }); } catch (e) { fail(res, e); }
   });
 
+  const testBusy = res => { if (eng.test && eng.test.state !== 'done') { res.status(409).json({ error: 'A test is running: stop it on the Tests tab first' }); return true; } return false; };
   router.post('/runs/start', express.json(), async (req, res) => {
+    if (testBusy(res)) return;
     try { res.json(await eng.startRun((req.body || {}).name, { sync: (req.body || {}).sync, note: (req.body || {}).note })); } catch (e) { fail(res, e); }
   });
   router.post('/runs/stop', express.json(), async (req, res) => {
+    if (testBusy(res)) return;
     try { res.json(await eng.stopRun('stopped', { sync: (req.body || {}).sync })); } catch (e) { fail(res, e); }
   });
   router.get('/runs', (_req, res) => res.json({ runs: eng.listRuns(), current: eng.run ? eng.run.id : null }));
@@ -167,15 +170,22 @@ module.exports = function traceRoutes() {
     const b = req.body || {};
     try { res.json({ steps: eng.templateSteps(String(b.kind || ''), b.door == null ? null : Number(b.door), { fc: b.fc ?? '', cn: b.cn ?? '' }, { badCn: b.badCn, grantMs: b.grantMs, heldMs: b.heldMs, output: b.output }) }); } catch (e) { fail(res, e); }
   });
-  router.post('/tests/stop', express.json(), (_req, res) => res.json({ current: eng.stopTest() }));
+  router.post('/tests/stop', express.json(), (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can stop a test' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Tests can only be stopped from the Aether page itself' });
+    res.json({ current: eng.stopTest() });
+  });
   const saveSeq = (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change test sequences' });
+    // a stored test drives hardware the next time an admin runs it: only the Aether page may change one
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Tests can only be changed from the Aether page itself' });
     try { res.json(eng.saveSequence({ ...(req.body || {}), ...(req.params.id ? { id: req.params.id } : { id: undefined }) })); } catch (e) { fail(res, e); }
   };
   router.post('/tests', express.json({ limit: '256kb' }), saveSeq);
   router.put('/tests/:id', express.json({ limit: '256kb' }), saveSeq);
   router.delete('/tests/:id', (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change test sequences' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Tests can only be changed from the Aether page itself' });
     try { eng.deleteSequence(String(req.params.id)); res.json({ ok: true }); } catch (e) { fail(res, e); }
   });
   router.post('/tests/:id/run', express.json(), async (req, res) => {

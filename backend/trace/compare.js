@@ -49,9 +49,10 @@ function compare(A, B, evA, evB, testA, testB) {
   const integ = A.integrity && B.integrity ? Object.fromEntries(['lostInPush', 'notInLog', 'onlyInLog', 'duplicates', 'outOfOrder'].map(k => [k, { a: A.integrity[k].length, b: B.integrity[k].length }])) : null;
   let steps = null;
   if (testA && testB && testA.sequence && testB.sequence && testA.sequence.id === testB.sequence.id) {
+    // steps are matched by what they do (text), not position: the sequence may have been edited between the runs
     const rows = new Map();
-    for (const s of testA.report.byStep) rows.set(s.idx, { idx: s.idx, text: s.text, a: s, b: null });
-    for (const s of testB.report.byStep) rows.set(s.idx, { ...(rows.get(s.idx) || { idx: s.idx, text: s.text, a: null }), b: s });
+    for (const s of testA.report.byStep) rows.set(s.text, { idx: s.idx, text: s.text, a: s, b: null });
+    for (const s of testB.report.byStep) rows.set(s.text, { ...(rows.get(s.text) || { idx: s.idx, text: s.text, a: null }), idx: s.idx, b: s });
     steps = [...rows.values()].sort((x, y) => x.idx - y.idx).map(r => ({
       idx: r.idx, text: r.text,
       a: r.a && { runs: r.a.runs, pass: r.a.pass + r.a.warn, fail: r.a.fail, decision: r.a.decision.p50 ?? null, push: r.a.push.p50 ?? null },

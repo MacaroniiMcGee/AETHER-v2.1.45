@@ -160,6 +160,9 @@ function grade(a, events, log, steps, th = {}) {
   // a step's strike / output window ends where the next step starts (a later card must not count for this one)
   const order = [...log].filter(l => !l.skipped).sort((x, y) => x.at - y.at);
   const nextAt = new Map(order.map((l, i) => [l, order[i + 1] ? order[i + 1].at : Infinity]));
+  // the next step that acts on the same door (any door for a step without one): this step's events end there
+  const nextSameDoor = new Map(order.map((l, i) => { const n = order.slice(i + 1).find(o => o.kind !== 'wait' && (l.door == null || o.door == null || o.door === l.door)); return [l, n ? n.at : Infinity]; }));
+  const usedEv = new Set();
   for (const L of log) {
     const s = steps[L.idx] || {};
     const x = s.expect || {};
@@ -199,10 +202,13 @@ function grade(a, events, log, steps, th = {}) {
     }
     if (tr) { r.traceId = tr.id; r.latency = { decision: tr.latency.decision, push: tr.latency.push, api: tr.latency.api, ack: tr.latency.ack ?? null }; r.result = tr.result || (tr.decision && tr.decision.type) || null; }
     // controller / cloud events for this door within the window
-    const from = L.at - 1000, to = (L.end || L.at) + within + lag;
-    const mine = cloudEv.filter(e => { const t = piAt(e); return t != null && t >= from && t <= to && (!L.oncafe || !e.door || !e.door.id || e.door.id === L.oncafe); });
+    // with the clock offset known, controller times are compared directly (tight); without it, arrival times (plus the cloud lag)
+    const slack = offset != null ? 500 : lag;
+    const from = L.at - 1000, to = Math.min((L.end || L.at) + within + (offset != null ? 0 : lag), (nextSameDoor.get(L) ?? Infinity) + slack);
+    const mine = cloudEv.filter(e => { const t = piAt(e); return t != null && t >= from && t <= to && !usedEv.has(e.eventId || e.id) && (!L.oncafe || !e.door || !e.door.id || e.door.id === L.oncafe); });
     if (x.events) {
       const hit = mine.find(e => typeIn(e.type, x.events));
+      if (hit) for (const e of cloudEv) if ((e.eventId && e.eventId === hit.eventId) || e === hit) usedEv.add(e.eventId || e.id);   // one event answers one step
       r.checks.push({ what: 'events', want: x.events.join(' / '), got: hit ? hit.type : 'none' });
       if (!hit) fail(`No ${x.events.join(' / ')} from the controller within ${Math.round((within + lag) / 1000)} s`);
       else if (!r.latency.push && hit.src === 'cloud-mqtt' && hit.at != null) r.latency.push = hit.at - L.at;

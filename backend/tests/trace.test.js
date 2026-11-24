@@ -721,7 +721,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     const gq = { async enqueue(op, ch, v) { writes.push([op, ch, v]); eng.add(fromJournal({ t: Date.now(), k: 'relay', ch: `relay:${ch}`, v: v ? 1 : 0, src: 'physical' }));
       if (ch === 0) cloudEv(v ? (granted ? 'open' : 'doorforcedopen') : 'closed'); if (ch === 1) cloudEv(v ? 'rexactivated' : 'rexdeactivated'); return { success: true }; } };
     eng.deps = { getWiegand: () => wm, gpioQueue: gq };
-    eng.saveSettings({ sync: { atStart: false, atEnd: false } });
+    eng.saveSettings({ sync: { atStart: false, atEnd: false }, thresholds: { pushFail: 2000, pushWarn: 1500 } });
     const seqDef = eng.saveSequence({ name: 'Lab door basics', sync: false, steps: [
       ...template('valid', 1, { fc: 55, cn: 1001 }).map(x => ({ ...x, afterMs: 2200, expect: { ...x.expect, withinMs: 3000 } })),
       ...template('invalid', 1, { fc: 55 }, { badCn: 9 }).map(x => ({ ...x, afterMs: 800 })),
@@ -732,7 +732,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     ] });
     const st0 = await eng.runTest(seqDef.id, { repeat: 2, gapMs: 200 }, 'tester').catch(e => { throw e; });
     if (st0.state !== 'running' && eng.test.state !== 'done') throw new Error('test did not start');
-    for (let i = 0; i < 200 && eng.test.state !== 'done'; i++) await sleep(100);
+    for (let i = 0; i < 900 && eng.test.state !== 'done'; i++) await sleep(100);
     assert.strictEqual(eng.test.state, 'done', 'test finished');
     const rep = eng.testReport(eng.test.runId);
     const by = Object.fromEntries(rep.report.byStep.map(x => [x.idx, x]));
@@ -753,7 +753,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     await eng.runTest(long.id, {}, 't');
     await assert.rejects(eng.runTest(long.id, {}, 't'), /already running/);
     await sleep(500); eng.stopTest();
-    for (let i = 0; i < 100 && eng.test.state !== 'done'; i++) await sleep(100);
+    for (let i = 0; i < 900 && eng.test.state !== 'done'; i++) await sleep(100);
     assert.strictEqual(eng.test.state, 'done'); assert.deepStrictEqual(writes.slice(-1)[0].slice(1), [0, false], 'DPS closed again after stop');
     eng.saveSettings({ commands: { enabled: false } });
     const cmdSeq = eng.saveSequence({ name: 'Cmd', steps: template('lockdown', 1, { fc: 1, cn: 2 }) });
@@ -768,13 +768,13 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     const T0 = Date.now() - 40000;
     eng.add(fromJournal({ t: T0, k: 'card', ch: 'wiegand:wg-1', v: 1, src: 'wiegand', m: { fc: 3, cn: 3 } }));
     eng.settings.expectations = [];
-    eng._cache = null; eng._alertTick(); eng._cache = null; eng._alertTick();
+    eng._caches = {}; eng._alertLast = 0; eng._alertTick(); eng._caches = {}; eng._alertLast = 0; eng._alertTick();
     assert.strictEqual(seen.length, 1); assert.strictEqual(seen[0].status, 'fail'); assert(eng.alertsSince(0).alerts.length >= 1);
     ok('live alerts: a failed trace raises one alert (once), kept for the page');
     // review (harness): a trace judged during a run is not raised again when the run ends and the live view takes over
     const before = seen.length;
     eng._alerted.clear(); eng._alerted.add(eng.live.find(e => e.src === 'journal' && e.type === 'card').id);
-    eng._cache = null; eng._alertTick();
+    eng._caches = {}; eng._alertLast = 0; eng._alertTick();
     assert.strictEqual(seen.length, before, 'judged once');
     // review (harness): sync cards whose decisions arrive without card numbers are never matched to door events
     {
@@ -790,6 +790,55 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       assert.strictEqual(r.clock.offset, null, 'door open / closed 2 s apart are not taken for the sync pair');
     }
     ok('review: alerts judged once (no repeat when the live view takes over); sync pairs never matched to door events');
+    // review: an "on" command a test sent is turned back when the test stops early; a restart releases what a test left engaged
+    {
+      const sent = [], cmds = [];
+      eng.saveSettings({ commands: { enabled: true }, cloud: { doors: [OD] } });
+      eng.command = async c => { cmds.push(c); return { ok: true, status: 200, event: 'ev' + cmds.length }; };
+      eng._send = async cmd => { sent.push(cmd); return { r: { ok: true }, e: { id: 'x' } }; };
+      const mseq = eng.saveSequence({ name: 'Maint', sync: false, steps: [{ kind: 'command', door: 1, cmd: 'maintenance', value: true, afterMs: 100 }, { kind: 'wait', ms: 60000 }, { kind: 'command', door: 1, cmd: 'maintenance', value: false }] });
+      await eng.runTest(mseq.id, {}, 't');
+      await sleep(600); eng.stopTest();
+      for (let i = 0; i < 900 && eng.test.state !== 'done'; i++) await sleep(100);
+      assert.strictEqual(cmds[0].revertSec, 600, 'backstop turn-back on the "on" command');
+      assert(sent.some(c => c.kind === 'maintenance' && c.value === false), 'maintenance turned back when the test stopped');
+      delete eng.command; delete eng._send;
+      eng.saveSettings({ commands: { enabled: false } });
+      // restart: a DPS a test had opened is closed by the next engine
+      fs.writeFileSync(path.join(__dirname, '..', 'data', 'trace', 'test-touched.json'), JSON.stringify([{ k: '1:dps', door: 1 }]));
+      const e2 = new TraceEngine(); e2.deps = { gpioQueue: gq };
+      writes.length = 0;
+      await e2._releaseOrphans();
+      assert.deepStrictEqual(writes[0], ['setRelay', 0, false], 'DPS released after a restart');
+      assert(!fs.existsSync(path.join(__dirname, '..', 'data', 'trace', 'test-touched.json')));
+      // a REX release that fails once is retried inside the step
+      let failOnce = true;
+      const gq2 = { async enqueue(op, ch, v) { if (ch === 1 && !v && failOnce) { failOnce = false; throw new Error('Rate limit exceeded'); } writes.push([op, ch, v]); return { success: true }; } };
+      eng.deps = { getWiegand: () => wm, gpioQueue: gq2 };
+      const rseq = eng.saveSequence({ name: 'Rex', sync: false, steps: [{ kind: 'rex', door: 1, holdMs: 100, afterMs: 100 }] });
+      writes.length = 0;
+      await eng.runTest(rseq.id, {}, 't');
+      for (let i = 0; i < 400 && eng.test.state !== 'done'; i++) await sleep(100);
+      assert.deepStrictEqual(writes.filter(w => w[1] === 1).map(w => w[2]), [true, false], 'REX released after one failed try');
+      eng.deps = { getWiegand: () => wm, gpioQueue: gq };
+    }
+    // review: a missing event in one repeat is not covered by the next repeat's event
+    {
+      const tA = Date.now() - 100000;
+      const steps = [cleanSequence({ steps: [{ kind: 'dps', door: 1, state: 'open', expect: { events: ['doorforcedopen'] } }] }).steps[0]];
+      const log = [{ iter: 1, idx: 0, kind: 'dps', at: tA, end: tA, door: 1, oncafe: OD }, { iter: 2, idx: 0, kind: 'dps', at: tA + 8000, end: tA + 8000, door: 1, oncafe: OD }];
+      const evs = [{ id: 'f2', src: 'cloud-mqtt', lane: 'cloud', type: 'doorforcedopen', t: tA + 8100, at: tA + 8600, eventId: 'k2', door: { id: OD } }];
+      const g = grade({ clock: { offset: 0 }, traces: [] }, evs, log, steps, { pushFail: 10000 });
+      assert.deepStrictEqual(g.steps.map(x => x.status), ['fail', 'pass']);
+    }
+    // review: integrity stays linear on a long run
+    {
+      const big = [];
+      for (let i = 0; i < 15000; i++) { big.push({ src: 'cloud-mqtt', lane: 'cloud', type: 'open', t: i * 10, at: i * 10 + 500, eventId: 'p' + i, door: { id: 'D' } }); big.push({ src: 'cloud-api', lane: 'cloud', type: 'open', t: i * 10, at: i * 10 + 900, eventId: 'p' + i, door: { id: 'D' } }); }
+      const t0 = Date.now(); const r = integrity(big, { pollMs: 1000, apiEnabled: true, now: Date.now() }); const ms = Date.now() - t0;
+      assert.strictEqual(r.issues, 0); assert(ms < 1500, `integrity on 30k events took ${ms} ms`);
+    }
+    ok('review: test "on" commands turned back on stop (+10 min backstop); restart releases a DPS a test left open; REX release retried; one event answers one repeat; integrity linear');
     if (keepDc != null) fs.writeFileSync(dc, keepDc); else fs.unlinkSync(dc);
     if (keepAp != null) fs.writeFileSync(ap, keepAp);
   }

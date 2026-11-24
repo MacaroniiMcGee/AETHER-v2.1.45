@@ -23,7 +23,12 @@ function integrity(events, opt = {}) {
   // index pushes
   const pushById = new Map();
   for (const e of pushed) { const k = keyOf(e); if (k) pushById.set(k, (pushById.get(k) || []).concat(e)); }
-  const near = (list, e) => list.find(p => fuzzy(p) === fuzzy(e) && p.t != null && e.t != null && Math.abs(p.t - e.t) <= 50);
+  // indexes (a long run has tens of thousands of events: no scans inside loops)
+  const byFuzzy = list => { const m = new Map(); for (const e of list) { const f = fuzzy(e); if (!m.has(f)) m.set(f, []); m.get(f).push(e); } return m; };
+  const pushF = byFuzzy(pushed), logF = byFuzzy(logged);
+  const logById = new Set(logged.map(keyOf).filter(Boolean));
+  const nearIn = (idx, e) => (idx.get(fuzzy(e)) || []).find(p => p.t != null && e.t != null && Math.abs(p.t - e.t) <= 50);
+  const near = (list, e) => nearIn(list === logged ? logF : pushF, e);
   const inPush = e => { const k = keyOf(e); return k ? pushById.has(k) : !!near(pushed, e); };
   const apiOn = logged.length > 0 || !!opt.apiEnabled;
   const lostInPush = [], notInLog = [], onlyInLog = [], duplicates = [], outOfOrder = [];
@@ -31,16 +36,18 @@ function integrity(events, opt = {}) {
   for (const e of logged) { if (!inPush(e)) { const k = keyOf(e) || fuzzy(e) + e.t; if (!seenLost.has(k)) { seenLost.add(k); lostInPush.push(brief(e, 'event log')); } } }
   for (const e of ctrl) {
     if (inPush(e)) continue;
-    const inLog = logged.some(l => (keyOf(l) && keyOf(l) === keyOf(e)) || (fuzzy(l) === fuzzy(e) && l.t != null && e.t != null && Math.abs(l.t - e.t) <= 50));
+    const inLog = (keyOf(e) && logById.has(keyOf(e))) || !!near(logged, e);
     if (inLog) { const k = keyOf(e) || fuzzy(e) + e.t; if (!seenLost.has(k)) { seenLost.add(k); lostInPush.push(brief(e, 'controller log + event log')); } }
     else onlyInLog.push(brief(e, 'controller log'));
   }
   if (apiOn) {
+    const seenMiss = new Set();
     for (const e of pushed) {
       if (e.at != null && now - e.at < pollMs * 3) continue;     // the poll may not have caught up yet
       const k = keyOf(e);
-      const there = k ? logged.some(l => keyOf(l) === k) : !!near(logged, e);
-      if (!there && !notInLog.some(x => x.key === (k || fuzzy(e) + e.t))) notInLog.push({ ...brief(e, 'push'), key: k || fuzzy(e) + e.t });
+      const there = k ? logById.has(k) : !!near(logged, e);
+      const mk = k || fuzzy(e) + e.t;
+      if (!there && !seenMiss.has(mk)) { seenMiss.add(mk); notInLog.push({ ...brief(e, 'push'), key: mk }); }
     }
   }
   for (const [k, list] of pushById) if (list.length > 1) duplicates.push({ ...brief(list[0], 'push'), copies: list.length, gapMs: list[list.length - 1].at - list[0].at, key: k });
