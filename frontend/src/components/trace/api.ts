@@ -25,7 +25,7 @@ export interface Trace {
 export interface Stat { n: number; min?: number; p50?: number; p95?: number; max?: number }
 export interface SyncResult { at: number; fc?: number; cn?: string; ch?: string; v?: number; set: string; idx: number; matched: boolean; eventT: number | null; type: string | null; offset: number | null; byPattern?: boolean }
 export interface Analysis {
-  meta: { id: string; name: string; start: number; end: number | null; endReason?: string; syncError?: string; imports: { at: number; what: string; count: number }[]; count: number; running: boolean; controllerClocks?: ClockCheck | null } | null;
+  meta: { id: string; name: string; start: number; end: number | null; endReason?: string; syncError?: string; imports: { at: number; what: string; count: number }[]; count: number; running: boolean; controllerClocks?: ClockCheck | null; links?: LinkCheck | null; linkChanges?: LinkChange[] } | null;
   clock: { offset: number | null; drift: { startMs: number; endMs: number; changeMs: number; perHourMs: number | null } | null; sync: SyncResult[]; gaps: { set: string; sent: number; seen: number }[] };
   traces: Trace[]; unexplained: { type: string; t: number; at: number; cred: Cred | null; door: { id: string | null; name: string | null } | null; sources: Src[] }[];
   stats: KindStats & { unexplained: number; byKind: Record<Kind, KindStats> };
@@ -59,7 +59,11 @@ export interface Comparison {
   steps: { idx: number; text: string; a: { runs: number; pass: number; fail: number; decision: number | null; push: number | null } | null; b: { runs: number; pass: number; fail: number; decision: number | null; push: number | null } | null; result: Moved; decision: Moved; push: Moved }[] | null;
   rule: string;
 }
-export interface ControllerClock { id: string; name: string; host: string; model: string | null; at?: number; offsetMs?: number; rttMs?: number; resolutionMs?: number; sync?: string | null; ntp?: string | null; tz?: string | null; error?: string; fields?: string[] }
+// TRACE-8: can this Pi reach each controller (TCP to its web port), and is the Azure controller polling each emulated board
+export interface ControllerLink { id: string; name: string; host: string; port: number | null; model: string | null; source: 'sunapi' | 'wire' | 'emulated'; login: boolean | null; link: 'up' | 'down'; ms: number | null; note: string | null; polls?: number; lastPollAt?: number | null }
+export interface LinkCheck { at: number; controllers: ControllerLink[] }
+export interface LinkChange { id: string; name: string; host: string; from: 'up' | 'down'; to: 'up' | 'down'; at: number }
+export interface ControllerClock { id: string; name: string; host: string; model: string | null; at?: number; offsetMs?: number; rttMs?: number; resolutionMs?: number; sync?: string | null; ntp?: string | null; tz?: string | null; error?: string; fields?: string[]; skipped?: boolean }
 export interface ClockCheck { available: boolean; reason?: string; at?: number; warnMs?: number; controllers: ControllerClock[] }
 export interface JiraStatus { site: string; email: string; hasToken: boolean; configured: boolean; me?: { name: string } | null }
 export interface JiraIssue { key: string; summary: string; status?: string; attachments: { id: string; filename: string; size: number; created: string; author?: string }[]; hars: { id: string; filename: string; size: number; created: string; author?: string }[] }
@@ -105,7 +109,7 @@ export interface Status {
   me?: { admin: boolean };
   pendingReverts?: { id: string; due: number; kind: string; value: unknown; target: string | string[] }[];
   inventory: { org: string; at: number; doors: InvDoor[]; areas: InvArea[]; zones: InvZone[]; controllers: Inventory['controllers'] } | null;
-  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[]; clockCheck?: ClockCheck | null;
+  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[]; clockCheck?: ClockCheck | null; links?: LinkCheck | null; linkLog?: LinkChange[];
 }
 export interface RunMeta { id: string; name: string; start: number; end: number | null; endReason?: string; count?: number; imports?: { at: number; what: string; count: number }[] }
 export interface OnCafeSession { signedIn: boolean; host?: string; user?: string; name?: string; orgs?: { id: string; name: string }[]; org?: string; expiresAt?: string | null; error?: string }
@@ -178,6 +182,7 @@ export function traceClient(backend: string) {
     doors: () => call<{ doors: DoorRow[] }>('/doors'),
     // TRACE-5
     clocks: () => call<ClockCheck>('/clocks'),
+    links: (fresh = false) => call<LinkCheck>(`/links${fresh ? '?fresh=1' : ''}`),
     jira: () => call<JiraStatus>('/jira'),
     saveJira: (b: { site?: string; email?: string; token?: string; test?: boolean }) => call<JiraStatus>('/jira', { method: 'PUT', body: b }),
     jiraIssue: (key: string) => call<JiraIssue>(`/jira/issue/${encodeURIComponent(key)}`),

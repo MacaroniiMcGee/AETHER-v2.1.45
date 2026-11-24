@@ -1,9 +1,9 @@
 // AETHER_TRACE — Event Trace › Setup
 import React, { useEffect, useState } from 'react';
-import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone, Bell, Clock, Ticket } from 'lucide-react';
+import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone, Bell, Clock, Ticket, Network } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
 import { SuggestCard } from './Suggest';
-import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, type JiraStatus, wiringVersion } from './api';
+import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, type JiraStatus, type LinkCheck, clock, wiringVersion } from './api';
 
 const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ icon, title, sub, right, children }) => (
   <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line">
@@ -261,6 +261,9 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
         <div className="text-xs text-hv-text-3">Alerts are checked while a run is recording or the cloud feed is connected (every 2 s; less often on very long runs). A trace is judged once its answer and cloud push are in, or once its windows have passed (about {fmtMs(Math.max(s.thresholds.matchWindowMs, s.thresholds.inputWindowMs) + s.thresholds.pushFail)}). In Automation, a rule with the “Event Trace alert” trigger can pulse a relay, send a card or log a message.</div>
       </Card>
 
+      {/* TRACE-8: controller links */}
+      <LinksCard api={api} status={status} />
+
       {/* TRACE-5: controller clocks over SUNAPI */}
       <Card icon={<Clock size={16} />} title="Controller clocks" sub="Read each access controller's own clock (SUNAPI) at the start of every run, next to the offset the sync markers measure.">
         <Toggle on={s.clock?.check !== false} onChange={v => upd(x => { x.clock = { ...(x.clock || { check: true, warnMs: 2000 }), check: v }; return x; })} label="Check controller clocks when a run starts" />
@@ -407,6 +410,46 @@ const JiraCard: React.FC<{ api: TraceApi; admin: boolean }> = ({ api, admin }) =
         {msg && <span className={cx('text-xs', msg.tone === 'error' ? 'text-hv-error-fg' : 'text-hv-success-fg')}>{msg.text}</span>}
       </div>
       <div className="text-xs text-hv-text-3">The token is kept on the Pi (mode 600) and never shown again. Requests go only to your Atlassian site. Only an Aether admin can change this or post to Jira.</div>
+    </Card>
+  );
+};
+
+// ── TRACE-8: which controllers this Pi can reach on the local network, and which emulated Azure boards their IC2 is polling ──
+const SRC_NAME = { sunapi: 'SUNAPI Console', wire: 'Setup › Wire', emulated: 'Emulated Azure board' } as const;
+const LinksCard: React.FC<{ api: TraceApi; status: Status }> = ({ api, status }) => {
+  const [L, setL] = useState<LinkCheck | null>(status.links || null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const check = async (fresh: boolean) => { setBusy(true); setErr(null); try { setL(await api.links(fresh)); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); } };
+  useEffect(() => { check(false); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (status.links && (!L || status.links.at > L.at)) setL(status.links); }, [status.links]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const net = (L?.controllers || []).filter(c => c.source !== 'emulated'), emu = (L?.controllers || []).filter(c => c.source === 'emulated');
+  const row = (c: LinkCheck['controllers'][number]) => (
+    <tr key={c.id} className="border-t border-hv-line">
+      <td className="py-1 pr-2 text-hv-text">{c.name}{c.model && !c.name.includes(c.model) ? <span className="text-hv-text-3"> · {c.model}</span> : null}</td>
+      <td className="pr-2 font-mono text-hv-text-2">{c.host}{c.port ? `:${c.port}` : ''}</td>
+      <td className="pr-2 text-hv-text-3">{SRC_NAME[c.source]}{c.source === 'sunapi' && !c.login ? ' · no login saved' : ''}</td>
+      <td className="pr-2"><Badge tone={c.link === 'up' ? 'success' : 'error'}>{c.source === 'emulated' ? (c.link === 'up' ? 'polled by the controller' : 'not polled') : c.link === 'up' ? 'reachable' : 'not reachable'}</Badge></td>
+      <td className="pr-2 text-hv-text-3">{c.note || (c.source === 'emulated' ? `${c.polls ?? 0} polls` : c.ms != null ? `${c.ms} ms` : '')}</td>
+    </tr>
+  );
+  return (
+    <Card icon={<Network size={16} />} title="Controller links" sub="Can this Pi reach each controller on the local network? Emulated Azure boards: is the Azure controller polling them over RS-485?"
+      right={<Button size="sm" icon={<RefreshCw size={13} />} busy={busy} onClick={() => check(true)}>Check now</Button>}>
+      {err && <div className="text-xs text-hv-error-fg">{err}</div>}
+      {!L ? <div className="text-xs text-hv-text-3 flex items-center gap-2"><Loader2 size={12} className="animate-spin" />Checking…</div>
+        : !L.controllers.length ? <div className="text-xs text-hv-text-3">No controllers to check: save access controllers in Tools › SUNAPI Console, put controller IP addresses in Setup › Wire, or add boards in the Controller Emulator.</div>
+        : (
+          <table className="w-full text-[12px]"><thead><tr className="text-left text-hv-text-3"><th className="py-1 pr-2">Controller</th><th className="pr-2">Address</th><th className="pr-2">From</th><th className="pr-2">Link</th><th className="pr-2" /></tr></thead>
+            <tbody>{net.map(row)}{emu.map(row)}</tbody></table>
+        )}
+      {(status.linkLog || []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-hv-text-3">Changes:</span>
+          {status.linkLog!.slice(-8).map((x, i) => <Badge key={i} tone={x.to === 'down' ? 'error' : 'success'}>{clock(x.at)} {x.name} {x.to === 'down' ? 'lost' : 'back'}</Badge>)}
+        </div>
+      )}
+      <div className="text-xs text-hv-text-3">{L ? `Checked ${new Date(L.at).toLocaleTimeString()}. ` : ''}Only a connection to the controller's web port is opened (no login, nothing sent); "refused" still counts as reachable. Controllers that are not reachable are skipped by the clock check instead of timing out. While a run records this is checked every 15 s, and any change goes into the run.</div>
     </Card>
   );
 };

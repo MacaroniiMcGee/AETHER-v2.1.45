@@ -233,6 +233,8 @@ module.exports = function traceRoutes() {
   router.get('/alerts', (req, res) => res.json(eng.alertsSince(Number(req.query.since) || 0)));
 
   // ── TRACE-5: controller clocks (SUNAPI) and Jira ──────────────────────
+  // TRACE-8: controller links (reachable from this Pi; emulated Azure boards polled by their IC2). Read-only, no login used.
+  router.get('/links', async (req, res) => { try { res.json(req.query.fresh ? await eng.checkLinks() : (eng.links && Date.now() - eng.links.at < 30000 ? eng.links : await eng.checkLinks())); } catch (e) { fail(res, e); } });
   router.get('/clocks', async (_req, res) => { try { res.json(await eng.checkClocks()); } catch (e) { fail(res, e); } });
   const jira = require('../trace/jira');
   router.get('/jira', (_req, res) => res.json(jira.status()));

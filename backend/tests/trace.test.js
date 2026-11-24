@@ -977,6 +977,42 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     ok('Discover: relay pulses prove DPS (and NC) / REX and their doors (other doors\' traffic meanwhile ignored), a card proves a reader; always toggled back to the relay\'s real state (retried, and after a restart); one at a time; feeds the suggestion');
   }
 
+  {
+    console.log('TRACE-8: controller links');
+    const net = require('net');
+    const { probe, emulatedLinks, linkChanges } = require('../trace/linkcheck');
+    const srv = net.createServer(c => c.end()); await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const up = await probe('127.0.0.1', srv.address().port, 1000);
+    assert(up.ok && !up.refused, 'a listening port is reachable');
+    const port = srv.address().port; srv.close(); await sleep(100);
+    const closed = await probe('127.0.0.1', port, 1000);
+    assert(closed.ok && closed.refused, 'a refused port still means the host answered');
+    const far = await probe('no-such-controller.invalid', 80, 400);   // (a blackholed IP cannot be used here: this sandbox's network answers every address)
+    assert(!far.ok, 'no answer = not reachable'); assert(far.ms < 2000, 'gives up quickly');
+    const now = Date.now();
+    const st = { running: true, port: '/dev/ttyUSB1', devices: [{ address: 11, model: 'RI4S', lastPollAt: now - 200, pollCount: 900 }, { address: 12, model: 'RI2MS', lastPollAt: now - 9000 }, { address: 13, model: 'RI4S', lastPollAt: 0 }] };
+    const E = emulatedLinks(st, now);
+    assert.deepStrictEqual(E.map(x => x.link), ['up', 'down', 'down']);
+    assert(/stopped polling it 9 s ago/.test(E[1].note)); assert(/never polled/.test(E[2].note));
+    assert(emulatedLinks({ ...st, running: false }, now).every(x => x.link === 'down' && /stopped/.test(x.note)), 'emulator stopped: all down');
+    const ch = linkChanges({ controllers: [{ id: 'a', link: 'up' }, { id: 'b', link: 'down' }] }, { at: 5, controllers: [{ id: 'a', name: 'A', host: 'h', link: 'down' }, { id: 'b', link: 'down' }, { id: 'c', link: 'up' }] });
+    assert.deepStrictEqual(ch.map(c => [c.id, c.from, c.to]), [['a', 'up', 'down']], 'only changes of known controllers');
+    // the engine: links checked once at a time, changes logged and put in the recording run
+    const { TraceEngine } = require('../trace/engine');
+    const e = new TraceEngine();
+    let polled = now;
+    e.deps = { emulator: { status: () => ({ running: true, port: '/dev/ttyUSB1', devices: [{ address: 11, model: 'RI4S', lastPollAt: polled }] }) } };
+    e.settings.wire.controllerIps = [];
+    const [l1, l2] = await Promise.all([e.checkLinks(), e.checkLinks()]);
+    assert.strictEqual(l1, l2, 'concurrent checks share one');
+    assert.strictEqual(l1.controllers.find(c => c.id === 'emu:11').link, 'up');
+    polled = Date.now() - 20000;
+    const seen = []; e.on('link', c => seen.push(...c));
+    await e.checkLinks();
+    assert.strictEqual(seen.length, 1); assert.strictEqual(seen[0].to, 'down'); assert(e.status().linkLog.some(x => x.id === 'emu:11' && x.to === 'down'));
+    ok('controller links: TCP reachability (refused still answers, gives up fast), emulated Azure boards up while the IC2 polls them, changes logged once');
+  }
+
   console.log(`\n${passed} checks passed`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

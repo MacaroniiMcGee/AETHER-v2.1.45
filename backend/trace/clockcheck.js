@@ -52,6 +52,7 @@ async function checkControllers(opt = {}) {
   const list = devices.filter(d => !only || only.has(d.id)).slice(0, 16);
   const out = await Promise.all(list.map(async d => {
     const base = { id: d.id, name: d.name || d.host, host: d.host, model: d.model || null };
+    if (opt.unreachable && opt.unreachable.has(d.id)) return { ...base, skipped: true, error: 'Not reachable from this Pi (cloud only): not checked' };   // TRACE-8: no 8 s wait
     if (!creds[d.id]) return { ...base, error: 'No login saved for it in Tools › SUNAPI Console' };
     const root = d.cgiRoot || 'stw-cgi';
     const t1 = Date.now();

@@ -28,6 +28,7 @@ const { integrity } = require('./integrity');
 const { compare } = require('./compare');
 const { frameToEvent } = require('./readerfeedback');   // TRACE-5
 const { checkControllers } = require('./clockcheck');
+const { checkLinks, linkChanges } = require('./linkcheck');   // TRACE-8
 const { suggestWiring } = require('./suggest');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
@@ -748,7 +749,12 @@ class TraceEngine extends EventEmitter {
     // old runs
     const all = this.listRuns();
     for (const r of all.slice(KEEP_RUNS)) { try { fs.rmSync(runDir(r.id), { recursive: true, force: true }); } catch { /* */ } }
-    if (this.settings.clock.check) this.checkClocks().then(c => { if (c && c.available) this._patchMeta(id, { controllerClocks: c }); }).catch(() => {});   // TRACE-5
+    // TRACE-8: controller links at the start, then every 15 s while the run records (changes go into the run)
+    this.checkLinks().then(L => { if (this.run && this.run.id === id) this._patchMeta(id, { links: L }); }).catch(() => {})
+      .then(() => { if (this.settings.clock.check) return this.checkClocks().then(c => { if (c && c.available) this._patchMeta(id, { controllerClocks: c }); }); }).catch(() => {});   // TRACE-5
+    clearInterval(this._linkTimer);
+    this._linkTimer = setInterval(() => { if (this.run) this.checkLinks().catch(() => {}); }, 15000);
+    if (this._linkTimer.unref) this._linkTimer.unref();
     const doSync = opt.sync !== false && this.settings.sync.atStart;
     if (doSync) this.sendSync('start').catch(e => this._patchMeta(id, { syncError: e.message }));
     clearInterval(this._syncTimer);
@@ -764,6 +770,7 @@ class TraceEngine extends EventEmitter {
     if (!r || r.stopping) return null;
     r.stopping = true;
     clearInterval(this._syncTimer); this._syncTimer = null;
+    clearInterval(this._linkTimer); this._linkTimer = null;
     if (!opt.skipSync && this.settings.sync.atEnd && opt.sync !== false) {
       try { while (this.syncBusy) await sleep(200); if (this.run === r) await this.sendSync('end'); await sleep(Math.min(8000, this.settings.thresholds.matchWindowMs)); } catch (e) { this._patchMeta(r.id, { syncError: e.message }); }
     }
@@ -953,8 +960,30 @@ class TraceEngine extends EventEmitter {
   }
 
   // ── TRACE-5: controller clocks (SUNAPI) ────────────────────────────────
+  // ── TRACE-8: can this Pi reach each controller (TCP to its web port; emulated Azure boards: is the IC2 polling them) ──
+  async checkLinks() {
+    if (this._linkP) return this._linkP;   // one check at a time; callers share it
+    this._linkP = (async () => {
+      const prev = this.links || null;
+      const next = await checkLinks({ wireIps: this.settings.wire.controllerIps, emulator: this.deps.emulator });
+      const ch = linkChanges(prev, next);
+      this.links = next;
+      if (ch.length) {
+        this.linkLog = (this.linkLog || []).concat(ch).slice(-50);
+        for (const c of ch) console.log(`[Trace] ${c.name} (${c.host}): link ${c.from} → ${c.to}`);
+        if (this.run) { this.run.linkChanges = (this.run.linkChanges || []).concat(ch); this._patchMeta(this.run.id, { links: next, linkChanges: this.run.linkChanges }); }
+        this.emit('link', ch);
+      }
+      return next;
+    })().finally(() => { this._linkP = null; });
+    return this._linkP;
+  }
+
   async checkClocks(opt = {}) {
-    const r = await checkControllers(opt);
+    // controllers this Pi cannot reach are not asked (no 8 s timeout); a check from the last 60 s is reused
+    let L = this.links; if (!L || Date.now() - L.at > 60000) L = await this.checkLinks().catch(() => null);
+    const unreachable = new Set(((L && L.controllers) || []).filter(c => c.source === 'sunapi' && c.link === 'down').map(c => c.id));
+    const r = await checkControllers({ ...opt, unreachable });
     if (r && r.available) r.warnMs = this.settings.clock.warnMs;
     this.clockCheck = r;
     return r;
@@ -1443,6 +1472,7 @@ class TraceEngine extends EventEmitter {
       doorSync: this.doorSync || null,
       test: this.testStatus(),
       clockCheck: this.clockCheck || null,
+      links: this.links || null, linkLog: (this.linkLog || []).slice(-10),   // TRACE-8
       alertSeq: this.alertSeq,
       alerts: this.alerts.slice(-5),
       inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,

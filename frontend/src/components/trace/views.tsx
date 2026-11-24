@@ -126,12 +126,21 @@ export const ClockCard: React.FC<{ a: Analysis; live?: import('./api').ClockChec
           {cc && !cc.available && <span className="text-hv-text-3">{cc.reason}</span>}
           {cc && cc.available && !cc.controllers.length && <span className="text-hv-text-3">no access controllers saved in Tools › SUNAPI Console</span>}
           {cc && cc.controllers.map(x => (
-            <Badge key={x.id} tone={x.error ? 'neutral' : Math.abs(x.offsetMs || 0) > (cc.warnMs || 2000) ? 'warning' : 'success'}
+            <Badge key={x.id} tone={x.skipped || x.error ? 'neutral' : Math.abs(x.offsetMs || 0) > (cc.warnMs || 2000) ? 'warning' : 'success'}
               title={x.error ? x.error : `SUNAPI date view · round trip ${fmtMs(x.rttMs)} · ±${fmtMs(x.resolutionMs)}${x.sync ? ` · time sync: ${x.sync}` : ''}${x.ntp ? ` (${x.ntp})` : ''}${x.tz ? ` · ${x.tz}` : ''}`}>
-              {x.name}: {x.error ? 'not read' : `${(x.offsetMs || 0) >= 0 ? '+' : '−'}${fmtMs(Math.abs(x.offsetMs || 0))}`}{x.sync ? ` · ${x.sync}` : ''}
+              {x.name}: {x.skipped ? 'cloud only, not checked' : x.error ? 'not read' : `${(x.offsetMs || 0) >= 0 ? '+' : '−'}${fmtMs(Math.abs(x.offsetMs || 0))}`}{x.sync ? ` · ${x.sync}` : ''}
             </Badge>
           ))}
           {onCheck && <button className="text-hv-brand hover:underline" onClick={onCheck}>Check now</button>}
+        </div>
+      )}
+      {/* TRACE-8: controllers (or emulated Azure boards) that lost or regained their local link while this run recorded */}
+      {(a.meta?.linkChanges || []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+          <span className="text-hv-text-3">Controller links during the run:</span>
+          {a.meta!.linkChanges!.slice(-12).map((x, i) => (
+            <Badge key={i} tone={x.to === 'down' ? 'error' : 'success'} title={`${x.host} · ${x.from} → ${x.to}`}>{clock(x.at)} {x.name} {x.to === 'down' ? 'lost' : 'back'}</Badge>
+          ))}
         </div>
       )}
     </div>
