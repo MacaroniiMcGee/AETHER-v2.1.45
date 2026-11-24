@@ -29,6 +29,7 @@ const { compare } = require('./compare');
 const { frameToEvent } = require('./readerfeedback');   // TRACE-5
 const { checkControllers } = require('./clockcheck');
 const { checkLinks, linkChanges } = require('./linkcheck');   // TRACE-8
+const { explainTrace, doorVerdict } = require('./explain');     // TRACE-9
 const { suggestWiring } = require('./suggest');
 
 const BASE = path.join(__dirname, '..', 'data', 'trace');
@@ -61,6 +62,7 @@ const DEFAULTS = {
   commands: { enabled: false },
   alerts: { enabled: true, level: 'fail', automation: true },   // TRACE-4: live alerts (toast + Automation trigger)
   clock: { check: true, warnMs: 2000 },                            // TRACE-5: controller clocks over SUNAPI at run start
+  quick: { valid: null, invalid: null, held: false, heldMs: 30000 },   // TRACE-9: door check test cards ({fc, cn}); null = from expectations / sync cards
   expectations: [],     // [{ fc, cn, expect: 'grant'|'deny', note }]
   allowRaw: true,
 };
@@ -98,6 +100,8 @@ function cleanSettings(s = {}) {
     allowRaw: s.allowRaw !== false,
     commands: { enabled: !!(s.commands && s.commands.enabled) },
     clock: { check: !(s.clock && s.clock.check === false), warnMs: int(s.clock && s.clock.warnMs, 200, 600000, 2000) },
+    quick: (() => { const q = s.quick || {}; const card = c => c && c.cn !== '' && c.cn != null && Number.isFinite(Number(c.cn)) ? { fc: c.fc === '' || c.fc == null ? '' : String(int(c.fc, 0, 2 ** 31 - 1, 0)), cn: String(int(c.cn, 0, 2 ** 53 - 1, 0)) } : null;
+      return { valid: card(q.valid), invalid: card(q.invalid), held: !!q.held, heldMs: int(q.heldMs, 5000, 600000, 30000) }; })(),
     alerts: { enabled: !(s.alerts && s.alerts.enabled === false), level: s.alerts && s.alerts.level === 'warn' ? 'warn' : 'fail', automation: !(s.alerts && s.alerts.automation === false) },
   };
 }
@@ -801,6 +805,7 @@ class TraceEngine extends EventEmitter {
     const events = id ? this.readEvents(id) : this.live;
     const syncs = id ? (meta.syncs || []) : (this.liveSyncs || []);
     const res = correlate(events, syncs, { ...this.settings, doorConfig: this.settings.cloud.doorConfig }, { wiring: this.wiring() });
+    for (const t of res.traces) t.explain = explainTrace(t);   // TRACE-9: one plain sentence + likely cause / what to check per note
     res.integrity = integrity(events, { pollMs: this.settings.cloud.pollMs, apiEnabled: this.settings.cloud.poll, now: meta && meta.end ? meta.end + 60000 : Date.now() });
     const value = { meta: meta ? { id: meta.id, name: meta.name, start: meta.start, end: meta.end, endReason: meta.endReason, syncError: meta.syncError, controllerClocks: meta.controllerClocks || null, imports: meta.imports || [], count: events.length, running: !!(this.run && this.run.id === id), test: meta.test ? { sequence: meta.test.sequence, startedAt: meta.test.startedAt, endedAt: meta.test.endedAt || null } : (this.run && this.run.id === id && this.run.test ? { sequence: this.run.test.sequence, startedAt: this.run.test.startedAt, endedAt: null } : null) } : null, ...res };
     this._cache = this._caches[slot] = { key, at: Date.now(), value };
@@ -1130,6 +1135,7 @@ class TraceEngine extends EventEmitter {
         const merge = (now, old, k) => now.concat((old || []).filter(o => !now.some(n => n[k] === o[k])));
         const keep = { at: D.at, end: D.end, who: D.who, relays: merge(D.relays, prev.relays, 'ch'), readers: merge(D.readers, prev.readers, 'ch'), locks: merge(D.locks, prev.locks, 'door'), error: D.error, aborted: D.abort };
         try { writeAtomic(DISCOVER, JSON.stringify(keep, null, 1)); } catch { /* */ }
+        try { this._autoApplyWiring(D.who); } catch (e) { console.warn('[Trace] could not take the suggested wiring:', e.message); }   // TRACE-9
       }
     })();
     return this.discoverStatus();
@@ -1456,6 +1462,143 @@ class TraceEngine extends EventEmitter {
   }
   alertsSince(seq = 0) { return { seq: this.alertSeq, alerts: this.alerts.filter(a => a.seq > seq) }; }
 
+  // ── TRACE-9: smart defaults ─────────────────────────────────────────────
+  /** Wiring mapped by hand or suggestion (not counting what doors own)? If none, take what Discover proved / the Doors page set. */
+  _autoApplyWiring(who = 'auto') {
+    const w = this.wiring();
+    const own = Object.values(w).filter(e => e && !e.src && !e.via && e.role && e.role !== 'ignore').length;
+    if (own) return { applied: [], why: 'wiring already mapped' };
+    const sug = this.suggest();
+    const pick = sug.rows.filter(r => r.differs !== false && (r.source === 'probe' || r.source === 'doors page') && r.role && r.role !== 'ignore').map(r => r.ch);
+    if (!pick.length) return { applied: [], why: 'nothing proved yet' };
+    const r = this.applySuggestion(pick, `${who}, automatic`);
+    return { applied: r.done || pick, why: null };
+  }
+  /** Doors under test and their controllers from the Doors page pairing (OnCAFE door on each door). Adds, never removes. */
+  adoptPairing() {
+    let doors = [];
+    try { doors = [...this._doorMap().values()].filter(x => x.enabled && x.oncafe); } catch { return { added: 0 }; }
+    const inv = this.cloud.inv;
+    const c = this.settings.cloud;
+    const addD = doors.map(x => x.oncafe).filter(id => /^[0-9a-f-]{36}$/i.test(id) && !c.doors.includes(id));
+    const ctl = doors.map(x => ((inv && inv.doors || []).find(d => d.id === x.oncafe) || {}).controllerId).filter(id => id && /^[0-9a-f-]{36}$/i.test(id) && !c.controllers.includes(id));
+    const addC = [...new Set(ctl)];
+    if (!addD.length && !addC.length) return { added: 0 };
+    this.saveSettings({ ...this.settings, cloud: { ...c, doors: c.doors.concat(addD).slice(0, 50), controllers: c.controllers.concat(addC).slice(0, 64) } });
+    // a connected feed subscribes per controller and polls per door: start it again with the new list
+    if (this.cloud.status().push.state === 'connected') this.cloud.start(this.settings.cloud).catch(e => console.warn('[Trace] reconnect after adding doors:', e.message));
+    return { added: addD.length + addC.length, doors: addD.length, controllers: addC.length };
+  }
+
+  /** The two cards a door check uses: valid (has access) and invalid (has none). */
+  _testCards() {
+    const q = this.settings.quick || {}, ex = this.settings.expectations || [];
+    const g = ex.find(e => e.expect === 'grant'), d = ex.find(e => e.expect === 'deny');
+    const valid = q.valid || (g ? { fc: String(g.fc ?? ''), cn: String(g.cn) } : this.settings.sync.cards[0] ? { fc: String(this.settings.sync.cards[0].fc ?? ''), cn: String(this.settings.sync.cards[0].cn) } : null);
+    const invalid = q.invalid || (d ? { fc: String(d.fc ?? ''), cn: String(d.cn) } : null);
+    return { valid, invalid, validFrom: q.valid ? 'set' : g ? 'expectations' : 'sync card', invalidFrom: q.invalid ? 'set' : d ? 'expectations' : null };
+  }
+
+  /** ── TRACE-9: Ready to trace? Each item: { id, state: ok|warn|todo, title, detail, fix?: { action, label } } ── */
+  readiness() {
+    const items = [];
+    const add = (id, state, title, detail, fix) => items.push({ id, state, title, detail, ...(fix ? { fix } : {}) });
+    const c = this.settings.cloud, cs = this.cloud.status();
+    if (!c.url || !c.org) add('cloud', 'todo', 'Connect to OnCAFE', 'Sign in and pick the organisation, so Aether can see what the controller reports.', { action: 'setup:cloud', label: 'Sign in' });
+    else if (cs.push.state !== 'connected') add('cloud', 'todo', 'OnCAFE feed not connected', cs.push.error ? `Last error: ${cs.push.error}` : 'Aether is not listening to OnCAFE right now.', { action: 'connect', label: 'Connect' });
+    else add('cloud', 'ok', 'OnCAFE connected', `${cs.push.host || 'cloud'}: live events are coming in.`);
+    // first time only: watch the doors the Doors page already pairs with OnCAFE (and their controllers)
+    if (!c.doors.length && c.url && c.org) { try { this.adoptPairing(); } catch { /* shown below */ } }
+    let doors = [];
+    try { doors = [...this._doorMap().values()].filter(x => x.enabled); } catch (e) { add('doors', 'todo', 'Doors page config is damaged', e.message); }
+    const paired = doors.filter(x => x.oncafe);
+    if (!doors.length) add('doors', 'todo', 'No doors on the Doors page', 'Add the doors Aether is wired to on the Doors page first.', { action: 'open:doors', label: 'Doors page' });
+    else if (!paired.length) add('pair', 'todo', 'Doors not paired with OnCAFE', `${doors.length} door${doors.length === 1 ? '' : 's'} on the Doors page, none paired with an OnCAFE door (Doors page › Settings › Event Trace, or Setup › Wiring).`, { action: 'setup:wiring', label: 'Pair doors' });
+    else {
+      const picked = paired.filter(x => c.doors.includes(x.oncafe));
+      if (picked.length < paired.length) add('pick', 'todo', 'Doors not being watched', `${paired.length - picked.length} paired door${paired.length - picked.length === 1 ? ' is' : 's are'} not picked under OnCAFE in Setup.`, { action: 'adopt', label: 'Watch them' });
+      else add('pick', paired.length < doors.length ? 'warn' : 'ok', `${picked.length} door${picked.length === 1 ? '' : 's'} watched`, paired.length < doors.length ? `${doors.length - paired.length} more on the Doors page ${doors.length - paired.length === 1 ? 'is' : 'are'} not paired with OnCAFE.` : paired.map(x => x.name).join(', '));
+    }
+    // wiring: every watched door needs its DPS / REX / lock known
+    const missing = paired.filter(x => !(x.chs.dps || x.raw.dps) || !(x.chs.rex || x.raw.rex)).map(x => x.name);
+    if (paired.length) {
+      if (missing.length) add('wiring', 'todo', 'Wiring not complete', `${missing.join(', ')}: DPS or REX is not set on the Doors page. Discover can find them.`, { action: 'setup:suggest', label: 'Find the wiring' });
+      else add('wiring', 'ok', 'Wiring known', 'Every watched door has its DPS and REX.');
+    }
+    // sync cards: proven by the last run that recorded (an offset came out of it)
+    const s = this.settings.sync;
+    if (!s.cards.length) add('sync', 'todo', 'No sync cards', 'Two enrolled cards line up the controller’s clock with Aether’s.', { action: 'setup:sync', label: 'Set sync cards' });
+    else {
+      const last = this.listRuns().find(r => r.end);
+      let off = null; try { off = last ? this.analyze(last.id, 'ready').clock.offset : null; } catch { /* */ }
+      if (off != null) add('sync', 'ok', 'Clocks lined up', `The last run’s sync cards worked (${s.cards.map(x => `${x.fc}-${x.cn}`).join(', ')}).`);
+      else add('sync', last ? 'todo' : 'warn', last ? 'Sync cards did not work last time' : 'Sync cards not tried yet', `Cards ${s.cards.map(x => `${x.fc}-${x.cn}`).join(', ')} must be enrolled with access to a watched door.`, { action: 'sync', label: 'Try them now' });
+    }
+    const tc = this._testCards();
+    if (!tc.valid || !tc.invalid) add('cards', 'todo', 'Test cards for door checks', `${tc.valid ? `Valid card ${tc.valid.fc}-${tc.valid.cn} (${tc.validFrom}).` : 'No card with access.'} ${tc.invalid ? '' : 'Pick a card number nobody has, for the "refused" check.'}`, { action: 'cards', label: 'Set test cards' });
+    else add('cards', 'ok', 'Test cards set', `Valid ${tc.valid.fc}-${tc.valid.cn} · without access ${tc.invalid.fc}-${tc.invalid.cn}`, { action: 'cards', label: 'Change' });
+    const L = this.links;
+    if (L) {
+      const down = L.controllers.filter(x => x.link === 'down');
+      if (down.length) add('links', 'warn', `${down.length} controller link${down.length === 1 ? '' : 's'} down`, down.map(x => `${x.name}: ${x.note || 'not reachable'}`).join(' · '), { action: 'links', label: 'Check again' });
+      else if (L.controllers.length) add('links', 'ok', 'Controllers reachable', `${L.controllers.length} checked ${new Date(L.at).toLocaleTimeString()}.`);
+    }
+    const todo = items.filter(i => i.state === 'todo').length;
+    return { ready: !todo, todo, warn: items.filter(i => i.state === 'warn').length, items, at: Date.now() };
+  }
+
+  /** ── TRACE-9: Test this door — the standard checks, in an order that keeps each one clean ── */
+  doorCheckPlan(doorId, opt = {}) {
+    const doors = this._doorMap();
+    const info = doors.get(Number(doorId));
+    if (!info) throw err('That door is not on the Doors page', 404);
+    if (!info.enabled) throw err(`${info.name} is turned off on the Doors page`);
+    const tc = this._testCards();
+    const q = this.settings.quick || {};
+    const grantMs = (info.oncafe && this.settings.cloud.doorConfig[info.oncafe] && this.settings.cloud.doorConfig[info.oncafe].grantMs) || 5000;
+    const settle = grantMs + 3000;   // the door relocks before the next check
+    const hasReader = !!info.d.reader, hasDps = !!(info.chs.dps || info.raw.dps), hasRex = !!(info.chs.rex || info.raw.rex);
+    const steps = [], skipped = [];
+    const after = (list, ms) => { if (list.length) list[list.length - 1].afterMs = ms; return list; };
+    if (hasReader && tc.invalid) steps.push(...after(template('invalid', info.id, {}, { badFc: tc.invalid.fc, badCn: tc.invalid.cn }), 3000));
+    else skipped.push(hasReader ? 'Card without access: no test card set (Ready to trace › Test cards)' : 'Cards: this door has no reader on the Doors page');
+    if (hasDps) steps.push(...after(template('forced', info.id), 3000)); else skipped.push('Forced open: no DPS on the Doors page');
+    if (hasReader && tc.valid) steps.push(...after(template('valid', info.id, tc.valid), settle)); else if (hasReader) skipped.push('Valid card: no card with access set');
+    if (hasRex) steps.push(...after(template('rex', info.id), settle)); else skipped.push('REX: no REX on the Doors page');
+    const held = opt.held != null ? !!opt.held : !!q.held;
+    if (held && hasDps && hasReader && tc.valid) steps.push(...template('held', info.id, tc.valid, { heldMs: q.heldMs || 30000, grantMs }));
+    else if (held) skipped.push('Held open: needs a reader, a DPS and a valid card');
+    return { info, steps, skipped, seqId: `seq-door${info.id}`, name: `Door check: ${info.name}` };
+  }
+  async doorCheck(doorId, opt = {}, who = '?') {
+    const p = this.doorCheckPlan(doorId, opt);
+    if (!p.steps.length) throw err(`Nothing to check on ${p.info.name}: ${p.skipped.join('; ')}`);
+    this.saveSequence({ id: p.seqId, name: p.name, note: 'Made by "Test this door" (TRACE-9); runs again each time with the current cards and wiring.', steps: p.steps, repeat: 1, sync: true });
+    const t = await this.runTest(p.seqId, {}, who);
+    const dc = { door: p.info.id, name: p.info.name, skipped: p.skipped };
+    if (this.test) this.test.doorCheck = dc;
+    if (this.test && this.test.runId) this._patchMeta(this.test.runId, { doorCheck: dc });
+    return t;
+  }
+  /** Plain verdict of a door check run. */
+  doorCheckResult(runId) {
+    const meta = JSON.parse(fs.readFileSync(this._metaPath(runId), 'utf8'));
+    if (!meta.doorCheck) throw err('That run is not a door check', 404);
+    const r = this.testReport(runId);
+    const a = this.analyze(runId);
+    return { runId, door: meta.doorCheck.door, name: meta.doorCheck.name, running: !!(this.test && this.test.runId === runId && this.test.state !== 'done'),
+      startedAt: r.startedAt, endedAt: r.endedAt, aborted: r.aborted, error: r.error, ...doorVerdict(meta.doorCheck.name, r.report, a.traces, meta.doorCheck.skipped || []) };
+  }
+  /** The newest door check per door (Doors page strip, Tests tab). */
+  doorChecks() {
+    const out = {};
+    for (const r of this.listRuns()) {
+      if (!r.doorCheck || out[r.doorCheck.door]) continue;
+      out[r.doorCheck.door] = { runId: r.id, at: r.start, end: r.end };
+    }
+    return out;
+  }
+
   status() {
     return {
       run: this.run ? { id: this.run.id, name: this.run.name, start: this.run.start, count: this.run.count, syncs: this.run.syncs } : null,
@@ -1473,6 +1616,7 @@ class TraceEngine extends EventEmitter {
       test: this.testStatus(),
       clockCheck: this.clockCheck || null,
       links: this.links || null, linkLog: (this.linkLog || []).slice(-10),   // TRACE-8
+      doorCheck: this.test && this.test.doorCheck ? { ...this.test.doorCheck, runId: this.test.runId, state: this.test.state } : null,   // TRACE-9
       alertSeq: this.alertSeq,
       alerts: this.alerts.slice(-5),
       inventory: this.cloud.inv ? { org: this.cloud.inv.org, at: this.cloud.inv.at, doors: this.cloud.inv.doors, areas: this.cloud.inv.areas, zones: this.cloud.inv.zones, controllers: this.cloud.inv.controllers } : null,

@@ -1013,6 +1013,91 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     ok('controller links: TCP reachability (refused still answers, gives up fast), emulated Azure boards up while the IC2 polls them, changes logged once');
   }
 
+  {
+    console.log('TRACE-9: plain language, ready to trace, test this door');
+    const { explainTrace, explainNote, doorVerdict } = require('../trace/explain');
+    const ex = explainTrace({ kind: 'card', action: { cred: { fc: 55, cn: 1001 } }, decision: { door: { name: 'Front' } }, result: 'grant', latency: { decision: 420, push: 1650 }, hops: [{ id: 'lock' }], notes: ['Cloud push after 4000 ms (warn at 3000)'] });
+    assert.strictEqual(ex.say, 'Card 55-1001 was granted at Front in 0.4 s; the lock opened; OnCAFE had it 1.6 s after Aether acted.');
+    assert.strictEqual(ex.problems[0].plain, 'OnCAFE delivered this late.'); assert(ex.problems[0].check.length);
+    assert.strictEqual(explainTrace({ kind: 'card', action: { cred: { cn: 9 } }, decision: null, notes: [] }).say, 'Card 9 was presented, but the controller never decided on it.');
+    assert.strictEqual(explainTrace({ kind: 'input', role: 'dps', action: { v: 1 }, decision: { door: { name: 'Back' } }, result: 'doorforcedopen', latency: { decision: 300, push: null, api: null }, notes: [] }).say,
+      'Door opened (Aether moved it); the controller reported FORCED OPEN at Back after 0.3 s; OnCAFE never reported it.');
+    assert(/never answered/.test(explainNote('No controller decision within 30 s').plain));
+    assert.strictEqual(explainNote('something new').plain, 'something new', 'unknown notes pass through');
+    const v = doorVerdict('Lab door', { steps: [{ kind: 'card', text: 'Valid card · Lab door', status: 'pass', why: [], traceId: 'a' }, { kind: 'card', text: 'Card without access · Lab door', status: 'fail', why: ['Expected a denial, got accessgranted', 'The strike turned on (10:00:00)'] }, { kind: 'wait', status: 'pass' }] },
+      [{ id: 'a', kind: 'card', action: { cred: { fc: 55, cn: 1001 } }, decision: {}, result: 'grant', latency: { decision: 300 }, hops: [], notes: [] }], ['REX: no REX on the Doors page']);
+    assert.strictEqual(v.headline, 'Lab door: 1 problem — card without access.'); assert(!v.ok);
+    assert.strictEqual(v.lines[0].say, 'Card 55-1001 was granted in 0.3 s; Aether did not see the lock open; OnCAFE never reported it.');
+    assert.strictEqual(v.lines[1].problems.length, 2); assert(/should be refused opened/.test(v.lines[1].problems[0].plain));
+    ok('plain language: one sentence per trace, likely cause and what to check per note, door verdicts');
+
+    // a Doors page door, a fake controller / cloud, and the whole "Test this door" flow
+    const { TraceEngine } = require('../trace/engine');
+    const dc = path.join(__dirname, '..', 'data', 'doors', 'door-config.json');
+    const ap = path.join(__dirname, '..', 'data', 'analytics', 'settings.json');
+    const keepDc = fs.existsSync(dc) ? fs.readFileSync(dc, 'utf8') : null, keepAp = fs.existsSync(ap) ? fs.readFileSync(ap, 'utf8') : null;
+    const OD = '88888888-8888-8888-8888-888888888888', OC = '99999999-9999-9999-9999-999999999999';
+    fs.mkdirSync(path.dirname(dc), { recursive: true });
+    fs.writeFileSync(dc, JSON.stringify({ savedAt: new Date().toISOString(), doors: [
+      { id: 1, name: 'Lab door', enabled: true, ioSource: 'physical', reader: 'wg-1', dps: { hardwareType: 'relay', channel: 0 }, rexIn: { hardwareType: 'relay', channel: 1 }, lock: { hardwareType: 'opto-in', channel: 3 }, trace: { oncafeDoorId: OD } },
+      { id: 2, name: 'Store', enabled: true, ioSource: 'physical', reader: null, dps: { hardwareType: 'relay', channel: 4 }, lock: { hardwareType: 'opto-in', channel: 5 } }] }));
+    fs.writeFileSync(ap, JSON.stringify({ wiring: {} }));
+    try {
+      const eng = new TraceEngine();
+      eng.saveSettings({ cloud: { url: '', org: '', controllers: [], doors: [], zones: [], doorConfig: {} }, quick: { valid: null, invalid: null }, expectations: [] });   // earlier checks left a cloud set up
+      eng.importDoors();
+      // ready to trace: cloud not set up yet; Lab door paired, Store not
+      let R = eng.readiness();
+      const item = id => R.items.find(i => i.id === id);
+      assert(!R.ready && item('cloud').state === 'todo' && item('cloud').fix.action === 'setup:cloud');
+      assert.strictEqual(item('pick').state, 'todo', 'paired door not yet watched');
+      assert.strictEqual(item('cards').state, 'todo', 'no card without access yet');
+      // smart default: watching the paired doors (and their controllers from the inventory) is one action
+      eng.cloud.inv = { org: 'o', at: Date.now(), doors: [{ id: OD, name: 'Lab door (OnCAFE)', controllerId: OC }], controllers: [{ id: OC, name: 'NHP lab' }], areas: [], zones: [] };
+      const ad = eng.adoptPairing();
+      assert.deepStrictEqual([ad.doors, ad.controllers], [1, 1]); assert(eng.settings.cloud.doors.includes(OD) && eng.settings.cloud.controllers.includes(OC));
+      assert.strictEqual(eng.adoptPairing().added, 0, 'adopting twice adds nothing');
+      // the plan says what it will do and what it cannot
+      eng.saveSettings({ quick: { valid: { fc: 55, cn: 1001 }, invalid: { fc: 55, cn: 9 } }, cloud: { ...eng.settings.cloud, doorConfig: { [OD]: { grantMs: 500 } } }, sync: { atStart: false, atEnd: false }, thresholds: { pushFail: 2000, pushWarn: 1500 } });
+      const P = eng.doorCheckPlan(1);
+      assert.deepStrictEqual(P.steps.filter(x => x.kind !== 'wait').map(x => x.label), ['Card without access', 'Force the door open', 'Close it', 'Valid card', 'REX']);
+      assert.deepStrictEqual(P.skipped, []);
+      const P2 = eng.doorCheckPlan(2);
+      assert(P2.skipped.some(x => /no reader/.test(x)) && P2.skipped.some(x => /no REX/.test(x)) && P2.steps.some(x => x.kind === 'dps'), 'a door without reader / REX: only what it can');
+      R = eng.readiness(); assert.strictEqual(item('cards').state, 'ok'); assert.strictEqual(item('pick').state, 'warn', 'Store is not paired');
+      // run it against a fake controller
+      const cloudEv = (type, extra = {}, lag = 150) => setTimeout(() => eng.add(fromCloud({ eventTimestamp: Date.now() - lag + 20, doorId: OD, ...extra, eventMeta: { eventId: Math.random().toString(16).slice(2), events: [{ event: [{ eventType: type }] }] } }, { src: 'cloud-mqtt', at: Date.now() })[0]), lag);
+      let granted = false;
+      const wm = { getReaders: () => [{ id: 'wg-1' }], async sendCard(id, fc, cn) {
+        eng.add(fromJournal({ t: Date.now(), k: 'card', ch: `wiegand:${id}`, v: 1, src: 'wiegand', m: { fc, cn } }));
+        if (cn === 1001) { granted = true; cloudEv('accessgranted', { cardNumber: '1001', facilityCode: String(fc) });
+          setTimeout(() => eng.add(fromJournal({ t: Date.now(), k: 'opto', ch: 'opto:3', v: 1, src: 'physical' })), 220);
+          setTimeout(() => { eng.add(fromJournal({ t: Date.now(), k: 'opto', ch: 'opto:3', v: 0, src: 'physical' })); granted = false; }, 700); }
+        else cloudEv('accessdenied', { cardNumber: String(cn), facilityCode: String(fc) });
+        return { success: true }; } };
+      const gq = { async enqueue(op, ch, v) { if (op === 'getRelay') return {}; eng.add(fromJournal({ t: Date.now(), k: 'relay', ch: `relay:${ch}`, v: v ? 1 : 0, src: 'physical' }));
+        if (ch === 0) cloudEv(v ? (granted ? 'open' : 'doorforcedopen') : 'closed'); if (ch === 1) cloudEv(v ? 'rexactivated' : 'rexdeactivated'); return { success: true }; } };
+      eng.deps = { getWiegand: () => wm, gpioQueue: gq };
+      await eng.doorCheck(1, {}, 'tester');
+      assert.strictEqual(eng.status().doorCheck.name, 'Lab door');
+      for (let i = 0; i < 900 && eng.test.state !== 'done'; i++) await sleep(100);
+      const res = eng.doorCheckResult(eng.test.runId);
+      assert(res.ok, JSON.stringify(res.lines.map(l => [l.label, l.ok, l.problems.map(p => p.note)])));
+      assert(/^Lab door: works/.test(res.headline), res.headline);   // sync cards are off in this check, so the clock note may add "things to look at"
+      assert(res.lines.filter(l => l.warn).every(l => l.problems.every(p => /line up the controller/.test(p.plain))), 'only the clock note');
+      assert.deepStrictEqual(res.lines.map(l => l.label), ['Card without access', 'Force the door open', 'Close it', 'Valid card', 'REX']);
+      assert(/^Card 55-1001 was granted/.test(res.lines[3].say), res.lines[3].say);
+      assert.strictEqual(eng.doorChecks()[1].runId, res.runId, 'newest check per door');
+      assert(eng.sequences().some(q => q.id === 'seq-door1' && q.name === 'Door check: Lab door'));
+      // every analysed trace carries its sentence
+      assert(eng.analyze(res.runId).traces.every(t => t.explain && typeof t.explain.say === 'string'));
+      ok('Ready to trace (cloud, pairing, cards), watching paired doors is one action, Test this door runs only what the door has and answers in words');
+    } finally {
+      if (keepDc != null) fs.writeFileSync(dc, keepDc); else try { fs.unlinkSync(dc); } catch { /* */ }
+      if (keepAp != null) fs.writeFileSync(ap, keepAp); else try { fs.unlinkSync(ap); } catch { /* */ }
+    }
+  }
+
   console.log(`\n${passed} checks passed`);
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

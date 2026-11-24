@@ -220,6 +220,30 @@ module.exports = function traceRoutes() {
     const b = req.body || {};
     try { res.json({ current: await eng.runTest(String(req.params.id), { repeat: b.repeat, minutes: b.minutes, gapMs: b.gapMs }, who(req)) }); } catch (e) { fail(res, e); }
   });
+  // ── TRACE-9: Ready to trace? / Test this door ──
+  router.get('/ready', (_req, res) => { try { res.json(eng.readiness()); } catch (e) { fail(res, e); } });
+  router.post('/ready/adopt', express.json(), (req, res) => {
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Only the Aether page itself can change the doors under test' });
+    try { res.json({ ...eng.adoptPairing(), ready: eng.readiness() }); } catch (e) { fail(res, e); }
+  });
+  router.post('/ready/wiring', express.json(), (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can change the wiring map' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Only the Aether page itself can change the wiring map' });
+    try { res.json(eng._autoApplyWiring(who(req))); } catch (e) { fail(res, e); }
+  });
+  router.get('/doors/:id/check/plan', (req, res) => {
+    try { const p = eng.doorCheckPlan(Number(req.params.id), { held: req.query.held === undefined ? undefined : req.query.held === '1' });
+      res.json({ door: p.info.id, name: p.name, steps: p.steps.filter(s => s.kind !== 'wait').map(s => s.label), skipped: p.skipped }); } catch (e) { fail(res, e); }
+  });
+  router.post('/doors/:id/check', express.json(), async (req, res) => {
+    // moves real hardware like any test: admins only, and only from the Aether page itself
+    if (!isAdmin(req)) return res.status(403).json({ error: 'Only an Aether admin can test a door' });
+    if (!ownOrigin(req)) return res.status(403).json({ error: 'Door checks can only be started from the Aether page itself' });
+    const b = req.body || {};
+    try { res.json({ current: await eng.doorCheck(Number(req.params.id), { held: b.held }, who(req)) }); } catch (e) { fail(res, e); }
+  });
+  router.get('/doorchecks', (_req, res) => { try { res.json(eng.doorChecks()); } catch (e) { fail(res, e); } });
+  router.get('/runs/:id/doorcheck', (req, res) => { try { res.json(eng.doorCheckResult(String(req.params.id))); } catch (e) { fail(res, e.code === 'ENOENT' ? Object.assign(new Error('That run no longer exists'), { status: 404 }) : e); } });
   router.get('/runs/:id/test', (req, res) => { try { res.json(eng.testReport(String(req.params.id))); } catch (e) { fail(res, e.code === 'ENOENT' ? Object.assign(new Error('That run no longer exists'), { status: 404 }) : e); } });
   router.get('/runs/:id/test.csv', (req, res) => {
     try {
