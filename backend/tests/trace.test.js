@@ -860,6 +860,7 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
       ...fromCloud({ eventTimestamp: T0 + 10100, doorId: 'D1', cardNumber: '77', facilityCode: '5', eventMeta: { eventId: 'a2', events: [{ event: [{ eventType: 'accessgranted' }] }] } }, { src: 'cloud-mqtt', at: T0 + 10800 }),
       frameToEvent({ name: 'osdp_LED', isReply: false, address: 1, port: 'p', dataHex: led(1), ts: T0 + 10200 }, [{ id: 'rd1', address: 1 }]),
     ];
+    assert.strictEqual(frameToEvent({ name: 'osdp_LED', isReply: false, address: 3, port: '/dev/ttyUSB1', dataHex: led(1), ts: T0 }, [], { emuPorts: ['/dev/ttyUSB1'] }).info.ch, 'emu:3:rdr:0', 'controller emulator on a serial port');
     const r = correlate(evs, [], { thresholds: {}, expectations: [] }, { wiring: {} });
     const c1 = r.traces.find(t => t.at === T0), c2 = r.traces.find(t => t.at === T0 + 10000);
     assert.strictEqual(c1.latency.reader, 180); assert.strictEqual(c1.reader.colour, 'green'); assert.strictEqual(c1.reader.beep, 'beep');

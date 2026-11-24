@@ -34,13 +34,13 @@ function parseBuz(hex) {
 }
 
 /** One OSDP Trace frame → an Event Trace event, or null (only commands to a reader count, never replies). */
-function frameToEvent(f, readers = []) {
+function frameToEvent(f, readers = [], opt = {}) {
   if (!f || f.isReply) return null;
   const name = String(f.name || '');
   if (name !== 'osdp_LED' && name !== 'osdp_BUZ') return null;
   const rd = readers.find(r => Number(r.address) === Number(f.address) && (!r.port || !f.port || r.port === f.port)) || null;
   // a reader on an emulated board (the panel polls Aether's emulated RI4S / RI2MS): emu:<board>:rdr:<reader on that board>
-  const onBoard = !rd && /controller-emulator/.test(String(f.port || ''));
+  const onBoard = !rd && (/controller-emulator/.test(String(f.port || '')) || (!!f.port && (opt.emuPorts || []).includes(f.port)));
   const chFor = readerNo => (rd ? `osdp:${rd.id}` : onBoard ? `emu:${Number(f.address) & 0x7F}:rdr:${readerNo}` : `osdp-addr:${f.port || '?'}:${f.address}`);
   const at = Number(f.ts) || Date.now();
   const base = { id: newId(), src: 'reader', lane: 'aether', at, t: at, clock: 'pi', door: null, controllerId: null, cred: null, clientType: null, eventId: null, topic: null };

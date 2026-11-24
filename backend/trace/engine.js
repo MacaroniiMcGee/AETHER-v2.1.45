@@ -932,7 +932,9 @@ class TraceEngine extends EventEmitter {
       try {
         const om = this.deps.getOsdp && this.deps.getOsdp();
         const readers = om && om.getReaders ? [].concat(om.getReaders() || []).map(r => ({ id: String(r.id ?? r.readerId), name: r.name, address: r.address, port: r.port || r.portPath || null })) : [];
-        const e = frameToEvent(f, readers);
+        // the controller emulator's frames carry its serial port (e.g. /dev/ttyUSB1), not a name
+        const em = this.deps.emulator, emPort = em && (em.portPath || (em.cfg && em.cfg.port));
+        const e = frameToEvent(f, readers, { emuPorts: emPort ? [String(emPort)] : [] });
         if (e) this.add(e);
       } catch { /* never break OSDP Trace */ }
     });
