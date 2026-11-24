@@ -347,7 +347,7 @@ class TraceEngine extends EventEmitter {
     const s = this.settings.sync;
     const sent = [];
     const batch = Date.now().toString(36);
-    const keep = rec => { sent.push(rec); if (this.run) { this.run.syncs.push(rec); this._patchMeta(this.run.id, { syncs: this.run.syncs }); } else { this.liveSyncs = (this.liveSyncs || []).concat(rec).slice(-20); } };
+    const keep = rec => { sent.push(rec); if (this.run) { this.run.syncs.push(rec); this._patchMeta(this.run.id, { syncs: this.run.syncs }); } this.liveSyncs = (this.liveSyncs || []).concat(rec).slice(-20); };   // the live view keeps the clock after a run too
     try {
       if (this.journal) this.journal.record('marker', 'trace', 1, 'ui', { event: 'sync-' + set, trace: true });
       if (s.channel.kind === 'relay' || s.channel.kind === 'emu-in') {
@@ -1144,10 +1144,12 @@ class TraceEngine extends EventEmitter {
       const cut = Date.now() - 10 * 60000;
       for (const t of a.traces) {
         if (t.sync || t.at < cut || this._alerted.has(t.id)) continue;
+        // a trace still inside its windows may still find its answer (a slow cloud): judge it once they have passed
+        const th = this.settings.thresholds;
+        const age = Date.now() - t.at;
+        if (t.decision ? age < 3000 : age < Math.max(th.matchWindowMs, th.inputWindowMs, th.outputWindowMs) + th.pushFail) continue;   // a wrong answer is final sooner than a missing one
+        this._alerted.add(t.id);   // judged now, pass or fail: never raised again (also when the run ends and the live view takes over)
         if (!(t.status === 'fail' || (al.level === 'warn' && t.status === 'warn'))) continue;
-        // a trace still inside its match window may still find its answer: wait for it
-        if (Date.now() - t.at < this.settings.thresholds.matchWindowMs && !t.decision && t.kind !== 'command') continue;
-        this._alerted.add(t.id);
         const x = { seq: ++this.alertSeq, at: Date.now(), traceAt: t.at, traceId: t.id, runId: this.run ? this.run.id : null, status: t.status, kind: t.kind, label: t.action.label,
           why: t.notes[0] || (t.status === 'fail' ? 'failed' : 'slow'), door: (t.decision && t.decision.door && (t.decision.door.name || t.decision.door.id)) || null };
         this.alerts.push(x);

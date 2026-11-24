@@ -64,7 +64,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
     if (alertSeq <= alertSeen.current) return;
     const since = alertSeen.current;
     alertSeen.current = alertSeq;
-    api.alerts(since).then(r => { if (r.alerts.length) setToasts(t => t.concat(r.alerts).slice(-4)); }).catch(() => {});
+    api.alerts(since).then(r => { if (r.alerts.length) setToasts(t => t.concat(r.alerts).slice(-3)); }).catch(() => {});
   }, [alertSeq, api, status]);
   useEffect(() => { if (!toasts.length) return; const t = setTimeout(() => setToasts(x => x.slice(1)), 15000); return () => clearTimeout(t); }, [toasts]);
 
@@ -199,17 +199,17 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
         </div>
       )}
       {toasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-50 w-96 space-y-2" role="status" aria-live="polite">
+        <div className="fixed bottom-4 right-4 z-50 w-80 space-y-1.5" role="status" aria-live="polite">
           {toasts.map(t => (
-            <div key={t.seq} className={cx('rounded-hv-xs shadow-hv-2 ring-1 px-3 py-2 text-[12px] bg-hv-popup-panel', t.status === 'fail' ? 'ring-hv-error' : 'ring-hv-warning')}>
+            <div key={t.seq} className={cx('rounded-hv-xs shadow-hv-2 ring-1 px-2.5 py-1.5 text-[12px] bg-hv-popup-panel', t.status === 'fail' ? 'ring-hv-error' : 'ring-hv-warning')}>
               <div className="flex items-center gap-2">
                 <Bell size={13} className={t.status === 'fail' ? 'text-hv-error-fg' : 'text-hv-warning-fg'} />
                 <span className="font-semibold text-hv-text">{t.status === 'fail' ? 'Failed' : 'Slow'}: {t.label}</span>
                 <span className="ml-auto" />
                 <button className="text-hv-text-3 hover:text-hv-text" aria-label="Dismiss" onClick={() => setToasts(x => x.filter(y => y.seq !== t.seq))}>×</button>
               </div>
-              <div className="text-hv-text-2 mt-0.5">{t.why}{t.door ? ` · ${t.door}` : ''} · {new Date(t.traceAt).toLocaleTimeString()}</div>
-              <button className="mt-1 text-hv-brand hover:underline" onClick={() => { setToasts(x => x.filter(y => y.seq !== t.seq)); if (t.runId) { setOpenRun({ runId: t.runId, traceId: t.traceId }); setPage('runs'); } else { setPage('live'); setSelected(t.traceId); } }}>Show the trace</button>
+              <div className="text-hv-text-2 mt-0.5 truncate" title={t.why}>{t.why}{t.door ? ` · ${t.door}` : ''} · {new Date(t.traceAt).toLocaleTimeString()}</div>
+              <button className="mt-0.5 text-hv-brand hover:underline" onClick={() => { setToasts(x => x.filter(y => y.seq !== t.seq)); if (t.runId) { setOpenRun({ runId: t.runId, traceId: t.traceId }); setPage('runs'); } else { setPage('live'); setSelected(t.traceId); } }}>Show the trace</button>
             </div>
           ))}
         </div>

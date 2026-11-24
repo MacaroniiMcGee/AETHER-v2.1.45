@@ -771,6 +771,25 @@ function mockBroker({ user, pass, refuseIds = [] } = {}) {
     eng._cache = null; eng._alertTick(); eng._cache = null; eng._alertTick();
     assert.strictEqual(seen.length, 1); assert.strictEqual(seen[0].status, 'fail'); assert(eng.alertsSince(0).alerts.length >= 1);
     ok('live alerts: a failed trace raises one alert (once), kept for the page');
+    // review (harness): a trace judged during a run is not raised again when the run ends and the live view takes over
+    const before = seen.length;
+    eng._alerted.clear(); eng._alerted.add(eng.live.find(e => e.src === 'journal' && e.type === 'card').id);
+    eng._cache = null; eng._alertTick();
+    assert.strictEqual(seen.length, before, 'judged once');
+    // review (harness): sync cards whose decisions arrive without card numbers are never matched to door events
+    {
+      const S0 = Date.now() - 120000;
+      const evs = [
+        fromJournal({ t: S0, k: 'card', ch: 'wiegand:wg-1', v: 1, src: 'wiegand', m: { fc: 123, cn: 1234 } }),
+        fromJournal({ t: S0 + 2000, k: 'card', ch: 'wiegand:wg-1', v: 1, src: 'wiegand', m: { fc: 123, cn: 9876 } }),
+        ...fromCloud({ eventTimestamp: S0 + 5000 + 1240, doorId: OD, eventMeta: { eventId: 'x1', events: [{ event: [{ eventType: 'open' }] }] } }, { src: 'cloud-mqtt', at: S0 + 5300 }),
+        ...fromCloud({ eventTimestamp: S0 + 7000 + 1240, doorId: OD, eventMeta: { eventId: 'x2', events: [{ event: [{ eventType: 'closed' }] }] } }, { src: 'cloud-mqtt', at: S0 + 7300 }),
+      ];
+      const syncs = [{ at: S0, fc: 123, cn: '1234', set: 'start', idx: 0, batch: 'b' }, { at: S0 + 2000, fc: 123, cn: '9876', set: 'start', idx: 1, batch: 'b' }];
+      const r = correlate(evs, syncs, { thresholds: {}, expectations: [] }, { wiring: {} });
+      assert.strictEqual(r.clock.offset, null, 'door open / closed 2 s apart are not taken for the sync pair');
+    }
+    ok('review: alerts judged once (no repeat when the live view takes over); sync pairs never matched to door events');
     if (keepDc != null) fs.writeFileSync(dc, keepDc); else fs.unlinkSync(dc);
     if (keepAp != null) fs.writeFileSync(ap, keepAp);
   }

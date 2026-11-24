@@ -93,14 +93,15 @@ export const LatencyChart: React.FC<{ series: TestReport['report']['series'] }> 
   const pts = useMemo(() => [...series].sort((a, b) => a.at - b.at), [series]);
   if (pts.length < 2) return <div className="text-xs text-hv-text-3 p-2">The chart needs at least two graded steps with a latency.</div>;
   const t0 = pts[0].at, t1 = pts[pts.length - 1].at || t0 + 1;
-  const vmax = Math.max(1, ...pts.flatMap(p => [p.decision ?? 0, p.push ?? 0]));
-  const step = [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 30000, 60000].find(s => vmax / s <= 4) || 60000;
-  const top = Math.ceil(vmax / step) * step;
+  const vals = pts.flatMap(p => [p.decision, p.push]).filter((v): v is number => v != null);
+  const vmax = Math.max(1, ...vals), vmin = Math.min(0, ...vals);   // an uncorrected clock can make a hop slightly negative
+  const step = [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 30000, 60000].find(s => (vmax - vmin) / s <= 4) || 60000;
+  const top = Math.ceil(vmax / step) * step, bottom = Math.floor(vmin / step) * step;
   const x = (t: number) => L + ((t - t0) / Math.max(1, t1 - t0)) * (W - L - R);
-  const y = (v: number) => T + (1 - v / top) * (H - T - B);
+  const y = (v: number) => T + (1 - (v - bottom) / (top - bottom)) * (H - T - B);
   const line = (k: 'decision' | 'push') => pts.filter(p => p[k] != null).map((p, i) => `${i ? 'L' : 'M'}${x(p.at).toFixed(1)},${y(p[k] as number).toFixed(1)}`).join('');
   const lastOf = (k: 'decision' | 'push') => [...pts].reverse().find(p => p[k] != null);
-  const ticks = Array.from({ length: Math.round(top / step) + 1 }, (_, i) => i * step);
+  const ticks = Array.from({ length: Math.round((top - bottom) / step) + 1 }, (_, i) => bottom + i * step);
   const h = hover != null ? pts[hover] : null;
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
     const r = (e.currentTarget as SVGRectElement).getBoundingClientRect();

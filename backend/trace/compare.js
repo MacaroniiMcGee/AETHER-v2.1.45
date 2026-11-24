@@ -54,8 +54,8 @@ function compare(A, B, evA, evB, testA, testB) {
     for (const s of testB.report.byStep) rows.set(s.idx, { ...(rows.get(s.idx) || { idx: s.idx, text: s.text, a: null }), b: s });
     steps = [...rows.values()].sort((x, y) => x.idx - y.idx).map(r => ({
       idx: r.idx, text: r.text,
-      a: r.a && { runs: r.a.runs, pass: r.a.pass, fail: r.a.fail, decision: r.a.decision.p50 ?? null, push: r.a.push.p50 ?? null },
-      b: r.b && { runs: r.b.runs, pass: r.b.pass, fail: r.b.fail, decision: r.b.decision.p50 ?? null, push: r.b.push.p50 ?? null },
+      a: r.a && { runs: r.a.runs, pass: r.a.pass + r.a.warn, fail: r.a.fail, decision: r.a.decision.p50 ?? null, push: r.a.push.p50 ?? null },
+      b: r.b && { runs: r.b.runs, pass: r.b.pass + r.b.warn, fail: r.b.fail, decision: r.b.decision.p50 ?? null, push: r.b.push.p50 ?? null },
       result: !r.a || !r.b ? 'only-one' : (r.b.fail / r.b.runs) > (r.a.fail / r.a.runs) ? 'worse' : (r.b.fail / r.b.runs) < (r.a.fail / r.a.runs) ? 'better' : 'same',
       decision: r.a && r.b ? moved(r.a.decision.p50, r.b.decision.p50) : 'only-one', push: r.a && r.b ? moved(r.a.push.p50, r.b.push.p50) : 'only-one',
     }));

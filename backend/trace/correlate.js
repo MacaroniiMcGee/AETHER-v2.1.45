@@ -127,7 +127,8 @@ function solveClock(syncs, groups, opt) {
       if (a.matched && b.matched) continue;
       const gap = b.at - a.at;
       const pool = groups.filter(g => !used.has(g) && !g.cloudClock && Math.abs(g.t - a.at) < opt.maxOffsetMs);
-      const okA = g => (a.types ? fits(a, g) : !g.cred), okB = g => (b.types ? fits(b, g) : !g.cred);
+      // a card marker without a card number can only be an access decision (never a door / I/O event)
+      const okA = g => (a.types ? fits(a, g) : !g.cred && !!g.access), okB = g => (b.types ? fits(b, g) : !g.cred && !!g.access);
       let best = null;
       for (const g1 of pool) {
         if (!okA(g1)) continue;
