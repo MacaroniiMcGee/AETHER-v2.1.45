@@ -50,6 +50,46 @@ export const Summary: React.FC<{ a: Analysis; kind?: Kind | 'all' }> = ({ a, kin
   );
 };
 
+/** TRACE-4: did every controller event reach the cloud once, in order? */
+const INTEG: { k: 'lostInPush' | 'notInLog' | 'onlyInLog' | 'duplicates' | 'outOfOrder'; label: string; tone: 'error' | 'warning'; hint: string }[] = [
+  { k: 'lostInPush', label: 'never pushed', tone: 'error', hint: 'In the event log (or the controller log) but never pushed over MQTT' },
+  { k: 'onlyInLog', label: 'only in the controller log', tone: 'error', hint: 'In the controller\'s own log (Log Analytics report) but never in the cloud' },
+  { k: 'notInLog', label: 'not in the event log', tone: 'warning', hint: 'Pushed, but the event-log API never returned it' },
+  { k: 'duplicates', label: 'pushed twice', tone: 'warning', hint: 'The same event pushed more than once' },
+  { k: 'outOfOrder', label: 'out of order', tone: 'warning', hint: 'Pushed after an event the controller stamped later' },
+];
+export const IntegrityCard: React.FC<{ a: Analysis }> = ({ a }) => {
+  const [open, setOpen] = React.useState<string | null>(null);
+  const g = a.integrity;
+  if (!g || g.verdict === 'no-data') return null;
+  const list = open ? (g[open as keyof typeof g] as unknown as import('./api').IntegrityItem[]) : [];
+  return (
+    <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line px-3 py-1.5 text-[12px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-hv-text">Every event, once, in order</span>
+        <Badge tone={g.verdict === 'pass' ? 'success' : g.verdict === 'fail' ? 'error' : 'warning'}>{g.verdict === 'pass' ? 'all accounted for' : `${g.issues} to look at`}</Badge>
+        <span className="text-hv-text-3">{g.counts.push} pushed · {g.counts.eventLog} in the event log{g.counts.controllerLog ? ` · ${g.counts.controllerLog} in the controller log` : ''}{!g.apiOn ? ' · event-log poll off (no lost-push check)' : ''}</span>
+        {INTEG.filter(x => (g[x.k] as unknown[]).length).map(x => (
+          <button key={x.k} title={x.hint} onClick={() => setOpen(open === x.k ? null : x.k)} className={cx('rounded-hv-xs px-1.5 py-0.5', open === x.k ? 'ring-1 ring-hv-line-strong' : '')}>
+            <Badge tone={x.tone}>{(g[x.k] as unknown[]).length} {x.label}</Badge>
+          </button>
+        ))}
+      </div>
+      {open && (
+        <table className="w-full mt-1"><tbody>
+          {list.slice(0, 50).map((e, i) => (
+            <tr key={i} className="border-t border-hv-line">
+              <td className="py-0.5 pr-2 font-mono text-hv-text-3 w-[100px]">{e.at != null ? clock(e.at) : e.t != null ? clock(e.t) : ''}</td>
+              <td className="pr-2 font-mono text-hv-text">{e.type}</td><td className="pr-2 text-hv-text-3">{e.door || ''}</td>
+              <td className="pr-2 text-hv-text-3">{e.copies ? `${e.copies} copies, ${fmtMs(e.gapMs)} apart` : e.byMs ? `stamped ${fmtMs(e.byMs)} before ${e.after ? e.after.type : 'an earlier push'}` : `seen in: ${e.where}`}</td>
+              <td className="text-hv-text-3 font-mono">{e.eventId ? e.eventId.slice(0, 12) : ''}</td>
+            </tr>))}
+        </tbody></table>
+      )}
+    </div>
+  );
+};
+
 export const ClockCard: React.FC<{ a: Analysis }> = ({ a }) => {
   const c = a.clock;
   const sets = ['start', 'check', 'end'].map(set => ({ set, rows: c.sync.filter(x => x.set === set) })).filter(x => x.rows.length);

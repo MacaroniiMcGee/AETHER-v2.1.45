@@ -915,6 +915,7 @@ try {
   });
 } catch (e) { console.warn('[Analytics] journal not attached:', e.message); }
 try { require('./routes/trace').getEngine().attach({ gpioQueue, getWiegand: () => wiegandManager, getOsdp: () => osdpManager, emulator: require('./osdp/OSDPDeviceEmulator') }); } catch (e) { console.warn('[Trace] not attached:', e.message); }   // AETHER_TRACE
+try { const te = require('./routes/trace').getEngine(); te.on('alert', a => { if (te.settings.alerts && te.settings.alerts.automation) feedAutomation('trace_alert', a); }); } catch (_) { /* no Event Trace */ }   // AETHER_TRACE (TRACE-4): alerts can fire Automation rules
 let nfcManager = null;
 let nfcBridge = null;
 let switchManager = null;

@@ -3,14 +3,15 @@
 // the controller's own logs (Log Analytics reports) and OnCAFE (MQTT push + event log). Sync cards line the
 // controller clock up with the Pi; secrets are scrubbed and plain text is shown only on request.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, Send, Radio, History, Settings as Cog, Loader2, AlertTriangle, Download, Trash2, Upload, FileJson, Waypoints, ScrollText, ChevronDown, Activity, Cloud } from 'lucide-react';
+import { Play, Square, Send, Radio, History, Settings as Cog, Loader2, AlertTriangle, Download, Trash2, Upload, FileJson, Waypoints, ScrollText, ChevronDown, Activity, Cloud, FlaskConical, Bell } from 'lucide-react';
 import { Badge, Button, Empty, Input, Segmented, Tabs, Toggle, cx, lsGet, lsSet } from '../sunapi/ui';
-import { traceClient, defaultBackend, clock, credText, fmtMs, SRC_LABEL, KIND_LABEL, type Analysis, type Kind, type RunMeta, type Status, type TEvent, type ReportMeta } from './api';
+import { traceClient, defaultBackend, clock, credText, fmtMs, SRC_LABEL, KIND_LABEL, type Analysis, type Kind, type RunMeta, type Status, type TEvent, type ReportMeta, type Alert } from './api';
 import { CommandDialog } from './CommandDialog';
-import { Summary, ClockCard, TraceTable, TraceDetail, Swimlanes, EventBox } from './views';
+import { Summary, ClockCard, TraceTable, TraceDetail, Swimlanes, EventBox, IntegrityCard } from './views';
+import { TestsPage, CompareView } from './Tests';
 import { SetupPanel } from './Setup';
 
-type Page = 'live' | 'runs' | 'setup';
+type Page = 'live' | 'runs' | 'tests' | 'setup';
 const KindFilter: React.FC<{ a: Analysis | null; value: Kind | 'all'; onChange: (k: Kind | 'all') => void }> = ({ a, value, onChange }) => (
   <Segmented value={value} onChange={onChange} items={[{ id: 'all', label: `All${a ? ' ' + a.stats.actions : ''}` }, ...(['card', 'input', 'output', 'command'] as Kind[]).map(k => ({ id: k, label: `${KIND_LABEL[k]}${a ? ' ' + a.stats.byKind[k].actions : ''}` }))]} />
 );
@@ -43,6 +44,9 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
   const [kind, setKind] = useState<Kind | 'all'>(() => lsGet('aether.trace.kind', 'all'));
   const [cmdOpen, setCmdOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [openRun, setOpenRun] = useState<{ runId: string; traceId?: string } | null>(null);
+  const [toasts, setToasts] = useState<Alert[]>([]);
+  const alertSeen = useRef<number | null>(null);
   const seq = useRef(0);
   useEffect(() => lsSet('aether.trace.kind', kind), [kind]);
 
@@ -52,6 +56,17 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
 
   const loadStatus = useCallback(() => api.status().then(s => { setStatus(s); setLoadErr(null); return s; }).catch(e => { setLoadErr(e.message); return null; }), [api]);
   useEffect(() => { loadStatus(); const t = setInterval(loadStatus, 3000); return () => clearInterval(t); }, [loadStatus]);
+  // TRACE-4 live alerts: a toast for every failed (or slow, if chosen) trace since this page opened
+  const alertSeq = status?.alertSeq ?? 0;
+  useEffect(() => {
+    if (!status || status.settings.alerts?.enabled === false) return;
+    if (alertSeen.current == null) { alertSeen.current = alertSeq; return; }
+    if (alertSeq <= alertSeen.current) return;
+    const since = alertSeen.current;
+    alertSeen.current = alertSeq;
+    api.alerts(since).then(r => { if (r.alerts.length) setToasts(t => t.concat(r.alerts).slice(-4)); }).catch(() => {});
+  }, [alertSeq, api, status]);
+  useEffect(() => { if (!toasts.length) return; const t = setTimeout(() => setToasts(x => x.slice(1)), 15000); return () => clearTimeout(t); }, [toasts]);
 
   // live events + analysis
   const runId = status?.run?.id || null;
@@ -136,6 +151,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
       <Tabs className="px-3 shrink-0" value={page} onChange={setPage} items={[
         { id: 'live', label: <><Radio size={14} />Live</>, count: analysis ? analysis.stats.actions : undefined },
         { id: 'runs', label: <><History size={14} />Runs</> },
+        { id: 'tests', label: <><FlaskConical size={14} />Tests</>, count: status.test && status.test.state !== 'done' ? 1 : undefined },
         { id: 'setup', label: <><Cog size={14} />Setup</> },
       ]} />
 
@@ -143,7 +159,9 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
       {page === 'setup' ? (
         <div className="flex-1 min-h-0 overflow-auto p-4"><SetupPanel api={api} status={status} onSaved={loadStatus} /></div>
       ) : page === 'runs' ? (
-        <RunsPage api={api} status={status} />
+        <RunsPage api={api} status={status} initial={openRun} />
+      ) : page === 'tests' ? (
+        <TestsPage api={api} status={status} onOpenTrace={(runId, traceId) => { setOpenRun({ runId, traceId }); setPage('runs'); }} />
       ) : (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="px-3 pt-3 space-y-2 shrink-0">
@@ -153,6 +171,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
             {note && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-success-tint text-hv-success-fg flex items-center gap-2"><span className="flex-1">{note}</span><button className="opacity-70 hover:opacity-100" onClick={() => setNote(null)}>×</button></div>}
             {analysis && <Summary a={analysis} kind={kind} />}
             {analysis && <ClockCard a={analysis} />}
+            {analysis && <IntegrityCard a={analysis} />}
             <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line px-2 pt-1 pb-0.5">
               <div className="flex items-center gap-2 text-[11px] text-hv-text-3"><Activity size={12} />Timeline by vantage point (controller times shifted by the clock offset)<span className="ml-auto" />
                 <Segmented value={windowMs} onChange={setWindowMs} items={WINDOWS.map(w => ({ id: w.id, label: w.label }))} />
@@ -179,15 +198,32 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
           </div>
         </div>
       )}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 w-96 space-y-2" role="status" aria-live="polite">
+          {toasts.map(t => (
+            <div key={t.seq} className={cx('rounded-hv-xs shadow-hv-2 ring-1 px-3 py-2 text-[12px] bg-hv-popup-panel', t.status === 'fail' ? 'ring-hv-error' : 'ring-hv-warning')}>
+              <div className="flex items-center gap-2">
+                <Bell size={13} className={t.status === 'fail' ? 'text-hv-error-fg' : 'text-hv-warning-fg'} />
+                <span className="font-semibold text-hv-text">{t.status === 'fail' ? 'Failed' : 'Slow'}: {t.label}</span>
+                <span className="ml-auto" />
+                <button className="text-hv-text-3 hover:text-hv-text" aria-label="Dismiss" onClick={() => setToasts(x => x.filter(y => y.seq !== t.seq))}>×</button>
+              </div>
+              <div className="text-hv-text-2 mt-0.5">{t.why}{t.door ? ` · ${t.door}` : ''} · {new Date(t.traceAt).toLocaleTimeString()}</div>
+              <button className="mt-1 text-hv-brand hover:underline" onClick={() => { setToasts(x => x.filter(y => y.seq !== t.seq)); if (t.runId) { setOpenRun({ runId: t.runId, traceId: t.traceId }); setPage('runs'); } else { setPage('live'); setSelected(t.traceId); } }}>Show the trace</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
 
 /** Runs: pick one, see its analysis, add after-the-fact evidence, export. */
-const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status }> = ({ api, status }) => {
+const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status; initial?: { runId: string; traceId?: string } | null }> = ({ api, status, initial }) => {
   const [runs, setRuns] = useState<RunMeta[]>([]);
-  const [id, setId] = useState<string | null>(null);
+  const [id, setId] = useState<string | null>(initial ? initial.runId : null);
   const [a, setA] = useState<Analysis | null>(null);
+  const [cmp, setCmp] = useState<string>('');
   const [events, setEvents] = useState<TEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [showSync, setShowSync] = useState(false);
@@ -203,7 +239,7 @@ const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status }
   const load = useCallback(async (rid: string) => {
     try { const [x, ev] = await Promise.all([api.run(rid), api.events(rid)]); setA(x); setEvents(ev.events); } catch (e) { setMsg({ tone: 'error', text: (e as Error).message }); }
   }, [api]);
-  useEffect(() => { if (id) { setSelected(null); load(id); } }, [id, load]);
+  useEffect(() => { if (id) { setSelected(initial && initial.runId === id && initial.traceId ? initial.traceId : null); setCmp(''); load(id); } }, [id, load, initial]);
 
   const done = async (p: Promise<{ imported: number }>, what: string) => {
     setMsg(null);
@@ -270,14 +306,20 @@ const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status }
                   </>
                 )}
               </div>
+              <select className="h-7 rounded-hv-xs bg-hv-box ring-1 ring-inset ring-hv-line text-[12px] text-hv-text px-1.5 max-w-[220px]" value={cmp} onChange={e => setCmp(e.target.value)} title="Put this run (B) next to an earlier run (A)">
+                <option value="">Compare with…</option>
+                {runs.filter(r => r.id !== id).map(r => <option key={r.id} value={r.id}>{r.name} · {new Date(r.start).toLocaleDateString()}</option>)}
+              </select>
               <Button size="sm" icon={<Download size={13} />} onClick={() => api.saveCsv(id!).catch(e => setMsg({ tone: 'error', text: e.message }))}>CSV</Button>
               <Button size="sm" icon={<Upload size={13} className="rotate-180" />} onClick={() => api.saveJson(id!).catch(e => setMsg({ tone: 'error', text: e.message }))}>JSON</Button>
               <Button size="sm" tone="ghost" icon={<Trash2 size={13} />} disabled={!current.end} onClick={async () => { if (!window.confirm(`Delete “${current.name}”?`)) return; await api.del(id!).catch(e => setMsg({ tone: 'error', text: e.message })); setId(null); setA(null); list(); }}>Delete</Button>
             </div>
             {msg && <div className={cx('text-xs rounded-hv-xs px-2 py-1', msg.tone === 'error' ? 'bg-hv-error-tint text-hv-error-fg' : 'bg-hv-success-tint text-hv-success-fg')}>{msg.text}</div>}
             {a.meta && a.meta.imports.length > 0 && <div className="text-[11px] text-hv-text-3">Added: {a.meta.imports.map(i => i.what).join(' · ')}</div>}
+            {cmp && <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line p-3 max-h-[50vh] overflow-auto"><CompareView api={api} a={cmp} b={id!} onClose={() => setCmp('')} /></div>}
             <Summary a={a} kind={kind} />
             <ClockCard a={a} />
+            <IntegrityCard a={a} />
           </div>
           <div className="flex items-center gap-3 px-3 py-1.5 shrink-0">
             <KindFilter a={a} value={kind} onChange={setKind} />

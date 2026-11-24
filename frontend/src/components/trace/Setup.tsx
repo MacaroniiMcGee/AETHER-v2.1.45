@@ -1,6 +1,6 @@
 // AETHER_TRACE — Event Trace › Setup
 import React, { useEffect, useState } from 'react';
-import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone } from 'lucide-react';
+import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone, Bell } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
 import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, wiringVersion } from './api';
 
@@ -243,6 +243,19 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
       <Card icon={<Megaphone size={16} />} title="Commands" sub="Let Aether send door, area and zone commands to OnCAFE (temporary unlock, lockdown, maintenance, shunt, zones) and trace them to the door.">
         <Toggle on={s.commands.enabled} onChange={v => upd(x => { x.commands.enabled = v; return x; })} label="Allow commands from Event Trace (admins only)" />
         <div className="text-xs text-hv-text-3">Commands change real doors through the Pi's OnCAFE account and appear in OnCAFE's audit log. They only go to the doors under test (and their areas); each one asks for confirmation and can be turned back automatically. Commands sent from the OnCAFE web app are traced too when that PC goes through the Traffic Inspector or you add a HAR to a run.</div>
+      </Card>
+
+      {/* TRACE-4: live alerts */}
+      <Card icon={<Bell size={16} />} title="Alerts" sub="Tell me as soon as a trace fails, while I'm doing something else.">
+        <Toggle on={s.alerts?.enabled !== false} onChange={v => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), enabled: v }; return x; })} label="Pop up an alert on this page when a trace fails" />
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-hv-text-2">Alert on</span>
+          <Select className="!w-56" value={s.alerts?.level || 'fail'} onChange={e => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), level: e.target.value as 'fail' | 'warn' }; return x; })}>
+            <option value="fail">Failures only</option><option value="warn">Failures and slow traces</option>
+          </Select>
+        </div>
+        <Toggle on={s.alerts?.automation !== false} onChange={v => upd(x => { x.alerts = { ...(x.alerts || { enabled: true, level: 'fail', automation: true }), automation: v }; return x; })} label="Also hand alerts to Automation (trigger “Event Trace alert”)" />
+        <div className="text-xs text-hv-text-3">Alerts are checked every 2 seconds while a run is recording or the cloud feed is connected. A trace still waiting for its answer is given its match window ({fmtMs(s.thresholds.matchWindowMs)}) first. In Automation, a rule with the “Event Trace alert” trigger can pulse a relay, send a card or log a message.</div>
       </Card>
 
       {/* Expectations */}

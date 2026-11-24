@@ -284,6 +284,68 @@ def main():
             return insert_after_line(s, r"mode === 'tools' && page === '", line)
     P.edit(cs, 'render the page', fe_render)
 
+    # ── TRACE-4: Event Trace alerts as an Automation trigger (all optional) ──
+    def server_alerts(s):
+        if 'trace_alert' in s:
+            return None
+        line = ("try { const te = require('./routes/trace').getEngine(); te.on('alert', a => { if (te.settings.alerts && te.settings.alerts.automation) feedAutomation('trace_alert', a); }); } "
+                "catch (_) { /* no Event Trace */ }   // AETHER_TRACE (TRACE-4): alerts can fire Automation rules")
+        if 'function feedAutomation(' not in s:
+            raise LookupError('no feedAutomation() (Automation update not installed)')
+        return insert_after_line(s, r"getEngine\(\)\.attach\(\{ gpioQueue", line)
+    P.edit('backend/server.js', 'Event Trace alerts feed Automation', server_alerts, required=False)
+
+    aeg = 'backend/automation/aegis.js'
+    def aegis_types(s):
+        if "'trace_alert'" in s:
+            return None
+        old = "'door_event', 'card_read'];"
+        if old not in s:
+            raise LookupError('event type list not found')
+        s = s.replace(old, "'door_event', 'card_read', 'trace_alert'];   // AETHER_TRACE: Event Trace alerts", 1)
+        s = insert_before_line(s, r"^    case 'card_read':$",
+            "    case 'trace_alert':   // AETHER_TRACE: an Event Trace alert (a failed / slow trace)\n"
+            "      return { status: d.status === 'warn' ? 'warn' : 'fail', kind: String(d.kind || ''), label: String(d.label || '').slice(0, 120), why: String(d.why || '').slice(0, 160), door: d.door ? String(d.door) : null, initial };")
+        s = insert_before_line(s, r"^    case 'reader_event':$",
+            "    case 'trace_alert':   // AETHER_TRACE\n"
+            "      if (type !== 'trace_alert') return false;\n"
+            "      if (given(tr.status) && tr.status !== 'any' && tr.status !== ev.status) return false;\n"
+            "      return !given(tr.kind) || tr.kind === 'any' || tr.kind === ev.kind;")
+        s = insert_before_line(s, r"^    case 'card_read': return `Card ",
+            "    case 'trace_alert': return `Event Trace ${ev.status === 'warn' ? 'slow' : 'failed'}: ${ev.label}${ev.why ? ` (${ev.why})` : ''}`;   // AETHER_TRACE")
+        return s
+    P.edit(aeg, 'Event Trace alert trigger (matching)', aegis_types, required=False)
+
+    au = 'frontend/src/components/AutomationSection.tsx'
+    def auto_ui(s):
+        if "'trace_alert'" in s:
+            return None
+        s = insert_after_line(s, r"\{ type: 'card_read', label: 'Card',",
+            "  { type: 'trace_alert', label: 'Event Trace alert', hint: 'A trace fails (or is slow) in Tools › Event Trace', icon: <Activity size={14} /> },   // AETHER_TRACE")
+        s = insert_before_line(s, r"^    case 'reader_event':$",
+            "    case 'trace_alert':   // AETHER_TRACE\n"
+            "      return `an Event Trace ${tr.kind && tr.kind !== 'any' ? `${tr.kind} ` : ''}trace ${tr.status === 'warn' ? 'is slow' : tr.status === 'any' ? 'fails or is slow' : 'fails'}`;")
+        s = insert_before_line(s, r"^    case 'schedule': return \{ type, time:",
+            "    case 'trace_alert': return { type, status: 'fail', kind: 'any' };   // AETHER_TRACE")
+        s = insert_before_line(s, r"^      \{tr\.type === 'schedule' && \($",
+            "      {tr.type === 'trace_alert' && (   /* AETHER_TRACE */\n"
+            "        <div className=\"grid grid-cols-2 sm:grid-cols-4 gap-3\">\n"
+            "          <Field label=\"When a trace\">\n"
+            "            <select className={sel} value={tr.status || 'fail'} onChange={e => up({ status: e.target.value })}>\n"
+            "              <option value=\"fail\">fails</option><option value=\"warn\">is slow</option><option value=\"any\">fails or is slow</option>\n"
+            "            </select>\n"
+            "          </Field>\n"
+            "          <Field label=\"Kind\">\n"
+            "            <select className={sel} value={tr.kind || 'any'} onChange={e => up({ kind: e.target.value })}>\n"
+            "              <option value=\"any\">Any</option><option value=\"card\">Card</option><option value=\"input\">Input (DPS / REX)</option><option value=\"output\">Output (strike)</option><option value=\"command\">Command</option>\n"
+            "            </select>\n"
+            "          </Field>\n"
+            "          <p className=\"sm:col-span-2 text-[11px] text-hv-text-3\">Event Trace raises alerts while a run is recording or its cloud feed is connected (Setup › Alerts).</p>\n"
+            "        </div>\n"
+            "      )}")
+        return s
+    P.edit(au, 'Event Trace alert trigger (Automation page)', auto_ui, required=False)
+
     for x in P.done:
         print(('would change ' if check else 'changed ') + x)
     for x in P.skipped:

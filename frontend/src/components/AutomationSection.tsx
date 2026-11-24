@@ -120,6 +120,8 @@ export function describeTrigger(tr: any, n: NameCtx = {}): string {
       const at = isSet(tr.readerId) ? ` on reader ${tr.readerId}` : '';
       return `${src ? `an ${src}` : 'a '}card${card} is read${at}`.replace(/^an ([^AEIOU])/, 'a $1');
     }
+    case 'trace_alert':   // AETHER_TRACE
+      return `an Event Trace ${tr.kind && tr.kind !== 'any' ? `${tr.kind} ` : ''}trace ${tr.status === 'warn' ? 'is slow' : tr.status === 'any' ? 'fails or is slow' : 'fails'}`;
     case 'reader_event':
       return `a card is read${isSet(tr.readerId) ? ` on reader ${tr.readerId}` : ''}`;
     case 'gpio_change':
@@ -395,6 +397,7 @@ const TRIGGERS: { type: string; label: string; hint: string; icon: React.ReactNo
   { type: 'zone_change', label: 'EOL zone', hint: 'ADC 1-8 supervision state changes', icon: <Activity size={14} /> },
   { type: 'door_event', label: 'Door', hint: 'Door activity: lock, DPS, REX, inputs, cards', icon: <DoorOpen size={14} /> },
   { type: 'card_read', label: 'Card', hint: 'A card is sent or read (OSDP, Wiegand, NFC)', icon: <CreditCard size={14} /> },
+  { type: 'trace_alert', label: 'Event Trace alert', hint: 'A trace fails (or is slow) in Tools › Event Trace', icon: <Activity size={14} /> },   // AETHER_TRACE
   { type: 'schedule', label: 'Schedule', hint: 'A time of day, on chosen days', icon: <Clock size={14} /> },
   { type: 'manual', label: 'Run now only', hint: 'Started by hand from this page', icon: <Hand size={14} /> },
   { type: 'gpio_change', label: 'Pi GPIO', hint: 'A Raspberry Pi GPIO pin written by Aether (advanced)', icon: <Cpu size={14} /> },
@@ -452,6 +455,7 @@ function triggerDefaults(type: string): { type: string; [k: string]: any } {
     case 'zone_change': return { type, zone: 1, state: 'ALARM' };
     case 'door_event': return { type, doorId: null, event: 'dps', value: 1 };
     case 'card_read': return { type, source: 'any', facility: null, card: null, readerId: null };
+    case 'trace_alert': return { type, status: 'fail', kind: 'any' };   // AETHER_TRACE
     case 'schedule': return { type, time: '02:00', days: [] };
     case 'gpio_change': return { type, pin: null, value: 1 };
     default: return { type };
@@ -832,6 +836,21 @@ const TriggerEditor: React.FC<{
         </div>
       )}
 
+      {tr.type === 'trace_alert' && (   /* AETHER_TRACE */
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Field label="When a trace">
+            <select className={sel} value={tr.status || 'fail'} onChange={e => up({ status: e.target.value })}>
+              <option value="fail">fails</option><option value="warn">is slow</option><option value="any">fails or is slow</option>
+            </select>
+          </Field>
+          <Field label="Kind">
+            <select className={sel} value={tr.kind || 'any'} onChange={e => up({ kind: e.target.value })}>
+              <option value="any">Any</option><option value="card">Card</option><option value="input">Input (DPS / REX)</option><option value="output">Output (strike)</option><option value="command">Command</option>
+            </select>
+          </Field>
+          <p className="sm:col-span-2 text-[11px] text-hv-text-3">Event Trace raises alerts while a run is recording or its cloud feed is connected (Setup › Alerts).</p>
+        </div>
+      )}
       {tr.type === 'schedule' && (
         <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-3 items-end">
           <Field label="Time"><input type="time" className={inp} value={tr.time || ''} onChange={e => up({ time: e.target.value })} /></Field>

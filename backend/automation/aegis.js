@@ -32,7 +32,7 @@
 
 'use strict';
 
-const EVENT_TYPES = ['gpio_change', 'relay_change', 'opto_change', 'zone_change', 'door_event', 'card_read'];
+const EVENT_TYPES = ['gpio_change', 'relay_change', 'opto_change', 'zone_change', 'door_event', 'card_read', 'trace_alert'];   // AETHER_TRACE: Event Trace alerts
 const ZONE_STATES = ['ALARM', 'NORMAL', 'TROUBLE', 'TAMPER'];
 const DOOR_ROLES = ['lock', 'dps', 'rex', 'input', 'card', 'event', 'note'];
 
@@ -87,6 +87,8 @@ function normalizeEvent(type, data) {
       return { doorId, role, value: doorValue(d.value), text: String(d.text || ''), source: String(d.source || ''),
         relayChannel: m ? Number(m[1]) : null, initial };
     }
+    case 'trace_alert':   // AETHER_TRACE: an Event Trace alert (a failed / slow trace)
+      return { status: d.status === 'warn' ? 'warn' : 'fail', kind: String(d.kind || ''), label: String(d.label || '').slice(0, 120), why: String(d.why || '').slice(0, 160), door: d.door ? String(d.door) : null, initial };
     case 'card_read':
       return {
         source: String(d.source || 'unknown').toLowerCase(),
@@ -130,6 +132,10 @@ function triggerMatches(trigger, type, ev) {
       if (given(tr.readerId) && String(tr.readerId) !== ev.readerId) return false;
       if (isNum(tr.facility) && Number(tr.facility) !== ev.facility) return false;
       return !given(tr.card) || String(tr.card) === ev.card;
+    case 'trace_alert':   // AETHER_TRACE
+      if (type !== 'trace_alert') return false;
+      if (given(tr.status) && tr.status !== 'any' && tr.status !== ev.status) return false;
+      return !given(tr.kind) || tr.kind === 'any' || tr.kind === ev.kind;
     case 'reader_event':
       return type === 'card_read' && (!given(tr.readerId) || String(tr.readerId) === ev.readerId);
     default:
@@ -191,6 +197,7 @@ function describeEvent(type, ev) {
     case 'opto_change': return `OPTO ${ev.channel + 1} ${ev.value ? 'ACTIVE' : 'idle'}`;
     case 'zone_change': return `ADC ${ev.zone} ${ev.state}`;
     case 'door_event': return `Door ${ev.doorId}: ${ev.text || ev.role}`;
+    case 'trace_alert': return `Event Trace ${ev.status === 'warn' ? 'slow' : 'failed'}: ${ev.label}${ev.why ? ` (${ev.why})` : ''}`;   // AETHER_TRACE
     case 'card_read': return `Card ${ev.facility !== null ? `${ev.facility}:` : ''}${ev.card || '?'} (${ev.source}${ev.readerId ? ` ${ev.readerId}` : ''})`;
     default: return type;
   }

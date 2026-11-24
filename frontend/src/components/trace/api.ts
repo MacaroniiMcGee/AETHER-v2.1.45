@@ -29,7 +29,37 @@ export interface Analysis {
   traces: Trace[]; unexplained: { type: string; t: number; at: number; cred: Cred | null; door: { id: string | null; name: string | null } | null; sources: Src[] }[];
   stats: KindStats & { unexplained: number; byKind: Record<Kind, KindStats> };
   roles: Record<string, Role>;
+  integrity?: Integrity;
 }
+// ── TRACE-4 ──────────────────────────────────────────────────────────────
+export interface IntegrityItem { type: string; t: number | null; at: number | null; door: string | null; cred: Cred | null; eventId: string | null; controllerId: string | null; where: string; copies?: number; gapMs?: number; byMs?: number; after?: IntegrityItem | null }
+export interface Integrity { counts: { push: number; eventLog: number; controllerLog: number; har: number; uniquePushed: number }; verdict: 'pass' | 'warn' | 'fail' | 'no-data'; issues: number; lostInPush: IntegrityItem[]; notInLog: IntegrityItem[]; onlyInLog: IntegrityItem[]; duplicates: IntegrityItem[]; outOfOrder: IntegrityItem[]; apiOn: boolean }
+export type StepKind = 'card' | 'rex' | 'dps' | 'command' | 'wait';
+export interface StepExpect { result?: 'grant' | 'deny' | 'any'; events?: string[]; noEvents?: string[]; strike?: 'on' | 'off' | 'stays-on' | 'any'; minMs?: number; maxMs?: number; output?: string; withinMs?: number }
+export interface Step { kind: StepKind; label?: string; door?: number | null; fc?: string; cn?: string; format?: string; holdMs?: number; state?: 'open' | 'close'; cmd?: 'override' | 'maintenance' | 'shunt' | 'lockdown'; value?: unknown; seconds?: number; ms?: number; expect?: StepExpect; afterMs?: number }
+export interface Sequence { id?: string; name: string; note?: string; steps: Step[]; repeat: number; minutes: number; gapMs: number; sync: boolean; updatedAt?: number }
+export interface TemplateInfo { id: string; label: string; hint: string }
+export interface TestStatus { state: 'running' | 'grading' | 'done'; seqId: string; name: string; runId: string | null; startedAt: number; endedAt: number | null; iter: number; repeat: number; until: number | null; idx: number; steps: number; done: number; errors: number; abort: boolean; error: string | null; verdict: string | null; last: { iter: number; idx: number; text: string; at: number; error: string | null }[] }
+export interface StepResult { iter: number; idx: number; kind: StepKind; text: string; door: string | null; at: number; status: 'pass' | 'warn' | 'fail' | 'error' | 'skipped'; checks: { what: string; want: string; got: string }[]; why: string[]; latency: { decision?: number | null; push?: number | null; api?: number | null; ack?: number | null; output?: number | null }; traceId: string | null; result?: string | null; held?: number | null }
+export interface StepAgg { idx: number; text: string; kind: StepKind; runs: number; pass: number; warn: number; fail: number; decision: Stat; push: Stat; output: Stat }
+export interface TestReport { runId: string; sequence: { id: string; name: string }; startedAt: number; endedAt: number | null; aborted: boolean; error: string | null; who: string; repeat: number; minutes: number; iterations: number;
+  report: { steps: StepResult[]; byStep: StepAgg[]; totals: { steps: number; pass: number; warn: number; fail: number; skipped: number; verdict: string }; series: { at: number; iter: number; idx: number; decision: number | null; push: number | null; status: string }[]; health: { samples: number; pushDrops: number } } }
+export interface TestRunMeta { id: string; name: string; start: number; end: number | null; sequence: { id: string; name: string }; aborted: boolean }
+export type Moved = 'same' | 'worse' | 'better' | 'only-one';
+export interface Comparison {
+  a: { id: string; name: string; start: number; verdict: string }; b: { id: string; name: string; start: number; verdict: string };
+  summary: { worse: number; better: number; newFail: number; fixed: number; onlyA: number; onlyB: number };
+  hops: { kind: string; hop: string; label: string; a: { n: number; p50: number | null; p95: number | null; max: number | null }; b: { n: number; p50: number | null; p95: number | null; max: number | null }; p50: Moved; p95: Moved }[];
+  counts: Record<string, { a: { actions: number; pass: number; warn: number; fail: number }; b: { actions: number; pass: number; warn: number; fail: number } }>;
+  newFail: { kind: string; label: string; expect: string | null; why: string; at: number }[]; fixed: { kind: string; label: string; expect: string | null; why: string; at: number }[];
+  types: { onlyA: { type: string; n: number }[]; onlyB: { type: string; n: number }[] };
+  clock: { a: { offset: number | null; drift: number | null }; b: { offset: number | null; drift: number | null } };
+  integrity: Record<string, { a: number; b: number }> | null;
+  steps: { idx: number; text: string; a: { runs: number; pass: number; fail: number; decision: number | null; push: number | null } | null; b: { runs: number; pass: number; fail: number; decision: number | null; push: number | null } | null; result: Moved; decision: Moved; push: Moved }[] | null;
+  rule: string;
+}
+export interface Alert { seq: number; at: number; traceAt: number; traceId: string; runId: string | null; status: 'fail' | 'warn'; kind: Kind; label: string; why: string; door: string | null }
+export interface DoorRow { id: number; name: string; enabled?: boolean; oncafe: { id: string; name: string | null } | null; note?: string | null; reader?: string | null; channels: { key: string; role: string; label?: string; overridden?: boolean }[] }
 export interface KindStats { actions: number; pass: number; warn: number; fail: number; decision: Stat; push: Stat; api: Stat; decisionToPush: Stat; output: Stat; hardware: Stat; ack: Stat; credMismatch: number; unexplained?: number; verdict: 'pass' | 'warn' | 'fail' | 'no-data' }
 export interface Role { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; auto?: boolean; score?: number; kind?: string; count?: number }
 /** Version of a wiring map (newest entry time): sent back on save so a stale tab cannot overwrite newer door imports. */
@@ -45,6 +75,7 @@ export interface Settings {
   wire: { controllerIps: string[] };
   thresholds: { decisionWarn: number; decisionFail: number; pushWarn: number; pushFail: number; matchWindowMs: number; inputWindowMs: number; outputWindowMs: number; commandWarn: number; commandFail: number; heldToleranceMs: number };
   commands: { enabled: boolean };
+  alerts?: { enabled: boolean; level: 'fail' | 'warn'; automation: boolean };
   expectations: { fc: string; cn: string; expect: 'grant' | 'deny'; note: string }[];
   allowRaw: boolean;
 }
@@ -62,6 +93,7 @@ export interface Status {
   me?: { admin: boolean };
   pendingReverts?: { id: string; due: number; kind: string; value: unknown; target: string | string[] }[];
   inventory: { org: string; at: number; doors: InvDoor[]; areas: InvArea[]; zones: InvZone[]; controllers: Inventory['controllers'] } | null;
+  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[];
 }
 export interface RunMeta { id: string; name: string; start: number; end: number | null; endReason?: string; count?: number; imports?: { at: number; what: string; count: number }[] }
 export interface OnCafeSession { signedIn: boolean; host?: string; user?: string; name?: string; orgs?: { id: string; name: string }[]; org?: string; expiresAt?: string | null; error?: string }
@@ -120,6 +152,18 @@ export function traceClient(backend: string) {
     saveJson: (id: string) => save(`/runs/${encodeURIComponent(id)}/export.json`, `${id}.json`),
     saveCsv: (id: string) => save(`/runs/${encodeURIComponent(id)}/export.csv`, `${id}.csv`),
     // OnCAFE sign-in lives in routes-oncafe (Update 58); Event Trace reuses it
+    // TRACE-4
+    tests: () => call<{ sequences: Sequence[]; templates: TemplateInfo[]; current: TestStatus | null; runs: TestRunMeta[] }>('/tests'),
+    saveTest: (q: Sequence) => q.id ? call<Sequence>(`/tests/${encodeURIComponent(q.id)}`, { method: 'PUT', body: q }) : call<Sequence>('/tests', { method: 'POST', body: q }),
+    delTest: (id: string) => call<{ ok: boolean }>(`/tests/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    template: (b: { kind: string; door: number | null; fc?: string; cn?: string; badCn?: string; grantMs?: number; heldMs?: number; output?: string }) => call<{ steps: Step[] }>('/tests/template', { method: 'POST', body: b }),
+    runTest: (id: string, o: { repeat?: number; minutes?: number; gapMs?: number }) => call<{ current: TestStatus }>(`/tests/${encodeURIComponent(id)}/run`, { method: 'POST', body: o }),
+    stopTest: () => call<{ current: TestStatus | null }>('/tests/stop', { method: 'POST', body: {} }),
+    testReport: (runId: string) => call<TestReport>(`/runs/${encodeURIComponent(runId)}/test`),
+    saveTestCsv: (runId: string) => save(`/runs/${encodeURIComponent(runId)}/test.csv`, `${runId}-test.csv`),
+    compare: (a: string, b: string) => call<Comparison>(`/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`),
+    alerts: (since: number) => call<{ seq: number; alerts: Alert[] }>(`/alerts?since=${since}`),
+    doors: () => call<{ doors: DoorRow[] }>('/doors'),
     oncafeSession: (url: string) => call<OnCafeSession>('', { url: `${root}/api/oncafe/session?url=${encodeURIComponent(url)}` }),
     oncafeSignin: (url: string, username: string, password: string) => call<OnCafeSession>('', { url: `${root}/api/oncafe/signin`, method: 'POST', body: { url, username, password } }),
     oncafeSignout: (url: string) => call<OnCafeSession>('', { url: `${root}/api/oncafe/signout`, method: 'POST', body: { url } }),
