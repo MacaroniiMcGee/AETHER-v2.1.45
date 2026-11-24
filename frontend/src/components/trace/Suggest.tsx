@@ -1,7 +1,8 @@
 // AETHER_TRACE (TRACE-5) — Setup › Suggested wiring: what Aether is wired to on the controller, proved (Discover),
-// configured (Doors page) or seen (normal testing), drawn the Hydra way, and sent to Hydra to build the sheet.
+// configured (Doors page) or seen (normal testing). The drawing is Hydra's own (Integrations › Board Blueprints, 1.8.0+), framed here
+// as a drawing-only view; the hand-drawn picture below is only the stand-in for a Pi whose Hydra is older.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wand2, Radar, Square, Download, ExternalLink, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { Wand2, Radar, Square, Download, ExternalLink, Check, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import { Badge, Button, Empty, Toggle, cx } from '../sunapi/ui';
 import { defaultBackend, type TraceApi, type Status, type Suggestion, type SuggestRow, type DiscoverStatus, type SuggestDoor } from './api';
 
@@ -156,6 +157,39 @@ function downloadSvg(svg: SVGSVGElement | null, name: string, png: boolean) {
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text);
 }
 
+// ── Hydra's drawing, framed ─────────────────────────────────────────────────
+type HydraBoard = { controller: string; name: string; model: string; drawnAs: string; wired: number; unmapped: number; guessed: boolean };
+type HydraNews = { ok: boolean; error?: string; boards?: HydraBoard[]; active?: string | null; skipped?: string[]; switched?: boolean };
+const HYDRA_OPEN_KEY = 'bb-aether-open';   // read once by Hydra when it next opens (Integrations › Board Blueprints)
+export function openInHydra(from: HTMLElement | null, controller: string | null) {
+  try { localStorage.setItem(HYDRA_OPEN_KEY, JSON.stringify({ at: Date.now(), controller })); } catch { /* storage blocked */ }
+  // Aether's page switches to Integrations › Board Blueprints when it knows this event (AETHER_TRACE nav); otherwise a new tab
+  const ev = new CustomEvent('aether-open-tool', { bubbles: true, cancelable: true, detail: { page: 'blueprint' } });
+  const handled = from ? !from.dispatchEvent(ev) : false;
+  if (!handled) window.open(`${defaultBackend()}/api/blueprints/page?aetherWiring=1${controller ? `&controller=${encodeURIComponent(controller)}` : ''}`, '_blank', 'noopener');
+}
+const HydraFrame: React.FC<{ rev: number; onNews: (n: HydraNews | 'old') => void; frameRef: React.RefObject<HTMLIFrameElement> }> = ({ rev, onNews, frameRef }) => {
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    let heard = false;
+    const on = (e: MessageEvent) => {
+      if (!frameRef.current || e.source !== frameRef.current.contentWindow || !e.data || e.data.kind !== 'hydra-aether-wiring') return;
+      heard = true; setLoading(false); onNews(e.data as HydraNews);
+    };
+    window.addEventListener('message', on);
+    const t = setTimeout(() => { if (!heard) { setLoading(false); onNews('old'); } }, 15000);   // no answer: a Hydra older than 1.8.0
+    return () => { window.removeEventListener('message', on); clearTimeout(t); };
+  }, [rev, onNews, frameRef]);
+  return (
+    <div className="relative" style={{ height: 560 }}>
+      <iframe key={rev} ref={frameRef} title="Suggested wiring in Hydra" src={`${defaultBackend()}/api/blueprints/page?aetherWiring=view&r=${rev}`}
+        className="w-full h-full block border-0 rounded-hv-xs" style={{ background: '#fff' }} />
+      {loading && <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-hv-text-3 bg-hv-widget-panel/80"><Loader2 size={14} className="animate-spin" />Hydra is drawing it…</div>}
+    </div>
+  );
+};
+
 // ── the card ────────────────────────────────────────────────────────────────
 export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: () => void }> = ({ api, status, onApplied }) => {
   const [s, setS] = useState<Suggestion | null>(null);
@@ -167,12 +201,18 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
   const [confirm, setConfirm] = useState(false);
   const [opt, setOpt] = useState({ relays: true, readers: true, locks: false });
   const svgRef = useRef<SVGSVGElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const openRef = useRef<HTMLButtonElement | null>(null);
+  const [rev, setRev] = useState(1);   // a new rev redraws Hydra's picture (after Discover or applying)
+  const [hy, setHy] = useState<HydraNews | 'old' | null>(null);
+  const onNews = useCallback((n: HydraNews | 'old') => setHy(h => (n !== 'old' && n.switched && h && h !== 'old' ? { ...h, active: n.active } : n)), []);
+  const showCtl = (id: string) => frameRef.current?.contentWindow?.postMessage({ kind: 'hydra-aether-show', controller: id }, '*');
   const admin = status.me?.admin !== false;
   const load = useCallback(() => Promise.all([api.suggest().then(setS), api.discoverStatus().then(r => setDisc(r.current))]).catch(e => setMsg({ tone: 'error', text: (e as Error).message })), [api]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (!disc || disc.state !== 'running') return;
-    const t = setInterval(() => api.discoverStatus().then(r => { setDisc(r.current); if (r.current && r.current.state === 'done') { api.suggest().then(setS); } }).catch(() => {}), 1500);
+    const t = setInterval(() => api.discoverStatus().then(r => { setDisc(r.current); if (r.current && r.current.state === 'done') { api.suggest().then(setS); setRev(x => x + 1); } }).catch(() => {}), 1500);
     return () => clearInterval(t);
   }, [disc, api]);
   const rows = useMemo(() => (s ? s.rows.filter(r => !onlyDiff || r.differs) : []), [s, onlyDiff]);
@@ -184,13 +224,12 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
   };
   const apply = async () => {
     setBusy('apply'); setMsg(null);
-    try { const r = await api.applySuggestion([...pick]); setPick(new Set()); await load(); onApplied(); setMsg({ tone: 'success', text: `Applied ${r.applied.length}${r.skipped.length ? ` · ${r.skipped.length} owned by a door (change those on the Doors page)` : ''}` }); }
+    try { const r = await api.applySuggestion([...pick]); setPick(new Set()); await load(); setRev(x => x + 1); onApplied(); setMsg({ tone: 'success', text: `Applied ${r.applied.length}${r.skipped.length ? ` · ${r.skipped.length} owned by a door (change those on the Doors page)` : ''}` }); }
     catch (e) { setMsg({ tone: 'error', text: (e as Error).message }); } finally { setBusy(null); }
   };
-  const openHydra = async () => {
-    // Hydra (Board Blueprint Studio) reads /api/trace/hydra and builds the sheet itself (needs a Hydra page with Event Trace support)
-    window.open(`${defaultBackend()}/api/blueprints/page?aetherWiring=1`, '_blank', 'noopener');
-  };
+  const activeCtl = hy && hy !== 'old' ? hy.active || null : null;
+  const openHydra = () => openInHydra(openRef.current, activeCtl);
+  const old = hy === 'old';
   const running = disc && disc.state === 'running';
   return (
     <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line p-4 space-y-3">
@@ -198,11 +237,16 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
         <Wand2 size={16} className="text-hv-brand mt-0.5" />
         <div className="flex-1">
           <div className="text-sm font-semibold text-hv-text">Suggested wiring</div>
-          <div className="text-xs text-hv-text-3">What each Aether channel is wired to on the controller: <b>proved</b> by Discover, <b>configured</b> on the Doors page, or <b>seen</b> in normal testing — drawn the Hydra way.</div>
+          <div className="text-xs text-hv-text-3">What each Aether channel is wired to on the controller: <b>proved</b> by Discover, <b>configured</b> on the Doors page, or <b>seen</b> in normal testing — drawn by Hydra in its own project, "Aether wiring (Event Trace)".</div>
         </div>
-        <Button size="sm" icon={<Download size={13} />} disabled={!s} onClick={() => downloadSvg(svgRef.current, 'aether-wiring', false)}>SVG</Button>
-        <Button size="sm" icon={<Download size={13} />} disabled={!s} onClick={() => downloadSvg(svgRef.current, 'aether-wiring', true)}>PNG</Button>
-        <Button size="sm" icon={<ExternalLink size={13} />} disabled={!s || !s.controllers.length} onClick={openHydra} title="Build this as a wiring sheet in Hydra (Board Blueprint Studio), with the real boards">Open in Hydra</Button>
+        {old && <>
+          <Button size="sm" icon={<Download size={13} />} disabled={!s} onClick={() => downloadSvg(svgRef.current, 'aether-wiring', false)}>SVG</Button>
+          <Button size="sm" icon={<Download size={13} />} disabled={!s} onClick={() => downloadSvg(svgRef.current, 'aether-wiring', true)}>PNG</Button>
+        </>}
+        {!old && <Button size="sm" tone="ghost" icon={<RefreshCw size={13} />} disabled={!s || !s.controllers.length} onClick={() => setRev(x => x + 1)} title="Draw it again from the latest suggestion">Redraw</Button>}
+        <span ref={el => { openRef.current = el as unknown as HTMLButtonElement; }}>
+          <Button size="sm" tone="primary" icon={<ExternalLink size={13} />} disabled={!s || !s.controllers.length} onClick={openHydra} title="Open this drawing in Integrations › Board Blueprints (Hydra) to edit, print or export it">Open in Hydra</Button>
+        </span>
       </div>
 
       {/* Discover */}
@@ -239,7 +283,29 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
       {msg && <div className={cx('text-xs rounded-hv-xs px-2 py-1', msg.tone === 'error' ? 'bg-hv-error-tint text-hv-error-fg' : 'bg-hv-success-tint text-hv-success-fg')}>{msg.text}</div>}
       {!s ? <div className="text-xs text-hv-text-3 flex items-center gap-2"><Loader2 size={12} className="animate-spin" />Working it out…</div> : (
         <>
-          <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line overflow-hidden"><HydraDrawing s={s} wiegandIds={status.channels.wiegand.map(w => w.id)} svgRef={svgRef} /></div>
+          {!s.controllers.length ? <Empty title="Nothing to draw yet">Run Discover, or set up doors on the Doors page, and the drawing appears here.</Empty> : old ? (
+            <>
+              <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-warning-tint text-hv-warning-fg">This Pi's Hydra is older than 1.8.0, so this is a stand-in. For Hydra's own drawing: Integrations › Board Blueprints › Check for updates, then Redraw.</div>
+              <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line overflow-hidden"><HydraDrawing s={s} wiegandIds={status.channels.wiegand.map(w => w.id)} svgRef={svgRef} /></div>
+              <Button size="sm" tone="ghost" icon={<RefreshCw size={13} />} onClick={() => { setHy(null); setRev(x => x + 1); }}>Try Hydra again</Button>
+            </>
+          ) : (
+            <div className="space-y-1.5">
+              {hy && hy.ok && (hy.boards || []).length > 1 && (
+                <div className="flex flex-wrap gap-1">{hy.boards!.map(b => (
+                  <Button key={b.controller} size="sm" tone={hy.active === b.controller ? 'primary' : 'ghost'} onClick={() => showCtl(b.controller)}>{b.name.replace(/^C\d+ /, '')}</Button>))}</div>
+              )}
+              <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line overflow-hidden"><HydraFrame rev={rev} onNews={onNews} frameRef={frameRef} /></div>
+              {hy && !hy.ok && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-error-tint text-hv-error-fg">Hydra: {hy.error}</div>}
+              {hy && hy.ok && (() => { const b = (hy.boards || []).find(x => x.controller === hy.active) || (hy.boards || [])[0]; if (!b) return null; return (
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-hv-text-3">
+                  <span>{b.wired} connection{b.wired === 1 ? '' : 's'} drawn</span>
+                  {b.drawnAs && (!b.model || !/P\d00|IC2/i.test(b.model)) && <span className="text-hv-warning-fg">model {b.model || 'not known'}: drawn as an {b.drawnAs.toUpperCase().replace(/^P/, 'NHP-P')}{b.model ? '' : ' (connect Setup › OnCAFE so Aether knows the controller)'}</span>}
+                  {b.guessed && <span className="text-hv-warning-fg">door numbers not known: doors are on ports 1, 2, … in name order</span>}
+                  {b.unmapped > 0 && <span>{b.unmapped} not drawn (ADC, OSDP…): listed in the Aether device's note in Hydra</span>}
+                </div>); })()}
+            </div>
+          )}
           <div className="flex items-center gap-3 text-[12px]">
             <span className="font-semibold text-hv-text-2">{s.rows.length} channels</span>
             {s.differs > 0 ? <Badge tone="warning">{s.differs} differ from Setup › Wiring</Badge> : <Badge tone="success">Setup › Wiring agrees</Badge>}

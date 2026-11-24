@@ -66,10 +66,16 @@ function suggestWiring(x) {
   // per controller door: the picture the Hydra drawing uses
   const inv = x.inventory || {};
   const ctrlOf = id => (inv.controllers || []).find(c => c.id === id) || null;
+  // a door's name: OnCAFE inventory, else the Doors page door paired with it, else what the wiring map remembers, else its id
+  const doorNameOf = id => ((inv.doors || []).find(o => o.id === id) || {}).name
+    || ((x.doors || []).find(o => o.oncafe === id) || {}).name
+    || (Object.values(x.wiring || {}).find(w => w && w.door === id && (w.oncafeDoorName || w.doorName)) || {}).oncafeDoorName
+    || (Object.values(x.wiring || {}).find(w => w && w.door === id && w.doorName) || {}).doorName
+    || `Door ${String(id).slice(0, 8)}`;
   const byDoor = new Map();
   for (const r of list) {
     if (!r.door) continue;
-    const d = byDoor.get(r.door) || { door: r.door, name: ((inv.doors || []).find(o => o.id === r.door) || {}).name || r.door.slice(0, 8), controllerId: ((inv.doors || []).find(o => o.id === r.door) || {}).controllerId || null, reader: null, dps: null, rex: null, lock: null, inputs: [], outputs: [] };
+    const d = byDoor.get(r.door) || { door: r.door, name: doorNameOf(r.door), controllerId: ((inv.doors || []).find(o => o.id === r.door) || {}).controllerId || null, reader: null, dps: null, rex: null, lock: null, inputs: [], outputs: [] };
     const slot = r.role === 'card' ? 'reader' : r.role === 'dps' || r.role === 'rex' || r.role === 'lock' ? r.role : null;
     const v = { ch: r.ch, terminal: r.terminal, source: r.source, active: r.active || null };
     if (slot) { if (!d[slot] || RANK[r.source] > RANK[d[slot].source]) d[slot] = v; }
@@ -78,7 +84,7 @@ function suggestWiring(x) {
   }
   const controllers = new Map();
   for (const d of byDoor.values()) {
-    const c = ctrlOf(d.controllerId) || { id: d.controllerId || 'unknown', name: 'Controller', model: '' };
+    const c = ctrlOf(d.controllerId) || { id: d.controllerId || 'unknown', name: d.controllerId ? `Controller ${d.controllerId.slice(0, 8)}` : 'Unknown controller', model: '' };
     const e = controllers.get(c.id) || { id: c.id, name: c.name, model: c.model || '', doors: [] };
     e.doors.push(d); controllers.set(c.id, e);
   }

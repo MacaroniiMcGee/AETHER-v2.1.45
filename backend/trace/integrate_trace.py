@@ -354,6 +354,22 @@ def main():
             "try { require('./routes/trace').getEngine().attachOsdpTrace(osdpTrace); } catch (_) { /* no Event Trace */ }   // AETHER_TRACE (TRACE-5): reader LED / buzzer")
     P.edit('backend/server.js', 'reader LED / buzzer into Event Trace', server_osdp_feedback, required=False)
 
+    # ── TRACE-5: "Open in Hydra" switches this node's page to Integrations › Board Blueprints (optional; else a new tab) ──
+    def iox_open_tool(s):
+        if 'aether-open-tool' in s:
+            return None
+        root = '  return (\n    <div className="min-h-screen flex flex-col bg-hv-surface text-hv-text">'
+        if s.count(root) != 1:
+            raise LookupError('landmark not found: the page root <div className="min-h-screen flex flex-col …">')
+        s = s.replace(root, '  return (\n    <div className="min-h-screen flex flex-col bg-hv-surface text-hv-text" data-aether-scope={navScopeRef.current}>')
+        return insert_after_line(s, r"^  const \[toolsPage, setToolsPage\] = useState<ToolId>\(",
+            "  // AETHER_TRACE (TRACE-5): Event Trace › Open in Hydra asks this node's page (not the other cluster nodes') to open an Integrations page\n"
+            "  useEffect(() => { const h = (e: Event) => { const t = e.target as HTMLElement | null; const d = (e as CustomEvent).detail || {};\n"
+            "    if (!t || !t.closest || t.closest('[data-aether-scope]')?.getAttribute('data-aether-scope') !== navScopeRef.current || !TOOL_TABS.some(x => x.id === d.page)) return;\n"
+            "    e.preventDefault(); setActiveTab('integrations'); setToolsPage(d.page as ToolId); rememberPage('aether.tools.tab', d.page); };\n"
+            "    document.addEventListener('aether-open-tool', h); return () => document.removeEventListener('aether-open-tool', h); }, []);")
+    P.edit('frontend/src/components/IOAccessEmulator.tsx', 'Open in Hydra goes to Integrations › Board Blueprints', iox_open_tool, required=False)
+
     for x in P.done:
         print(('would change ' if check else 'changed ') + x)
     for x in P.skipped:
