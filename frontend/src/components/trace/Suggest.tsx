@@ -1,6 +1,6 @@
 // AETHER_TRACE (TRACE-5) — Setup › Suggested wiring: what Aether is wired to on the controller, proved (Discover),
-// configured (Doors page) or seen (normal testing). The drawing is Hydra's own (Integrations › Board Blueprints, 1.8.0+), framed here
-// as a drawing-only view; the hand-drawn picture below is only the stand-in for a Pi whose Hydra is older.
+// configured (Doors page) or seen (normal testing). The drawing is always Hydra's own (Integrations › Board Blueprints, 1.8.0+), framed
+// here as a drawing-only view. The hand-drawn simple picture is never shown on its own: only when the user asks for it (Hydra too old).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Wand2, Radar, Square, Download, ExternalLink, Check, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import { Badge, Button, Empty, Toggle, cx } from '../sunapi/ui';
@@ -178,7 +178,7 @@ const HydraFrame: React.FC<{ rev: number; onNews: (n: HydraNews | 'old') => void
       heard = true; setLoading(false); onNews(e.data as HydraNews);
     };
     window.addEventListener('message', on);
-    const t = setTimeout(() => { if (!heard) { setLoading(false); onNews('old'); } }, 15000);   // no answer: a Hydra older than 1.8.0
+    const t = setTimeout(() => { if (!heard) onNews('old'); }, 15000);   // no answer yet: maybe a Hydra older than 1.8.0 (the frame stays; it may still answer)
     return () => { window.removeEventListener('message', on); clearTimeout(t); };
   }, [rev, onNews, frameRef]);
   return (
@@ -205,6 +205,7 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
   const openRef = useRef<HTMLButtonElement | null>(null);
   const [rev, setRev] = useState(1);   // a new rev redraws Hydra's picture (after Discover or applying)
   const [hy, setHy] = useState<HydraNews | 'old' | null>(null);
+  const [simple, setSimple] = useState(false);   // the hand-drawn simple picture: only on request, never by default
   const onNews = useCallback((n: HydraNews | 'old') => setHy(h => (n !== 'old' && n.switched && h && h !== 'old' ? { ...h, active: n.active } : n)), []);
   const showCtl = (id: string) => frameRef.current?.contentWindow?.postMessage({ kind: 'hydra-aether-show', controller: id }, '*');
   const admin = status.me?.admin !== false;
@@ -230,6 +231,8 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
   const activeCtl = hy && hy !== 'old' ? hy.active || null : null;
   const openHydra = () => openInHydra(openRef.current, activeCtl);
   const old = hy === 'old';
+  const news = hy && hy !== 'old' ? hy : null;
+  useEffect(() => { setSimple(false); }, [rev]);
   const running = disc && disc.state === 'running';
   return (
     <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line p-4 space-y-3">
@@ -239,7 +242,7 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
           <div className="text-sm font-semibold text-hv-text">Suggested wiring</div>
           <div className="text-xs text-hv-text-3">What each Aether channel is wired to on the controller: <b>proved</b> by Discover, <b>configured</b> on the Doors page, or <b>seen</b> in normal testing — drawn by Hydra in its own project, "Aether wiring (Event Trace)".</div>
         </div>
-        {old && <>
+        {simple && <>
           <Button size="sm" icon={<Download size={13} />} disabled={!s} onClick={() => downloadSvg(svgRef.current, 'aether-wiring', false)}>SVG</Button>
           <Button size="sm" icon={<Download size={13} />} disabled={!s} onClick={() => downloadSvg(svgRef.current, 'aether-wiring', true)}>PNG</Button>
         </>}
@@ -283,21 +286,28 @@ export const SuggestCard: React.FC<{ api: TraceApi; status: Status; onApplied: (
       {msg && <div className={cx('text-xs rounded-hv-xs px-2 py-1', msg.tone === 'error' ? 'bg-hv-error-tint text-hv-error-fg' : 'bg-hv-success-tint text-hv-success-fg')}>{msg.text}</div>}
       {!s ? <div className="text-xs text-hv-text-3 flex items-center gap-2"><Loader2 size={12} className="animate-spin" />Working it out…</div> : (
         <>
-          {!s.controllers.length ? <Empty title="Nothing to draw yet">Run Discover, or set up doors on the Doors page, and the drawing appears here.</Empty> : old ? (
+          {!s.controllers.length ? <Empty title="Nothing to draw yet">Run Discover, or set up doors on the Doors page, and the drawing appears here.</Empty> : simple ? (
             <>
-              <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-warning-tint text-hv-warning-fg">This Pi's Hydra is older than 1.8.0, so this is a stand-in. For Hydra's own drawing: Integrations › Board Blueprints › Check for updates, then Redraw.</div>
+              <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-warning-tint text-hv-warning-fg flex items-center gap-2"><span className="flex-1">Simple drawing (not Hydra's), shown because you asked for it.</span>
+                <Button size="sm" tone="ghost" onClick={() => { setSimple(false); setHy(null); setRev(x => x + 1); }}>Back to Hydra's drawing</Button></div>
               <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line overflow-hidden"><HydraDrawing s={s} wiegandIds={status.channels.wiegand.map(w => w.id)} svgRef={svgRef} /></div>
-              <Button size="sm" tone="ghost" icon={<RefreshCw size={13} />} onClick={() => { setHy(null); setRev(x => x + 1); }}>Try Hydra again</Button>
             </>
           ) : (
             <div className="space-y-1.5">
-              {hy && hy.ok && (hy.boards || []).length > 1 && (
-                <div className="flex flex-wrap gap-1">{hy.boards!.map(b => (
-                  <Button key={b.controller} size="sm" tone={hy.active === b.controller ? 'primary' : 'ghost'} onClick={() => showCtl(b.controller)}>{b.name.replace(/^C\d+ /, '')}</Button>))}</div>
+              {news && news.ok && (news.boards || []).length > 1 && (
+                <div className="flex flex-wrap gap-1">{news.boards!.map(b => (
+                  <Button key={b.controller} size="sm" tone={news.active === b.controller ? 'primary' : 'ghost'} onClick={() => showCtl(b.controller)}>{b.name.replace(/^C\d+ /, '')}</Button>))}</div>
               )}
               <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line overflow-hidden"><HydraFrame rev={rev} onNews={onNews} frameRef={frameRef} /></div>
-              {hy && !hy.ok && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-error-tint text-hv-error-fg">Hydra: {hy.error}</div>}
-              {hy && hy.ok && (() => { const b = (hy.boards || []).find(x => x.controller === hy.active) || (hy.boards || [])[0]; if (!b) return null; return (
+              {old && (
+                <div className="text-xs rounded-hv-xs px-2 py-1.5 bg-hv-warning-tint text-hv-warning-fg flex flex-wrap items-center gap-2">
+                  <AlertTriangle size={13} /><span className="flex-1">Hydra has not drawn it yet. This needs Hydra 1.8.0 or newer: open Integrations › Board Blueprints, Check for updates, then Redraw.</span>
+                  <Button size="sm" tone="ghost" icon={<RefreshCw size={13} />} onClick={() => { setHy(null); setRev(x => x + 1); }}>Redraw</Button>
+                  <Button size="sm" tone="ghost" onClick={() => setSimple(true)}>Show a simple drawing instead</Button>
+                </div>
+              )}
+              {hy && hy !== 'old' && !hy.ok && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-error-tint text-hv-error-fg">Hydra: {hy.error}</div>}
+              {news && news.ok && (() => { const b = (news.boards || []).find(x => x.controller === news.active) || (news.boards || [])[0]; if (!b) return null; return (
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-hv-text-3">
                   <span>{b.wired} connection{b.wired === 1 ? '' : 's'} drawn</span>
                   {b.drawnAs && (!b.model || !/P\d00|IC2/i.test(b.model)) && <span className="text-hv-warning-fg">model {b.model || 'not known'}: drawn as an {b.drawnAs.toUpperCase().replace(/^P/, 'NHP-P')}{b.model ? '' : ' (connect Setup › OnCAFE so Aether knows the controller)'}</span>}
