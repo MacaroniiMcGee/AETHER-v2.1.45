@@ -21,7 +21,7 @@ const StatTile: React.FC<{ label: string; s: Stat; hint?: string }> = ({ label, 
 
 const TILES: Record<Kind | 'all', [keyof KindStats, string, string][]> = {
   all: [['decision', 'Aether → controller reported', 'Corrected with the sync clock offset.'], ['push', 'Aether → cloud push (MQTT)', 'Both ends on the Pi clock.'], ['decisionToPush', 'Controller → cloud push', 'Controller + Cloud Connector + broker + cloud'], ['api', 'Aether → event log (API)', 'Resolution = poll interval.']],
-  card: [['decision', 'Aether → controller decision', 'Corrected with the sync clock offset. Includes the reader transmission.'], ['push', 'Aether → cloud push (MQTT)', 'Both ends on the Pi clock: this is the cloud latency.'], ['decisionToPush', 'Decision → cloud push', 'Controller + Cloud Connector + broker + cloud'], ['api', 'Aether → event log (API)', 'When the event first showed in the event log. Resolution = poll interval.']],
+  card: [['decision', 'Aether → controller decision', 'Corrected with the sync clock offset. Includes the reader transmission.'], ['reader', 'Aether → reader showed it', 'Until the controller told the reader to light up (OSDP LED command). What a person at the door sees.'], ['push', 'Aether → cloud push (MQTT)', 'Both ends on the Pi clock: this is the cloud latency.'], ['decisionToPush', 'Decision → cloud push', 'Controller + Cloud Connector + broker + cloud'], ['api', 'Aether → event log (API)', 'When the event first showed in the event log. Resolution = poll interval.']],
   input: [['decision', 'Aether change → controller event', 'DPS / REX / input change until the controller stamped its event (corrected).'], ['push', 'Aether change → cloud push', 'Both ends on the Pi clock.'], ['decisionToPush', 'Controller → cloud push', ''], ['api', 'Aether change → event log', '']],
   output: [['hardware', 'Controller event → output seen', 'From the controller stamping unlocked / output on until Aether saw the wire change.'], ['output', 'Cause → output seen', 'From the card / REX / command that asked for it until Aether saw the output.'], ['push', 'Cause → cloud push', ''], ['decision', 'Cause → controller event', '']],
   command: [['ack', 'Command → OnCAFE answered', 'HTTP round trip of the command.'], ['decision', 'Command → controller event', 'Until the controller stamped the resulting event (corrected).'], ['output', 'Command → Aether saw the output', 'Until the strike / output physically changed at Aether.'], ['push', 'Command → cloud push', '']],
@@ -39,7 +39,7 @@ export const Summary: React.FC<{ a: Analysis; kind?: Kind | 'all' }> = ({ a, kin
           <span className="text-[11px] text-hv-text-3 tabular-nums">· {s.pass} pass · {s.warn} warn · {s.fail} fail</span>
         </div>
       </div>
-      {TILES[kind].map(([k, label, hint]) => <StatTile key={k} label={label} s={s[k] as Stat} hint={hint} />)}
+      {TILES[kind].filter(([k]) => k !== 'reader' || ((s[k] as Stat | undefined)?.n || 0) > 0).map(([k, label, hint]) => <StatTile key={k} label={label} s={(s[k] as Stat) || { n: 0 }} hint={hint} />)}
       {((kind === 'all' || kind === 'card') && (s.credMismatch > 0 || a.stats.unexplained > 0)) && (
         <div className="rounded-hv-xs bg-hv-error-tint ring-1 ring-inset ring-hv-error/40 px-3 py-1.5 text-xs text-hv-error-fg">
           {s.credMismatch > 0 && <div><b>{s.credMismatch}</b> credential{s.credMismatch > 1 ? 's' : ''} changed on the way</div>}
@@ -90,8 +90,9 @@ export const IntegrityCard: React.FC<{ a: Analysis }> = ({ a }) => {
   );
 };
 
-export const ClockCard: React.FC<{ a: Analysis }> = ({ a }) => {
+export const ClockCard: React.FC<{ a: Analysis; live?: import('./api').ClockCheck | null; onCheck?: () => void }> = ({ a, live, onCheck }) => {
   const c = a.clock;
+  const cc = a.meta?.controllerClocks || live || null;
   const sets = ['start', 'check', 'end'].map(set => ({ set, rows: c.sync.filter(x => x.set === set) })).filter(x => x.rows.length);
   return (
     <div className="rounded-hv-xs bg-hv-widget ring-1 ring-inset ring-hv-line px-3 py-2 text-xs">
@@ -116,11 +117,26 @@ export const ClockCard: React.FC<{ a: Analysis }> = ({ a }) => {
         </div>
       ))}
       {c.gaps.length > 0 && <div className="mt-1 text-hv-text-3">Gaps sent / seen: {c.gaps.map(g => `${fmtMs(g.sent)} / ${fmtMs(g.seen)}`).join(' · ')}</div>}
+      {/* TRACE-5: each controller's own clock (SUNAPI), read at the start of the run */}
+      {(cc || onCheck) && (
+        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+          <span className="text-hv-text-3">Controller clocks{cc && cc.at ? ` (${new Date(cc.at).toLocaleTimeString()})` : ''}:</span>
+          {cc && !cc.available && <span className="text-hv-text-3">{cc.reason}</span>}
+          {cc && cc.available && !cc.controllers.length && <span className="text-hv-text-3">no access controllers saved in Tools › SUNAPI Console</span>}
+          {cc && cc.controllers.map(x => (
+            <Badge key={x.id} tone={x.error ? 'neutral' : Math.abs(x.offsetMs || 0) > (cc.warnMs || 2000) ? 'warning' : 'success'}
+              title={x.error ? x.error : `SUNAPI date view · round trip ${fmtMs(x.rttMs)} · ±${fmtMs(x.resolutionMs)}${x.sync ? ` · time sync: ${x.sync}` : ''}${x.ntp ? ` (${x.ntp})` : ''}${x.tz ? ` · ${x.tz}` : ''}`}>
+              {x.name}: {x.error ? 'not read' : `${(x.offsetMs || 0) >= 0 ? '+' : '−'}${fmtMs(Math.abs(x.offsetMs || 0))}`}{x.sync ? ` · ${x.sync}` : ''}
+            </Badge>
+          ))}
+          {onCheck && <button className="text-hv-brand hover:underline" onClick={onCheck}>Check now</button>}
+        </div>
+      )}
     </div>
   );
 };
 
-const HOP_TONE: Record<string, string> = { cause: 'bg-hv-brand', ack: 'bg-hv-info', state: 'bg-hv-success', sent: 'bg-hv-brand', decided: 'bg-hv-purple', published: 'bg-hv-purple', wire: 'bg-hv-info', push: 'bg-hv-success', stored: 'bg-hv-success', api: 'bg-hv-warning', browser: 'bg-hv-warning', lock: 'bg-hv-text-3' };
+const HOP_TONE: Record<string, string> = { cause: 'bg-hv-brand', ack: 'bg-hv-info', state: 'bg-hv-success', sent: 'bg-hv-brand', decided: 'bg-hv-purple', published: 'bg-hv-purple', wire: 'bg-hv-info', push: 'bg-hv-success', stored: 'bg-hv-success', api: 'bg-hv-warning', browser: 'bg-hv-warning', lock: 'bg-hv-text-3', reader: 'bg-hv-success', beep: 'bg-hv-success' };
 
 export const HopChips: React.FC<{ t: Trace }> = ({ t }) => (
   <div className="flex flex-wrap gap-1">

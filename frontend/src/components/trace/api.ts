@@ -19,12 +19,13 @@ export interface Trace {
   action: { label: string; ch?: string | null; cred: Cred | null; type: string; v?: number; cmd?: Cmd };
   decision: { type: string; t: number; cred: Cred | null; door: { id: string | null; name: string | null } | null; sources: Src[]; matchedBy: string; clientType: string | null; eventIds: string[] } | null;
   hops: Hop[]; expect: string | null; result: string | null; credCheck: 'match' | 'mismatch' | 'not-reported' | 'n/a';
-  status: 'pass' | 'warn' | 'fail'; notes: string[]; latency: { decision: number | null; push: number | null; api: number | null; output?: number | null; hardware?: number | null; ack?: number | null };
+  status: 'pass' | 'warn' | 'fail'; notes: string[]; latency: { decision: number | null; push: number | null; api: number | null; output?: number | null; hardware?: number | null; ack?: number | null; reader?: number | null };
+  reader?: { colour: string; flash: boolean; beep: string | null } | null;
 }
 export interface Stat { n: number; min?: number; p50?: number; p95?: number; max?: number }
 export interface SyncResult { at: number; fc?: number; cn?: string; ch?: string; v?: number; set: string; idx: number; matched: boolean; eventT: number | null; type: string | null; offset: number | null; byPattern?: boolean }
 export interface Analysis {
-  meta: { id: string; name: string; start: number; end: number | null; endReason?: string; syncError?: string; imports: { at: number; what: string; count: number }[]; count: number; running: boolean } | null;
+  meta: { id: string; name: string; start: number; end: number | null; endReason?: string; syncError?: string; imports: { at: number; what: string; count: number }[]; count: number; running: boolean; controllerClocks?: ClockCheck | null } | null;
   clock: { offset: number | null; drift: { startMs: number; endMs: number; changeMs: number; perHourMs: number | null } | null; sync: SyncResult[]; gaps: { set: string; sent: number; seen: number }[] };
   traces: Trace[]; unexplained: { type: string; t: number; at: number; cred: Cred | null; door: { id: string | null; name: string | null } | null; sources: Src[] }[];
   stats: KindStats & { unexplained: number; byKind: Record<Kind, KindStats> };
@@ -58,9 +59,19 @@ export interface Comparison {
   steps: { idx: number; text: string; a: { runs: number; pass: number; fail: number; decision: number | null; push: number | null } | null; b: { runs: number; pass: number; fail: number; decision: number | null; push: number | null } | null; result: Moved; decision: Moved; push: Moved }[] | null;
   rule: string;
 }
+export interface ControllerClock { id: string; name: string; host: string; model: string | null; at?: number; offsetMs?: number; rttMs?: number; resolutionMs?: number; sync?: string | null; ntp?: string | null; tz?: string | null; error?: string; fields?: string[] }
+export interface ClockCheck { available: boolean; reason?: string; at?: number; warnMs?: number; controllers: ControllerClock[] }
+export interface JiraStatus { site: string; email: string; hasToken: boolean; configured: boolean; me?: { name: string } | null }
+export interface JiraIssue { key: string; summary: string; status?: string; attachments: { id: string; filename: string; size: number; created: string; author?: string }[]; hars: { id: string; filename: string; size: number; created: string; author?: string }[] }
+export interface SuggestRow { ch: string; role: string; door: string | null; active?: 'open' | 'closed'; source: 'probe' | 'doors page' | 'seen'; confidence: number; why: string[]; terminal: { kind: string; n?: number; id?: string; board?: number; label: string }; current: { role: string; door: string | null; active: string | null } | null; differs: boolean; aetherDoor?: number }
+export interface SuggestSlot { ch: string; terminal: SuggestRow['terminal']; source: string; active: string | null }
+export interface SuggestDoor { door: string; name: string; controllerId: string | null; reader: SuggestSlot | null; dps: SuggestSlot | null; rex: SuggestSlot | null; lock: SuggestSlot | null; inputs: SuggestSlot[]; outputs: SuggestSlot[] }
+export interface Suggestion { at: number; rows: SuggestRow[]; controllers: { id: string; name: string; model: string; doors: SuggestDoor[] }[]; differs: number; probeAt: number | null }
+export interface DiscoverStatus { state: 'running' | 'done'; at: number; end?: number | null; who: string; step?: string; done: number | null; total: number | null; error: string | null; aborted?: boolean;
+  relays: { ch: string; role: string | null; door: string | null; doorName: string | null; active?: string; events: { type: string; door: string | null }[] }[]; readers: { ch: string; name: string; door: string | null; doorName: string | null; type: string | null }[]; locks: { door: string; doorName: string; ok: boolean; error: string | null; ch: string | null; ms: number | null }[] }
 export interface Alert { seq: number; at: number; traceAt: number; traceId: string; runId: string | null; status: 'fail' | 'warn'; kind: Kind; label: string; why: string; door: string | null }
 export interface DoorRow { id: number; name: string; enabled?: boolean; oncafe: { id: string; name: string | null } | null; note?: string | null; reader?: string | null; channels: { key: string; role: string; label?: string; overridden?: boolean }[] }
-export interface KindStats { actions: number; pass: number; warn: number; fail: number; decision: Stat; push: Stat; api: Stat; decisionToPush: Stat; output: Stat; hardware: Stat; ack: Stat; credMismatch: number; unexplained?: number; verdict: 'pass' | 'warn' | 'fail' | 'no-data' }
+export interface KindStats { actions: number; pass: number; warn: number; fail: number; decision: Stat; push: Stat; api: Stat; decisionToPush: Stat; output: Stat; hardware: Stat; ack: Stat; reader?: Stat; credMismatch: number; unexplained?: number; verdict: 'pass' | 'warn' | 'fail' | 'no-data' }
 export interface Role { role: string; door?: string; active?: 'open' | 'closed'; ioId?: string; label?: string; auto?: boolean; score?: number; kind?: string; count?: number }
 /** Version of a wiring map (newest entry time): sent back on save so a stale tab cannot overwrite newer door imports. */
 export const wiringVersion = (w: Record<string, { at?: number }>) => Math.max(0, ...Object.values(w || {}).map(e => Number(e.at) || 0));
@@ -76,6 +87,7 @@ export interface Settings {
   thresholds: { decisionWarn: number; decisionFail: number; pushWarn: number; pushFail: number; matchWindowMs: number; inputWindowMs: number; outputWindowMs: number; commandWarn: number; commandFail: number; heldToleranceMs: number };
   commands: { enabled: boolean };
   alerts?: { enabled: boolean; level: 'fail' | 'warn'; automation: boolean };
+  clock?: { check: boolean; warnMs: number };
   expectations: { fc: string; cn: string; expect: 'grant' | 'deny'; note: string }[];
   allowRaw: boolean;
 }
@@ -93,7 +105,7 @@ export interface Status {
   me?: { admin: boolean };
   pendingReverts?: { id: string; due: number; kind: string; value: unknown; target: string | string[] }[];
   inventory: { org: string; at: number; doors: InvDoor[]; areas: InvArea[]; zones: InvZone[]; controllers: Inventory['controllers'] } | null;
-  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[];
+  test?: TestStatus | null; alertSeq?: number; alerts?: Alert[]; clockCheck?: ClockCheck | null;
 }
 export interface RunMeta { id: string; name: string; start: number; end: number | null; endReason?: string; count?: number; imports?: { at: number; what: string; count: number }[] }
 export interface OnCafeSession { signedIn: boolean; host?: string; user?: string; name?: string; orgs?: { id: string; name: string }[]; org?: string; expiresAt?: string | null; error?: string }
@@ -164,6 +176,18 @@ export function traceClient(backend: string) {
     compare: (a: string, b: string) => call<Comparison>(`/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`),
     alerts: (since: number) => call<{ seq: number; alerts: Alert[] }>(`/alerts?since=${since}`),
     doors: () => call<{ doors: DoorRow[] }>('/doors'),
+    // TRACE-5
+    clocks: () => call<ClockCheck>('/clocks'),
+    jira: () => call<JiraStatus>('/jira'),
+    saveJira: (b: { site?: string; email?: string; token?: string; test?: boolean }) => call<JiraStatus>('/jira', { method: 'PUT', body: b }),
+    jiraIssue: (key: string) => call<JiraIssue>(`/jira/issue/${encodeURIComponent(key)}`),
+    importJira: (id: string, key: string, attachmentId: string) => call<{ imported: number; from: string }>(`/runs/${encodeURIComponent(id)}/import/jira`, { method: 'POST', body: { key, attachmentId } }),
+    sendJira: (id: string, key: string, comment: boolean) => call<{ key: string; attached: { id: string; filename: string }[]; commented: boolean }>(`/runs/${encodeURIComponent(id)}/jira`, { method: 'POST', body: { key, comment } }),
+    suggest: () => call<Suggestion>('/suggest'),
+    applySuggestion: (channels: string[]) => call<{ applied: string[]; skipped: { ch: string; why: string }[] }>('/suggest/apply', { method: 'POST', body: { channels } }),
+    discover: (o: { relays?: number[]; readers?: boolean; locks?: boolean; holdMs?: number; watchMs?: number }) => call<{ current: DiscoverStatus }>('/discover', { method: 'POST', body: o }),
+    discoverStatus: () => call<{ current: DiscoverStatus | null }>('/discover'),
+    stopDiscover: () => call<{ current: DiscoverStatus | null }>('/discover/stop', { method: 'POST', body: {} }),
     oncafeSession: (url: string) => call<OnCafeSession>('', { url: `${root}/api/oncafe/session?url=${encodeURIComponent(url)}` }),
     oncafeSignin: (url: string, username: string, password: string) => call<OnCafeSession>('', { url: `${root}/api/oncafe/signin`, method: 'POST', body: { url, username, password } }),
     oncafeSignout: (url: string) => call<OnCafeSession>('', { url: `${root}/api/oncafe/signout`, method: 'POST', body: { url } }),

@@ -1,8 +1,8 @@
 // AETHER_TRACE — Event Trace › Setup
 import React, { useEffect, useState } from 'react';
-import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone, Bell } from 'lucide-react';
+import { Cloud, LogIn, LogOut, RefreshCw, Send, Plus, Trash2, Shield, Waypoints, Fingerprint, Gauge, ListChecks, Save, Loader2, Cable, Megaphone, Bell, Clock, Ticket } from 'lucide-react';
 import { Badge, Button, Field, Input, Select, Toggle, cx } from '../sunapi/ui';
-import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, wiringVersion } from './api';
+import { fmtMs, ROLE_LABEL, type Inventory, type OnCafeSession, type SeenChannel, type Settings, type Status, type TraceApi, type Wiring, type JiraStatus, wiringVersion } from './api';
 
 const Card: React.FC<{ icon: React.ReactNode; title: string; sub?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }> = ({ icon, title, sub, right, children }) => (
   <section className="rounded-hv-sm bg-hv-widget-panel ring-1 ring-hv-line">
@@ -258,6 +258,16 @@ export const SetupPanel: React.FC<{ api: TraceApi; status: Status; onSaved: () =
         <div className="text-xs text-hv-text-3">Alerts are checked while a run is recording or the cloud feed is connected (every 2 s; less often on very long runs). A trace is judged once its answer and cloud push are in, or once its windows have passed (about {fmtMs(Math.max(s.thresholds.matchWindowMs, s.thresholds.inputWindowMs) + s.thresholds.pushFail)}). In Automation, a rule with the “Event Trace alert” trigger can pulse a relay, send a card or log a message.</div>
       </Card>
 
+      {/* TRACE-5: controller clocks over SUNAPI */}
+      <Card icon={<Clock size={16} />} title="Controller clocks" sub="Read each access controller's own clock (SUNAPI) at the start of every run, next to the offset the sync markers measure.">
+        <Toggle on={s.clock?.check !== false} onChange={v => upd(x => { x.clock = { ...(x.clock || { check: true, warnMs: 2000 }), check: v }; return x; })} label="Check controller clocks when a run starts" />
+        <div className="flex items-center gap-2 text-xs"><span className="text-hv-text-2">Warn when a controller is off by more than</span>
+          <Input className="!w-20" value={String((s.clock?.warnMs ?? 2000) / 1000)} onChange={e => upd(x => { x.clock = { ...(x.clock || { check: true, warnMs: 2000 }), warnMs: Math.round((Number(e.target.value) || 2) * 1000) }; return x; })} /><span className="text-hv-text-3">s</span></div>
+        <div className="text-xs text-hv-text-3">Uses the access controllers (and their logins) saved in Tools › SUNAPI Console. SUNAPI reports whole seconds, so this catches a controller whose time sync is broken; the sync markers give the millisecond offset.</div>
+      </Card>
+
+      <JiraCard api={api} admin={status.me?.admin !== false} />
+
       {/* Expectations */}
       <Card icon={<ListChecks size={16} />} title="Expected results" sub="Known cards and what the controller should decide. A different decision fails the trace."
         right={<Button size="sm" icon={<Plus size={13} />} onClick={() => upd(x => { x.expectations.push({ fc: '', cn: '', expect: 'grant', note: '' }); return x; })}>Add card</Button>}>
@@ -365,6 +375,35 @@ export const WiringCard: React.FC<{ api: TraceApi; status: Status; doors: { id: 
         <Input mono className="w-48" placeholder="add channel, e.g. relay:6" value={extra} onChange={e => setExtra(e.target.value.trim())} />
         <Button size="sm" icon={<Plus size={13} />} disabled={!/^[\w:.\-]{3,80}$/.test(extra)} onClick={() => { set(extra, {}); setExtra(''); }}>Add</Button>
       </div>
+    </Card>
+  );
+};
+
+/** TRACE-5: Jira login (site, e-mail, API token — the token stays on the Pi). */
+const JiraCard: React.FC<{ api: TraceApi; admin: boolean }> = ({ api, admin }) => {
+  const [st, setSt] = useState<JiraStatus | null>(null);
+  const [site, setSite] = useState(''); const [email, setEmail] = useState(''); const [token, setToken] = useState('');
+  const [msg, setMsg] = useState<{ tone: 'error' | 'success'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.jira().then(j => { setSt(j); setSite(j.site || 'hanwhavision.atlassian.net'); setEmail(j.email); }).catch(() => {}); }, [api]);
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try { const r = await api.saveJira({ site, email, ...(token ? { token } : {}), test: true }); setSt(r); setToken(''); setMsg({ tone: 'success', text: r.me ? `Connected as ${r.me.name}` : 'Saved' }); }
+    catch (e) { setMsg({ tone: 'error', text: (e as Error).message }); } finally { setBusy(false); }
+  };
+  return (
+    <Card icon={<Ticket size={16} />} title="Jira" sub="Pull a ticket's HAR into a run, and attach a run's results to a ticket (Runs › From Jira / To Jira).">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <Field label="Site"><Input value={site} disabled={!admin} onChange={e => setSite(e.target.value)} placeholder="hanwhavision.atlassian.net" /></Field>
+        <Field label="E-mail"><Input value={email} disabled={!admin} onChange={e => setEmail(e.target.value)} placeholder="you@hanwha.com" /></Field>
+        <Field label={`API token${st?.hasToken ? ' (saved — type to replace)' : ''}`}><Input type="password" value={token} disabled={!admin} onChange={e => setToken(e.target.value)} placeholder={st?.hasToken ? '••••••••' : 'id.atlassian.com › Security › API tokens'} /></Field>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" busy={busy} disabled={!admin || !site || !email || (!token && !st?.hasToken)} onClick={save}>Save and test</Button>
+        {st?.configured && <Badge tone="success">set up</Badge>}
+        {msg && <span className={cx('text-xs', msg.tone === 'error' ? 'text-hv-error-fg' : 'text-hv-success-fg')}>{msg.text}</span>}
+      </div>
+      <div className="text-xs text-hv-text-3">The token is kept on the Pi (mode 600) and never shown again. Requests go only to your Atlassian site. Only an Aether admin can change this or post to Jira.</div>
     </Card>
   );
 };

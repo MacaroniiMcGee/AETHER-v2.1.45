@@ -9,6 +9,8 @@ import { traceClient, defaultBackend, clock, credText, fmtMs, SRC_LABEL, KIND_LA
 import { CommandDialog } from './CommandDialog';
 import { Summary, ClockCard, TraceTable, TraceDetail, Swimlanes, EventBox, IntegrityCard } from './views';
 import { TestsPage, CompareView } from './Tests';
+import { JiraButtons } from './Jira';
+import { ClusterRuns } from './Cluster';
 import { SetupPanel } from './Setup';
 
 type Page = 'live' | 'runs' | 'tests' | 'setup';
@@ -159,7 +161,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
       {page === 'setup' ? (
         <div className="flex-1 min-h-0 overflow-auto p-4"><SetupPanel api={api} status={status} onSaved={loadStatus} /></div>
       ) : page === 'runs' ? (
-        <RunsPage api={api} status={status} initial={openRun} />
+        <RunsPage api={api} status={status} initial={openRun} backend={backendUrl || defaultBackend()} />
       ) : page === 'tests' ? (
         <TestsPage api={api} status={status} onOpenTrace={(runId, traceId) => { setOpenRun({ runId, traceId }); setPage('runs'); }} />
       ) : (
@@ -170,7 +172,7 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
             ))}
             {note && <div className="text-xs rounded-hv-xs px-2 py-1 bg-hv-success-tint text-hv-success-fg flex items-center gap-2"><span className="flex-1">{note}</span><button className="opacity-70 hover:opacity-100" onClick={() => setNote(null)}>×</button></div>}
             {analysis && <Summary a={analysis} kind={kind} />}
-            {analysis && <ClockCard a={analysis} />}
+            {analysis && <ClockCard a={analysis} live={status.clockCheck} onCheck={() => api.clocks().then(() => loadStatus()).catch(e => setActionErr(e.message))} />}
             {analysis && <IntegrityCard a={analysis} />}
             <div className="rounded-hv-xs ring-1 ring-inset ring-hv-line px-2 pt-1 pb-0.5">
               <div className="flex items-center gap-2 text-[11px] text-hv-text-3"><Activity size={12} />Timeline by vantage point (controller times shifted by the clock offset)<span className="ml-auto" />
@@ -219,11 +221,12 @@ const EventTrace: React.FC<{ backendUrl?: string }> = ({ backendUrl }) => {
 };
 
 /** Runs: pick one, see its analysis, add after-the-fact evidence, export. */
-const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status; initial?: { runId: string; traceId?: string } | null }> = ({ api, status, initial }) => {
+const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status; initial?: { runId: string; traceId?: string } | null; backend: string }> = ({ api, status, initial, backend }) => {
   const [runs, setRuns] = useState<RunMeta[]>([]);
   const [id, setId] = useState<string | null>(initial ? initial.runId : null);
   const [a, setA] = useState<Analysis | null>(null);
   const [cmp, setCmp] = useState<string>('');
+  const [multi, setMulti] = useState(false);
   const [events, setEvents] = useState<TEvent[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [showSync, setShowSync] = useState(false);
@@ -268,9 +271,11 @@ const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status; 
   const sel = a?.traces.find(t => t.id === selected) || null;
   const current = runs.find(r => r.id === id);
 
+  if (multi) return <ClusterRuns backend={backend} onClose={() => setMulti(false)} />;
   return (
     <div className="flex-1 min-h-0 flex">
       <div className="w-[260px] shrink-0 border-r border-hv-line overflow-auto">
+        <div className="p-2 border-b border-hv-line"><Button size="sm" tone="ghost" className="w-full" onClick={() => setMulti(true)} title="Put runs from several Aether Pis (cluster) side by side">Runs on several Pis…</Button></div>
         {!runs.length ? <Empty icon={<History size={24} />} title="No runs yet">Start a run on the Live tab.</Empty> : runs.map(r => (
           <button key={r.id} onClick={() => setId(r.id)} className={cx('w-full text-left px-3 py-2 border-b border-hv-line', r.id === id ? 'bg-hv-brand-tint' : 'hover:bg-hv-widget')}>
             <div className="flex items-center gap-1.5 text-sm text-hv-text truncate">{!r.end && <span className="w-1.5 h-1.5 rounded-full bg-hv-error animate-pulse shrink-0" />}{r.name}</div>
@@ -310,6 +315,7 @@ const RunsPage: React.FC<{ api: ReturnType<typeof traceClient>; status: Status; 
                 <option value="">Compare with…</option>
                 {runs.filter(r => r.id !== id).map(r => <option key={r.id} value={r.id}>{r.name} · {new Date(r.start).toLocaleDateString()}</option>)}
               </select>
+              <JiraButtons api={api} runId={id!} admin={status.me?.admin !== false} onImported={t => { setMsg({ tone: 'success', text: t }); load(id!); list(); }} onError={t => setMsg({ tone: 'error', text: t })} onSent={t => setMsg({ tone: 'success', text: t })} />
               <Button size="sm" icon={<Download size={13} />} onClick={() => api.saveCsv(id!).catch(e => setMsg({ tone: 'error', text: e.message }))}>CSV</Button>
               <Button size="sm" icon={<Upload size={13} className="rotate-180" />} onClick={() => api.saveJson(id!).catch(e => setMsg({ tone: 'error', text: e.message }))}>JSON</Button>
               <Button size="sm" tone="ghost" icon={<Trash2 size={13} />} disabled={!current.end} onClick={async () => { if (!window.confirm(`Delete “${current.name}”?`)) return; await api.del(id!).catch(e => setMsg({ tone: 'error', text: e.message })); setId(null); setA(null); list(); }}>Delete</Button>
